@@ -1,0 +1,27 @@
+[package]
+name = "uniclipboard_native"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-only"
+description = "HarmonyOS Node-API bridge for the UniClipboard Rust mobile protocol core"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi-ohos = { version = "1.0", default-features = false, features = ["napi8", "async"] }
+napi-derive-ohos = "1.0"
+uc-mobile = { path = "../uc-mobile" }
+uc-mobile-proto = { path = "../space-core/crates/uc-mobile-proto" }
+uc-application = { path = "../space-core/crates/uc-application" }
+uc-bootstrap = { path = "../space-core/crates/uc-bootstrap", features = ["blobs"] }
+uc-core = { path = "../space-core/crates/uc-core" }
+tokio = { version = "1", features = ["rt", "sync", "time"] }
+
+[build-dependencies]
+napi-build-ohos = "1.0"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

@@ -1,0 +1,48 @@
+# HarmonyOS / DevEco generated files
+/.hvigor/
+/.idea/
+/.ohos-native/
+/.ohos-sdk/
+/oh_modules/
+/entry/build/
+/entry/oh_modules/
+/build/
+**/build/
+**/BuildProfile.ets
+local.properties
+
+# Rust and ohos-rs build outputs
+/rust/.ohos-sdk/
+/rust/**/target/
+/rust/uniclipboard-native/dist/
+
+# Local test captures and runtime data
+/artifacts/
+/uniclipboard_devices.jpeg
+/tablet-file-result.jpeg
+*.db
+*.db-shm
+*.db-wal
+
+# Signing material and local secrets
+*.cer
+*.p7b
+*.p12
+*.pem
+*.key
+.env
+.env.*
+!.env.example
+
+# Editor / OS / logs
+/.agents/
+/.codex/
+**/.vscode/
+.DS_Store
+Thumbs.db
+*.log
+
+# Packaged outputs belong in GitHub Releases, not source control
+*.app
+*.hap
+*.har
