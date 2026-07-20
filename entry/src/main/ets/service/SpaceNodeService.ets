@@ -20,15 +20,41 @@ import {
   getSpaceStatus,
   issueSpaceInvitation,
   joinSpace,
+  replaceSpace,
   sendSpaceFile,
   sendSpaceFileFromFd,
   sendSpaceImage,
   sendSpaceText,
-  startSpaceNode
+  startSpaceNode,
+  switchSpace,
+  wakeSpaceConnections,
+  revokeSpaceMember
 } from 'uniclipboard_native';
 import { fileIo } from '@kit.CoreFileKit';
 
 export class SpaceNodeService {
+  private async reconnectKnownPeers(): Promise<number> {
+    wakeSpaceConnections();
+    let devices: NativeSpaceDevice[] = await getSpaceDevices();
+    let onlinePeerCount: number = 0;
+    for (let index: number = 0; index < devices.length; index++) {
+      let device: NativeSpaceDevice = devices[index];
+      if (device.isLocal) {
+        continue;
+      }
+      try {
+        let online: boolean = await connectSpaceDevice(device.deviceId);
+        if (online) {
+          onlinePeerCount += 1;
+        }
+      } catch (error) {
+        console.warn('UniClipboard failed to reconnect space device: ' + device.deviceId);
+      }
+    }
+    console.info('UniClipboard reconnected space peer count: ' + onlinePeerCount.toString());
+    return onlinePeerCount;
+  }
+
   async start(dataDir: string, cacheDir: string, deviceType: string): Promise<NativeSpaceStatus> {
     return await startSpaceNode(dataDir, cacheDir, deviceType);
   }
@@ -45,33 +71,53 @@ export class SpaceNodeService {
     return await connectSpaceDevice(deviceId);
   }
 
+  wakeConnections(): void {
+    wakeSpaceConnections();
+  }
+
   async join(invitationCode: string, passphrase: string, deviceName: string): Promise<NativeJoinSpaceResult> {
     return await joinSpace(invitationCode, passphrase, deviceName);
+  }
+
+  async switchTo(invitationCode: string, passphrase: string): Promise<NativeJoinSpaceResult> {
+    return await switchSpace(invitationCode, passphrase);
   }
 
   async create(passphrase: string, deviceName: string): Promise<NativeCreateSpaceResult> {
     return await createSpace(passphrase, deviceName);
   }
 
+  async replace(passphrase: string, deviceName: string): Promise<NativeCreateSpaceResult> {
+    return await replaceSpace(passphrase, deviceName);
+  }
+
   async issueInvitation(): Promise<NativeSpaceInvitation> {
     return await issueSpaceInvitation();
   }
 
+  async revoke(deviceId: string): Promise<void> {
+    await revokeSpaceMember(deviceId);
+  }
+
   async sendText(text: string): Promise<number> {
+    await this.reconnectKnownPeers();
     return await sendSpaceText(text);
   }
 
   async sendImage(data: Uint8Array): Promise<number> {
+    await this.reconnectKnownPeers();
     return await sendSpaceImage(data, 'image/jpeg');
   }
 
   async sendFile(data: Uint8Array, fileName: string): Promise<number> {
+    await this.reconnectKnownPeers();
     return await sendSpaceFile(data, fileName);
   }
 
   async sendFileFromUri(uri: string, fileSize: number, fileName: string): Promise<NativeSpaceFileSendResult> {
     let file: fileIo.File = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY);
     try {
+      await this.reconnectKnownPeers();
       return await sendSpaceFileFromFd(file.fd, fileSize, fileName);
     } finally {
       fileIo.closeSync(file.fd);

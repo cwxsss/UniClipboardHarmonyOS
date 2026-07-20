@@ -1,6 +1,7 @@
 import {
-  deleteTextHistory,
+  deleteHistory,
   drainSseEvents,
+  getHistoryPayload,
   getLatestContent,
   getLatestText,
   LatestText,
@@ -9,14 +10,16 @@ import {
   NativeServerConfig,
   NativeSseEvent,
   probeServer,
+  putFileFromFd,
   putImage,
   putText,
-  queryTextHistory,
-  setTextHistoryPinned,
-  setTextHistoryStarred,
+  queryClipboardHistory,
+  setHistoryPinned,
+  setHistoryStarred,
   startSse,
   stopSse
 } from 'uniclipboard_native';
+import { fileIo } from '@kit.CoreFileKit';
 import {
   ServerConfig,
   ServerHistoryItem,
@@ -56,8 +59,19 @@ export class MobileSyncClient {
     return contentId === null ? '' : contentId;
   }
 
+  async putFileFromUri(uri: string, fileSize: number, fileName: string): Promise<string> {
+    let file: fileIo.File = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY);
+    try {
+      let contentId: string | null = await putFileFromFd(
+        this.nativeConfig(), file.fd, fileSize, fileName);
+      return contentId === null ? '' : contentId;
+    } finally {
+      fileIo.closeSync(file.fd);
+    }
+  }
+
   async queryHistory(page: number, searchText: string, starredOnly: boolean): Promise<ServerHistoryItem[]> {
-    let nativeItems: NativeHistoryItem[] = await queryTextHistory(
+    let nativeItems: NativeHistoryItem[] = await queryClipboardHistory(
       this.nativeConfig(), page, searchText.trim(), starredOnly);
     let items: ServerHistoryItem[] = [];
     for (let index: number = 0; index < nativeItems.length; index++) {
@@ -69,6 +83,7 @@ export class MobileSyncClient {
         this.formatTimestamp(nativeItem.timestampMs),
         nativeItem.starred,
         nativeItem.pinned,
+        nativeItem.hasData,
         nativeItem.version,
         nativeItem.timestampMs));
     }
@@ -94,19 +109,23 @@ export class MobileSyncClient {
   }
 
   async setHistoryStarred(item: ServerHistoryItem, starred: boolean): Promise<ServerHistoryItem> {
-    let nativeItem: NativeHistoryItem = await setTextHistoryStarred(
-      this.nativeConfig(), item.id, starred, item.version);
+    let nativeItem: NativeHistoryItem = await setHistoryStarred(
+      this.nativeConfig(), item.kind, item.id, starred, item.version);
     return this.serverHistoryItem(nativeItem);
   }
 
   async setHistoryPinned(item: ServerHistoryItem, pinned: boolean): Promise<ServerHistoryItem> {
-    let nativeItem: NativeHistoryItem = await setTextHistoryPinned(
-      this.nativeConfig(), item.id, pinned, item.version);
+    let nativeItem: NativeHistoryItem = await setHistoryPinned(
+      this.nativeConfig(), item.kind, item.id, pinned, item.version);
     return this.serverHistoryItem(nativeItem);
   }
 
   async deleteHistory(item: ServerHistoryItem): Promise<void> {
-    await deleteTextHistory(this.nativeConfig(), item.id, item.version);
+    await deleteHistory(this.nativeConfig(), item.kind, item.id, item.version);
+  }
+
+  async getHistoryPayload(item: ServerHistoryItem): Promise<Uint8Array> {
+    return await getHistoryPayload(this.nativeConfig(), item.kind, item.id);
   }
 
   private serverHistoryItem(nativeItem: NativeHistoryItem): ServerHistoryItem {
@@ -117,6 +136,7 @@ export class MobileSyncClient {
       this.formatTimestamp(nativeItem.timestampMs),
       nativeItem.starred,
       nativeItem.pinned,
+      nativeItem.hasData,
       nativeItem.version,
       nativeItem.timestampMs);
   }

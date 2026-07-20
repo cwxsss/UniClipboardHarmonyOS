@@ -9,6 +9,7 @@ const HISTORY_KEY: string = 'local_history_v1';
 const HISTORY_LIMIT: number = 200;
 const IMAGE_PREFIX: string = '/clipboard_history_image_';
 const FILE_PREFIX: string = '/clipboard_history_file_';
+const SERVER_FILE_PREFIX: string = '/clipboard_server_file_';
 
 class PersistedHistoryRecord {
   id: string = '';
@@ -37,6 +38,7 @@ export class HistoryStorageService {
   async load(context: common.Context): Promise<ClipboardHistoryItem[]> {
     let records: PersistedHistoryRecord[] = this.readRecords(context);
     let items: ClipboardHistoryItem[] = [];
+    let recordsChanged: boolean = false;
     let count: number = Math.min(records.length, HISTORY_LIMIT);
     for (let index: number = 0; index < count; index++) {
       let record: PersistedHistoryRecord = records[index];
@@ -45,10 +47,17 @@ export class HistoryStorageService {
       if (record.kind === 'Image' && record.payloadPath.length > 0) {
         pixelMap = await this.loadImage(record.payloadPath);
       } else if (record.kind === 'File') {
-        filePath = record.payloadPath;
+        filePath = this.restoreFile(context, record);
+        if (filePath !== record.payloadPath) {
+          record.payloadPath = filePath;
+          recordsChanged = true;
+        }
       }
       items.push(new ClipboardHistoryItem(record.id, record.text, record.direction, record.time,
         record.kind, pixelMap, null, filePath, record.timestampMs, record.starred === true));
+    }
+    if (recordsChanged) {
+      this.writeRecords(context, records);
     }
     return items;
   }
@@ -72,15 +81,68 @@ export class HistoryStorageService {
       records.push(new PersistedHistoryRecord(item.id, item.text, item.direction, item.time,
         item.kind, payloadPath, item.timestampMs, item.starred));
     }
-    let store: preferences.Preferences = this.getStore(context);
-    store.putSync(HISTORY_KEY, JSON.stringify(records));
-    store.flushSync();
+    this.writeRecords(context, records);
     this.removeUnusedPayloads(context, oldRecords, activePaths);
+  }
+
+  stageFile(context: common.Context, sourceUri: string, id: string, fileName: string): string {
+    let targetPath: string = this.filePath(context, id, fileName);
+    let source: fileIo.File | null = null;
+    try {
+      source = fileIo.openSync(sourceUri, fileIo.OpenMode.READ_ONLY);
+      fileIo.copyFileSync(source.fd, targetPath);
+      return targetPath;
+    } catch (error) {
+      this.removeFileIfPresent(targetPath);
+      return '';
+    } finally {
+      if (source !== null) {
+        fileIo.closeSync(source.fd);
+      }
+    }
+  }
+
+  storeServerFile(context: common.Context, id: string, fileName: string, data: Uint8Array): string {
+    if (data.length === 0) {
+      return '';
+    }
+    let targetPath: string = context.filesDir + SERVER_FILE_PREFIX + id + this.fileExtension(fileName);
+    if (this.fileExists(targetPath)) {
+      return targetPath;
+    }
+    try {
+      let file: fileIo.File = fileIo.openSync(targetPath,
+        fileIo.OpenMode.CREATE | fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.TRUNC);
+      try {
+        fileIo.writeSync(file.fd, data.buffer);
+      } finally {
+        fileIo.closeSync(file.fd);
+      }
+      return targetPath;
+    } catch (error) {
+      this.removeFileIfPresent(targetPath);
+      return '';
+    }
+  }
+
+  findServerFile(context: common.Context, id: string, fileName: string): string {
+    let path: string = context.filesDir + SERVER_FILE_PREFIX + id + this.fileExtension(fileName);
+    return this.fileExists(path) ? path : '';
+  }
+
+  discardManagedFile(context: common.Context, path: string): void {
+    if (this.isManagedPath(context, path)) {
+      this.removeFileIfPresent(path);
+    }
   }
 
   removePayload(context: common.Context, item: ClipboardHistoryItem): void {
     this.removeFileIfPresent(this.imagePath(context, item.id));
-    this.removeFileIfPresent(this.filePath(context, item.id));
+    this.removeFileIfPresent(this.filePath(context, item.id, item.text));
+    this.removeFileIfPresent(this.filePath(context, item.id, ''));
+    if (item.filePath.length > 0 && this.isManagedPath(context, item.filePath)) {
+      this.removeFileIfPresent(item.filePath);
+    }
   }
 
   private getStore(context: common.Context): preferences.Preferences {
@@ -99,6 +161,12 @@ export class HistoryStorageService {
     } catch (error) {
       return [];
     }
+  }
+
+  private writeRecords(context: common.Context, records: PersistedHistoryRecord[]): void {
+    let store: preferences.Preferences = this.getStore(context);
+    store.putSync(HISTORY_KEY, JSON.stringify(records));
+    store.flushSync();
   }
 
   private async ensureImage(context: common.Context, item: ClipboardHistoryItem): Promise<string> {
@@ -130,10 +198,11 @@ export class HistoryStorageService {
   }
 
   private ensureFile(context: common.Context, item: ClipboardHistoryItem): string {
-    let targetPath: string = this.filePath(context, item.id);
-    if (this.fileExists(targetPath)) {
-      return targetPath;
+    if (item.filePath.length > 0 && this.isManagedPath(context, item.filePath) &&
+      this.fileExists(item.filePath)) {
+      return item.filePath;
     }
+    let targetPath: string = this.filePath(context, item.id, item.text);
     try {
       if (item.fileData !== null && item.fileData.length > 0) {
         let file: fileIo.File = fileIo.openSync(targetPath,
@@ -146,13 +215,42 @@ export class HistoryStorageService {
         return targetPath;
       }
       if (item.filePath.length > 0) {
-        fileIo.copyFileSync(item.filePath, targetPath);
-        return targetPath;
+        let source: fileIo.File = fileIo.openSync(item.filePath, fileIo.OpenMode.READ_ONLY);
+        try {
+          fileIo.copyFileSync(source.fd, targetPath);
+          return targetPath;
+        } finally {
+          fileIo.closeSync(source.fd);
+        }
       }
     } catch (error) {
       this.removeFileIfPresent(targetPath);
     }
-    return item.filePath;
+    return '';
+  }
+
+  private restoreFile(context: common.Context, record: PersistedHistoryRecord): string {
+    let sourcePath: string = record.payloadPath;
+    if (sourcePath.length === 0) {
+      return '';
+    }
+    if (this.isManagedPath(context, sourcePath)) {
+      return this.fileExists(sourcePath) ? sourcePath : '';
+    }
+    let targetPath: string = this.filePath(context, record.id, record.text);
+    let source: fileIo.File | null = null;
+    try {
+      source = fileIo.openSync(sourcePath, fileIo.OpenMode.READ_ONLY);
+      fileIo.copyFileSync(source.fd, targetPath);
+      return targetPath;
+    } catch (error) {
+      this.removeFileIfPresent(targetPath);
+      return '';
+    } finally {
+      if (source !== null) {
+        fileIo.closeSync(source.fd);
+      }
+    }
   }
 
   private async loadImage(path: string): Promise<image.PixelMap | null> {
@@ -201,14 +299,27 @@ export class HistoryStorageService {
   }
 
   private isManagedPath(context: common.Context, path: string): boolean {
-    return path.startsWith(context.filesDir + IMAGE_PREFIX) || path.startsWith(context.filesDir + FILE_PREFIX);
+    return path.startsWith(context.filesDir + IMAGE_PREFIX) || path.startsWith(context.filesDir + FILE_PREFIX) ||
+      path.startsWith(context.filesDir + SERVER_FILE_PREFIX);
   }
 
   private imagePath(context: common.Context, id: string): string {
     return context.filesDir + IMAGE_PREFIX + id + '.png';
   }
 
-  private filePath(context: common.Context, id: string): string {
-    return context.filesDir + FILE_PREFIX + id;
+  private filePath(context: common.Context, id: string, fileName: string): string {
+    return context.filesDir + FILE_PREFIX + id + this.fileExtension(fileName);
+  }
+
+  private fileExtension(fileName: string): string {
+    let dotIndex: number = fileName.lastIndexOf('.');
+    if (dotIndex <= 0 || dotIndex >= fileName.length - 1) {
+      return '';
+    }
+    let extension: string = fileName.substring(dotIndex).toLowerCase();
+    if (extension.length > 11 || extension.indexOf('/') >= 0 || extension.indexOf('\\') >= 0) {
+      return '';
+    }
+    return extension;
   }
 }

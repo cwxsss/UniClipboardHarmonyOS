@@ -110,6 +110,7 @@ struct Index {
   @State password: string = '';
   @State connectUri: string = '';
   @State connectUriState: number = 0;
+  @State legacyConnectionExpanded: boolean = false;
   @State composerText: string = '';
   @State latestText: string = '';
   @State latestKind: string = 'Text';
@@ -161,6 +162,7 @@ struct Index {
   @State spaceInvitationExpiresAtMs: number = 0;
   @State spaceInvitationScanState: number = 0;
   @State spaceInvitationBusy: boolean = false;
+  @State mobileInvitationOpen: boolean = false;
   @State spaceConnectBusy: boolean = false;
   @State spaceConnectingDeviceId: string = '';
   @State spaceConnectState: number = 0;
@@ -206,6 +208,7 @@ struct Index {
   @State mobileSyncDevices: NativeMobileSyncDevice[] = [];
   @State mobileSyncBusy: boolean = false;
   @State mobileSyncState: number = 0;
+  @State desktopDeviceMutationBusy: boolean = false;
   @State mobileSyncAddOpen: boolean = false;
   @State mobileSyncAdvancedOpen: boolean = false;
   @State mobileSyncDeviceName: string = '';
@@ -241,6 +244,7 @@ struct Index {
   private realtimeAutoConnect: boolean = false;
   private mobileSyncDeviceRefreshBusy: boolean = false;
   private syncScroller: Scroller = new Scroller();
+  private devicesScroller: Scroller = new Scroller();
   private settingsScroller: Scroller = new Scroller();
   private aboutScroller: Scroller = new Scroller();
   private configRestored: boolean = false;
@@ -378,6 +382,7 @@ struct Index {
       this.serverUrl = config.baseUrl;
       this.username = config.username;
       this.password = config.password;
+      this.legacyConnectionExpanded = this.hasConfig();
       if (this.hasConfig()) {
         this.realtimeAutoConnect = true;
         this.startRealtime();
@@ -723,6 +728,9 @@ struct Index {
   }
 
   private async revokeMobileSyncDevice(device: NativeMobileSyncDevice): Promise<void> {
+    if (this.desktopDeviceMutationBusy || this.mobileSyncBusy) {
+      return;
+    }
     try {
       let result = await this.getUIContext().getPromptAction().showDialog({
         title: $r('app.string.mobile_sync_revoke_title'),
@@ -735,10 +743,43 @@ struct Index {
       if (result.index !== 1) {
         return;
       }
+      this.desktopDeviceMutationBusy = true;
       await this.mobileSyncServerService.revokeDevice(device.deviceId);
       await this.refreshMobileSyncDevices();
+      this.statusCode = 2;
     } catch (error) {
       this.mobileSyncState = 3;
+      this.statusCode = 3;
+    } finally {
+      this.desktopDeviceMutationBusy = false;
+    }
+  }
+
+  private async revokeSpaceDevice(device: NativeSpaceDevice): Promise<void> {
+    if (device.isLocal || this.desktopDeviceMutationBusy || this.spaceConnectBusy ||
+      !this.spaceJoined || this.spaceNodeState !== 2) {
+      return;
+    }
+    try {
+      let result = await this.getUIContext().getPromptAction().showDialog({
+        title: $r('app.string.space_revoke_device_title'),
+        message: $r('app.string.space_revoke_device_message'),
+        buttons: [
+          { text: $r('app.string.cancel_action'), color: $r('app.color.text_secondary') },
+          { text: $r('app.string.space_revoke_device_confirm'), color: $r('app.color.danger') }
+        ]
+      });
+      if (result.index !== 1) {
+        return;
+      }
+      this.desktopDeviceMutationBusy = true;
+      await this.spaceNodeService.revoke(device.deviceId);
+      await this.refreshSpaceDevices();
+      this.statusCode = 2;
+    } catch (error) {
+      this.statusCode = 3;
+    } finally {
+      this.desktopDeviceMutationBusy = false;
     }
   }
 
@@ -976,6 +1017,44 @@ struct Index {
       '&pwd=' + encodeURIComponent(this.spaceCreatePassphrase);
   }
 
+  private async shareCurrentSpaceInvitation(): Promise<void> {
+    let invitationUri: string = this.buildSpaceInvitationUri();
+    if (invitationUri.length === 0) {
+      return;
+    }
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context === undefined) {
+      this.showFeedbackToast($r('app.string.space_share_invitation_failed'));
+      return;
+    }
+    try {
+      let title: string = await context.resourceManager.getStringByName('space_invitation_title');
+      let codeLabel: string = await context.resourceManager.getStringByName('space_share_code_label');
+      let passphraseLabel: string =
+        await context.resourceManager.getStringByName('space_share_passphrase_label');
+      let linkLabel: string = await context.resourceManager.getStringByName('space_share_link_label');
+      let sharedContent: string = title + '\n' +
+        codeLabel + ': ' + this.spaceIssuedInvitationCode + '\n' +
+        passphraseLabel + ': ' + this.spaceCreatePassphrase + '\n' +
+        linkLabel + ': ' + invitationUri;
+      let record: systemShare.SharedRecord = {
+        utd: uniformTypeDescriptor.UniformDataType.PLAIN_TEXT,
+        content: sharedContent,
+        title: title
+      };
+      let sharedData: systemShare.SharedData = new systemShare.SharedData(record);
+      let shareController: systemShare.ShareController = new systemShare.ShareController(sharedData);
+      let options: systemShare.ShareControllerOptions = {
+        selectionMode: systemShare.SelectionMode.SINGLE
+      };
+      let abilityContext: common.UIAbilityContext = context as common.UIAbilityContext;
+      await shareController.show(abilityContext, options);
+    } catch (error) {
+      console.error('UniClipboard failed to share the space invitation.');
+      this.showFeedbackToast($r('app.string.space_share_invitation_failed'));
+    }
+  }
+
   private isSpaceInvitationCode(value: string): boolean {
     let code: string = value.trim().toUpperCase();
     return code.length === 9 && code.charAt(4) === '-';
@@ -1147,6 +1226,27 @@ struct Index {
             .fontSize(12)
             .fontColor($r('app.color.success'))
             .width('100%')
+        }
+        Button(this.mobileInvitationOpen ? $r('app.string.space_mobile_invite_collapse') :
+          $r('app.string.space_mobile_invite_open'), { type: ButtonType.Normal })
+          .height(46)
+          .width('100%')
+          .fontColor(this.mobileInvitationOpen ? $r('app.color.text_primary') :
+            $r('app.color.on_accent'))
+          .backgroundColor(this.mobileInvitationOpen ? $r('app.color.surface_muted') :
+            this.accentColor())
+          .borderRadius($r('app.float.corner_radius_level10'))
+          .enabled(!this.spaceInvitationBusy)
+          .onClick((): void => {
+            this.mobileInvitationOpen = !this.mobileInvitationOpen;
+          })
+        if (this.mobileInvitationOpen) {
+          Text($r('app.string.space_mobile_invite_note'))
+            .fontSize($r('app.float.font_body_small'))
+            .lineHeight(18)
+            .fontColor($r('app.color.text_secondary'))
+            .width('100%')
+          this.spaceInvitationCard()
         }
         Button(this.spaceSwitchOpen ? $r('app.string.space_switch_cancel') :
           $r('app.string.space_switch_open'), { type: ButtonType.Normal })
@@ -1371,15 +1471,21 @@ struct Index {
 
   private selectPage(index: number): void {
     this.selectedTab = index;
-    this.largeSection = index === 0 ? 0 : 2;
-    let destinationName: string = index === 0 ? 'sync' : 'settings';
+    this.largeSection = index === 0 ? 0 : (index === 1 ? 1 : 2);
+    let destinationName: string = index === 0 ? 'sync' : (index === 1 ? 'devices' : 'settings');
     this.largeNavStack.clear(false);
     this.largeNavStack.pushPath({ name: destinationName }, false);
+    if (index === 1) {
+      this.refreshMobileSyncDevices();
+      if (this.spaceJoined) {
+        this.refreshSpaceDevices();
+      }
+    }
   }
 
   private openConnectionSettings(): void {
     this.largeSettingsSection = 1;
-    this.selectPage(1);
+    this.selectPage(2);
   }
 
   private openFeedback(): void {
@@ -1443,7 +1549,7 @@ struct Index {
 
   private selectLargeSection(index: number): void {
     this.largeSection = index;
-    this.selectedTab = index === 2 ? 1 : 0;
+    this.selectedTab = index;
     let destinationName: string = index === 0 ? 'desktopClipboard' :
       index === 1 ? 'desktopDevices' : 'desktopSettings';
     this.largeNavStack.clear(false);
@@ -1503,7 +1609,8 @@ struct Index {
   }
 
   private async connectSpaceDevice(device: NativeSpaceDevice): Promise<void> {
-    if (device.isLocal || this.spaceConnectBusy || this.spaceNodeState !== 2 || !this.spaceJoined) {
+    if (device.isLocal || this.spaceConnectBusy || this.desktopDeviceMutationBusy ||
+      this.spaceNodeState !== 2 || !this.spaceJoined) {
       return;
     }
     this.spaceConnectBusy = true;
@@ -1527,7 +1634,8 @@ struct Index {
   }
 
   private async connectAllSpaceDevices(): Promise<void> {
-    if (this.spaceConnectBusy || this.spaceNodeState !== 2 || !this.spaceJoined) {
+    if (this.spaceConnectBusy || this.desktopDeviceMutationBusy ||
+      this.spaceNodeState !== 2 || !this.spaceJoined) {
       return;
     }
     this.spaceConnectBusy = true;
@@ -4664,7 +4772,7 @@ struct Index {
           Divider()
             .color($r('app.color.divider'))
             .margin({ top: 6, bottom: 2 })
-          this.fileComposer()
+          this.compactFileComposer()
         }
         .width('100%')
         .padding($r('app.float.padding_level8'))
@@ -5212,6 +5320,7 @@ struct Index {
               .fontColor($r('app.color.danger'))
               .backgroundColor($r('app.color.surface_muted'))
               .borderRadius($r('app.float.corner_radius_level4'))
+              .enabled(!this.desktopDeviceMutationBusy)
               .onClick((): void => {
                 this.revokeMobileSyncDevice(device);
               })
@@ -5359,10 +5468,360 @@ struct Index {
   }
 
   @Builder
+  private mobileSpaceConnectionGuide() {
+    Column({ space: 7 }) {
+      Row({ space: 8 }) {
+        Text($r('app.string.mobile_space_connection_title'))
+          .fontSize($r('app.float.font_subtitle_large'))
+          .fontWeight(FontWeight.Bold)
+          .fontColor($r('app.color.text_primary'))
+        Text($r('app.string.mobile_space_connection_recommended'))
+          .fontSize($r('app.float.font_caption_medium'))
+          .fontWeight(FontWeight.Medium)
+          .fontColor(this.accentColor())
+          .padding({ left: 8, right: 8, top: 3, bottom: 3 })
+          .borderRadius($r('app.float.corner_radius_level10'))
+          .backgroundColor(this.accentSoftColor())
+      }
+      .width('100%')
+      Text($r('app.string.mobile_space_connection_note'))
+        .fontSize($r('app.float.font_body_small'))
+        .lineHeight(18)
+        .fontColor($r('app.color.text_secondary'))
+        .width('100%')
+      Row({ space: 7 }) {
+        SymbolGlyph($r('sys.symbol.link'))
+          .fontSize(16)
+          .fontColor([this.accentColor()])
+        Text($r('app.string.mobile_connection_difference_note'))
+          .fontSize($r('app.float.font_body_small'))
+          .lineHeight(18)
+          .fontColor($r('app.color.text_primary'))
+          .layoutWeight(1)
+      }
+      .width('100%')
+      .padding(10)
+      .borderRadius($r('app.float.corner_radius_level4'))
+      .backgroundColor(this.accentSoftColor())
+    }
+    .width('100%')
+    .padding({ left: 4, right: 4 })
+  }
+
+  @Builder
+  private mobileLegacyConnectionCard() {
+    Column({ space: 10 }) {
+      Row({ space: 10 }) {
+        SymbolGlyph($r('sys.symbol.externaldrive'))
+          .fontSize(22)
+          .fontColor([$r('app.color.text_secondary')])
+        Column({ space: 3 }) {
+          Text($r('app.string.legacy_connection_title'))
+            .fontSize($r('app.float.font_body_large'))
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('app.color.text_primary'))
+            .width('100%')
+          Text($r('app.string.legacy_connection_note'))
+            .fontSize($r('app.float.font_body_small'))
+            .lineHeight(18)
+            .fontColor($r('app.color.text_secondary'))
+            .width('100%')
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+      }
+      .width('100%')
+      Button(this.legacyConnectionExpanded ? $r('app.string.legacy_connection_collapse') :
+        $r('app.string.legacy_connection_expand'), { type: ButtonType.Normal })
+        .height(44)
+        .width('100%')
+        .fontSize($r('app.float.font_body_medium'))
+        .fontColor($r('app.color.text_primary'))
+        .backgroundColor($r('app.color.surface_muted'))
+        .borderRadius($r('app.float.corner_radius_level10'))
+        .onClick((): void => {
+          this.legacyConnectionExpanded = !this.legacyConnectionExpanded;
+        })
+      if (this.legacyConnectionExpanded) {
+        Divider()
+          .color($r('app.color.divider'))
+          .margin({ top: 2, bottom: 2 })
+        Text($r('app.string.legacy_connect_code_title'))
+          .fontSize($r('app.float.font_body_medium'))
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.text_primary'))
+          .width('100%')
+        TextArea({ placeholder: $r('app.string.connect_uri_placeholder'), text: this.connectUri })
+          .height(96)
+          .fontSize(14)
+          .fontColor($r('app.color.text_primary'))
+          .placeholderColor($r('app.color.text_secondary'))
+          .backgroundColor($r('app.color.surface_muted'))
+          .borderRadius($r('app.float.corner_radius_level8'))
+          .padding(12)
+          .onChange((value: string): void => {
+            this.connectUri = value;
+            this.connectUriState = 0;
+          })
+        if (this.connectUriState === 1) {
+          Text($r('app.string.connect_uri_success'))
+            .fontSize(12)
+            .fontColor($r('app.color.success'))
+            .width('100%')
+        } else if (this.connectUriState === 2) {
+          Text($r('app.string.connect_uri_failed'))
+            .fontSize(12)
+            .fontColor($r('app.color.danger'))
+            .width('100%')
+        } else if (this.connectUriState === 3) {
+          Text($r('app.string.connect_uri_scan_failed'))
+            .fontSize(12)
+            .fontColor($r('app.color.danger'))
+            .width('100%')
+        }
+        Button($r('app.string.connect_uri_scan_action'), { type: ButtonType.Normal })
+          .height(46)
+          .width('100%')
+          .fontSize(14)
+          .fontColor($r('app.color.text_primary'))
+          .backgroundColor($r('app.color.surface_muted'))
+          .borderRadius($r('app.float.corner_radius_level10'))
+          .onClick((): void => {
+            this.scanConnectUri();
+          })
+        Button($r('app.string.connect_uri_action'), { type: ButtonType.Normal })
+          .height(46)
+          .width('100%')
+          .fontSize(14)
+          .fontColor($r('app.color.text_primary'))
+          .backgroundColor($r('app.color.surface_muted'))
+          .borderRadius($r('app.float.corner_radius_level10'))
+          .enabled(this.connectUri.trim().length > 0)
+          .onClick((): void => {
+            this.importConnectUri();
+          })
+        Divider()
+          .color($r('app.color.divider'))
+          .margin({ top: 6, bottom: 2 })
+        Text($r('app.string.legacy_service_form_title'))
+          .fontSize($r('app.float.font_body_medium'))
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.text_primary'))
+          .width('100%')
+        Text($r('app.string.legacy_server_url_label'))
+          .fontSize($r('app.float.font_body_medium'))
+          .fontColor($r('app.color.text_secondary'))
+          .width('100%')
+        TextInput({ placeholder: $r('app.string.server_url_placeholder'), text: this.serverUrl })
+          .height(50)
+          .fontSize($r('app.float.font_body_large'))
+          .fontColor($r('app.color.text_primary'))
+          .backgroundColor($r('app.color.surface_muted'))
+          .borderRadius($r('app.float.corner_radius_level10'))
+          .onChange((value: string): void => {
+            this.serverUrl = value;
+            this.connectionChanged();
+          })
+        Text($r('app.string.username_label'))
+          .fontSize($r('app.float.font_body_medium'))
+          .fontColor($r('app.color.text_secondary'))
+          .width('100%')
+          .margin({ top: 6 })
+        TextInput({ placeholder: $r('app.string.username_placeholder'), text: this.username })
+          .height(50)
+          .fontSize($r('app.float.font_body_large'))
+          .fontColor($r('app.color.text_primary'))
+          .backgroundColor($r('app.color.surface_muted'))
+          .borderRadius($r('app.float.corner_radius_level10'))
+          .onChange((value: string): void => {
+            this.username = value;
+            this.connectionChanged();
+          })
+        Text($r('app.string.password_label'))
+          .fontSize($r('app.float.font_body_medium'))
+          .fontColor($r('app.color.text_secondary'))
+          .width('100%')
+          .margin({ top: 6 })
+        TextInput({ placeholder: $r('app.string.password_placeholder'), text: this.password })
+          .type(InputType.Password)
+          .height(50)
+          .fontSize($r('app.float.font_body_large'))
+          .fontColor($r('app.color.text_primary'))
+          .backgroundColor($r('app.color.surface_muted'))
+          .borderRadius($r('app.float.corner_radius_level10'))
+          .onChange((value: string): void => {
+            this.password = value;
+            this.connectionChanged();
+          })
+        Button($r('app.string.test_connection_action'), { type: ButtonType.Normal })
+          .height(50)
+          .width('100%')
+          .fontSize($r('app.float.font_body_large'))
+          .fontColor($r('app.color.on_accent'))
+          .backgroundColor(this.accentColor())
+          .borderRadius($r('app.float.corner_radius_level10'))
+          .margin({ top: 12 })
+          .enabled(this.hasConfig() && !this.busy)
+          .onClick((): void => {
+            this.testConnection();
+          })
+        Button(this.realtimeActive ? $r('app.string.realtime_stop_action') :
+          $r('app.string.realtime_start_action'), { type: ButtonType.Normal })
+          .height(50)
+          .width('100%')
+          .fontSize($r('app.float.font_body_large'))
+          .fontColor(this.realtimeActive ? $r('app.color.danger') : $r('app.color.text_primary'))
+          .backgroundColor($r('app.color.surface_muted'))
+          .borderRadius($r('app.float.corner_radius_level10'))
+          .enabled(this.hasConfig())
+          .onClick((): void => {
+            this.toggleRealtime();
+          })
+        Text(this.realtimeActive ? $r('app.string.realtime_active_note') :
+          $r('app.string.realtime_inactive_note'))
+          .fontSize(12)
+          .lineHeight(18)
+          .fontColor(this.realtimeActive ? $r('app.color.success') : $r('app.color.text_secondary'))
+          .width('100%')
+      }
+    }
+    .width('100%')
+    .padding($r('app.float.padding_level8'))
+    .borderRadius($r('app.float.corner_radius_level8'))
+    .backgroundColor($r('app.color.surface'))
+  }
+
+  @Builder
+  private compactDevicePage() {
+    Scroll(this.devicesScroller) {
+      Column({ space: 12 }) {
+        Column({ space: 12 }) {
+          Row() {
+            Column({ space: 4 }) {
+              Text($r('app.string.desktop_paired_devices'))
+                .fontSize($r('app.float.font_subtitle_large'))
+                .fontWeight(FontWeight.Medium)
+                .fontColor($r('app.color.text_primary'))
+              Text(this.spaceJoined ? $r('app.string.desktop_roster_note') :
+                $r('app.string.desktop_no_device'))
+                .fontSize($r('app.float.font_body_small'))
+                .fontColor($r('app.color.text_secondary'))
+            }
+            .layoutWeight(1)
+            .alignItems(HorizontalAlign.Start)
+            Text(this.spaceDevices.length.toString())
+              .fontSize($r('app.float.font_body_small'))
+              .fontColor($r('app.color.text_secondary'))
+              .padding({ left: 9, right: 9, top: 3, bottom: 3 })
+              .borderRadius($r('app.float.corner_radius_level10'))
+              .backgroundColor($r('app.color.surface_muted'))
+          }
+          .width('100%')
+          if (this.spaceJoined) {
+            Row({ space: 10 }) {
+              Button($r('app.string.desktop_refresh_devices'), { type: ButtonType.Normal })
+                .layoutWeight(1)
+                .height(42)
+                .fontSize($r('app.float.font_body_small'))
+                .fontColor($r('app.color.text_primary'))
+                .backgroundColor($r('app.color.surface_muted'))
+                .borderRadius($r('app.float.corner_radius_level10'))
+                .enabled(!this.spaceDeviceRefreshBusy && !this.spaceConnectBusy &&
+                  !this.desktopDeviceMutationBusy)
+                .onClick((): void => {
+                  this.refreshSpaceDevices();
+                })
+              Button(this.spaceConnectBusy ? $r('app.string.desktop_connecting_all_devices') :
+                $r('app.string.desktop_connect_all_devices'), { type: ButtonType.Normal })
+                .layoutWeight(1)
+                .height(42)
+                .fontSize($r('app.float.font_body_small'))
+                .fontColor($r('app.color.on_accent'))
+                .backgroundColor(this.accentColor())
+                .borderRadius($r('app.float.corner_radius_level10'))
+                .enabled(!this.spaceConnectBusy && !this.desktopDeviceMutationBusy)
+                .onClick((): void => {
+                  this.connectAllSpaceDevices();
+                })
+            }
+            .width('100%')
+            if (this.spaceConnectState === 2) {
+              Text($r('app.string.desktop_connect_devices_success'))
+                .fontSize($r('app.float.font_body_small'))
+                .fontColor($r('app.color.success'))
+                .width('100%')
+            } else if (this.spaceConnectState === 3) {
+              Text($r('app.string.desktop_connect_devices_failed'))
+                .fontSize($r('app.float.font_body_small'))
+                .fontColor($r('app.color.danger'))
+                .width('100%')
+            }
+            ForEach(this.spaceDevices, (device: NativeSpaceDevice) => {
+              this.desktopPairedDeviceRow(device)
+            }, (device: NativeSpaceDevice): string => device.deviceId)
+          }
+          Text($r('app.string.device_management_hint'))
+            .fontSize($r('app.float.font_body_small'))
+            .lineHeight(18)
+            .fontColor($r('app.color.text_secondary'))
+            .width('100%')
+        }
+        .width('100%')
+        .padding($r('app.float.padding_level8'))
+        .borderRadius($r('app.float.corner_radius_level8'))
+        .backgroundColor($r('app.color.surface'))
+
+        Column({ space: 12 }) {
+          Row() {
+            Text($r('app.string.mobile_sync_registered_devices'))
+              .fontSize($r('app.float.font_subtitle_large'))
+              .fontWeight(FontWeight.Medium)
+              .fontColor($r('app.color.text_primary'))
+            Blank()
+            Text(this.mobileSyncDevices.length.toString())
+              .fontSize($r('app.float.font_body_small'))
+              .fontColor($r('app.color.text_secondary'))
+              .padding({ left: 9, right: 9, top: 3, bottom: 3 })
+              .borderRadius($r('app.float.corner_radius_level10'))
+              .backgroundColor($r('app.color.surface_muted'))
+          }
+          .width('100%')
+          if (this.mobileSyncDevices.length === 0) {
+            Text($r('app.string.mobile_sync_no_devices'))
+              .fontSize($r('app.float.font_body_small'))
+              .fontColor($r('app.color.text_secondary'))
+              .width('100%')
+              .padding({ top: 8, bottom: 8 })
+          } else {
+            ForEach(this.mobileSyncDevices, (device: NativeMobileSyncDevice) => {
+              this.desktopMobileDeviceRow(device)
+            }, (device: NativeMobileSyncDevice): string => device.deviceId)
+          }
+        }
+        .width('100%')
+        .padding($r('app.float.padding_level8'))
+        .borderRadius($r('app.float.corner_radius_level8'))
+        .backgroundColor($r('app.color.surface'))
+      }
+      .width('100%')
+      .padding({
+        left: 16,
+        right: 16,
+        top: 56 + this.avoidAreaRectHeight,
+        bottom: 116 + this.navigationRectHeight
+      })
+    }
+    .scrollBar(BarState.Off)
+    .layoutWeight(1)
+  }
+
+  @Builder
   private settingsPage() {
     Scroll(this.settingsScroller) {
       Column({ space: 12 }) {
         this.compactAppearanceCard()
+
+        this.mobileSpaceConnectionGuide()
 
         this.spaceJoinCard()
 
@@ -5376,147 +5835,7 @@ struct Index {
 
         this.mobileSyncManagementCard()
 
-        Column({ space: 8 }) {
-          Text($r('app.string.connect_uri_label'))
-            .fontSize($r('app.float.font_body_medium'))
-            .fontColor($r('app.color.text_secondary'))
-            .width('100%')
-          TextArea({ placeholder: $r('app.string.connect_uri_placeholder'), text: this.connectUri })
-            .height(96)
-            .fontSize(14)
-            .fontColor($r('app.color.text_primary'))
-            .placeholderColor($r('app.color.text_secondary'))
-            .backgroundColor($r('app.color.surface_muted'))
-            .borderRadius($r('app.float.corner_radius_level8'))
-            .padding(12)
-            .onChange((value: string) => {
-              this.connectUri = value;
-              this.connectUriState = 0;
-            })
-          if (this.connectUriState === 1) {
-            Text($r('app.string.connect_uri_success'))
-              .fontSize(12)
-              .fontColor($r('app.color.success'))
-              .width('100%')
-          } else if (this.connectUriState === 2) {
-            Text($r('app.string.connect_uri_failed'))
-              .fontSize(12)
-              .fontColor($r('app.color.danger'))
-              .width('100%')
-          } else if (this.connectUriState === 3) {
-            Text($r('app.string.connect_uri_scan_failed'))
-              .fontSize(12)
-              .fontColor($r('app.color.danger'))
-              .width('100%')
-          }
-          Button($r('app.string.connect_uri_scan_action'), { type: ButtonType.Normal })
-            .height(46)
-            .width('100%')
-            .fontSize(14)
-            .fontColor($r('app.color.text_primary'))
-            .backgroundColor($r('app.color.surface_muted'))
-            .borderRadius($r('app.float.corner_radius_level10'))
-            .onClick(() => {
-              this.scanConnectUri();
-            })
-          Button($r('app.string.connect_uri_action'), { type: ButtonType.Normal })
-            .height(46)
-            .width('100%')
-            .fontSize(14)
-            .fontColor($r('app.color.text_primary'))
-            .backgroundColor($r('app.color.surface_muted'))
-            .borderRadius($r('app.float.corner_radius_level10'))
-            .enabled(this.connectUri.trim().length > 0)
-            .onClick(() => {
-              this.importConnectUri();
-            })
-        }
-        .width('100%')
-        .padding($r('app.float.padding_level8'))
-        .borderRadius($r('app.float.corner_radius_level8'))
-        .backgroundColor($r('app.color.surface'))
-
-        Column({ space: 8 }) {
-          Text($r('app.string.server_url_label'))
-            .fontSize($r('app.float.font_body_medium'))
-            .fontColor($r('app.color.text_secondary'))
-            .width('100%')
-          TextInput({ placeholder: $r('app.string.server_url_placeholder'), text: this.serverUrl })
-            .height(50)
-            .fontSize($r('app.float.font_body_large'))
-            .fontColor($r('app.color.text_primary'))
-            .backgroundColor($r('app.color.surface_muted'))
-            .borderRadius($r('app.float.corner_radius_level10'))
-            .onChange((value: string) => {
-              this.serverUrl = value;
-              this.connectionChanged();
-            })
-          Text($r('app.string.username_label'))
-            .fontSize($r('app.float.font_body_medium'))
-            .fontColor($r('app.color.text_secondary'))
-            .width('100%')
-            .margin({ top: 6 })
-          TextInput({ placeholder: $r('app.string.username_placeholder'), text: this.username })
-            .height(50)
-            .fontSize($r('app.float.font_body_large'))
-            .fontColor($r('app.color.text_primary'))
-            .backgroundColor($r('app.color.surface_muted'))
-            .borderRadius($r('app.float.corner_radius_level10'))
-            .onChange((value: string) => {
-              this.username = value;
-              this.connectionChanged();
-            })
-          Text($r('app.string.password_label'))
-            .fontSize($r('app.float.font_body_medium'))
-            .fontColor($r('app.color.text_secondary'))
-            .width('100%')
-            .margin({ top: 6 })
-          TextInput({ placeholder: $r('app.string.password_placeholder'), text: this.password })
-            .type(InputType.Password)
-            .height(50)
-            .fontSize($r('app.float.font_body_large'))
-            .fontColor($r('app.color.text_primary'))
-            .backgroundColor($r('app.color.surface_muted'))
-            .borderRadius($r('app.float.corner_radius_level10'))
-            .onChange((value: string) => {
-              this.password = value;
-              this.connectionChanged();
-            })
-          Button($r('app.string.test_connection_action'), { type: ButtonType.Normal })
-            .height(50)
-            .width('100%')
-            .fontSize($r('app.float.font_body_large'))
-            .fontColor($r('app.color.on_accent'))
-            .backgroundColor(this.accentColor())
-            .borderRadius($r('app.float.corner_radius_level10'))
-            .margin({ top: 12 })
-            .enabled(!this.busy)
-            .onClick(() => {
-              this.testConnection();
-            })
-          Button(this.realtimeActive ? $r('app.string.realtime_stop_action') :
-            $r('app.string.realtime_start_action'), { type: ButtonType.Normal })
-            .height(50)
-            .width('100%')
-            .fontSize($r('app.float.font_body_large'))
-            .fontColor(this.realtimeActive ? $r('app.color.danger') : $r('app.color.text_primary'))
-            .backgroundColor($r('app.color.surface_muted'))
-            .borderRadius($r('app.float.corner_radius_level10'))
-            .enabled(this.hasConfig())
-            .onClick(() => {
-              this.toggleRealtime();
-            })
-          Text(this.realtimeActive ? $r('app.string.realtime_active_note') :
-            $r('app.string.realtime_inactive_note'))
-            .fontSize(12)
-            .lineHeight(18)
-            .fontColor(this.realtimeActive ? $r('app.color.success') : $r('app.color.text_secondary'))
-            .width('100%')
-        }
-        .width('100%')
-        .padding($r('app.float.padding_level8'))
-        .borderRadius($r('app.float.corner_radius_level8'))
-        .backgroundColor($r('app.color.surface'))
+        this.mobileLegacyConnectionCard()
       }
       .width('100%')
       .padding({
@@ -5888,6 +6207,37 @@ struct Index {
   }
 
   @Builder
+  private compactDevicesNavigation() {
+    HdsNavigation() {
+      this.compactDevicePage()
+    }
+    .titleBar({
+      avoidLayoutSafeArea: true,
+      content: {
+        title: {
+          mainTitle: $r('app.string.desktop_devices')
+        }
+      },
+      style: {
+        scrollEffectOpts: {
+          scrollEffectType: ScrollEffectType.GRADIENT_BLUR
+        },
+        systemMaterialEffect: {
+          materialType: hdsMaterial.MaterialType.IMMERSIVE,
+          materialLevel: hdsMaterial.MaterialLevel.ADAPTIVE
+        }
+      }
+    })
+    .bindToScrollable([this.devicesScroller])
+    .hideBackButton(true)
+    .titleMode(HdsNavigationTitleMode.MINI)
+    .mode(NavigationMode.Stack)
+    .backgroundColor($r('app.color.page_background'))
+    .ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM],
+      [LayoutSafeAreaEdge.TOP, LayoutSafeAreaEdge.BOTTOM])
+  }
+
+  @Builder
   private compactSettingsNavigation() {
     HdsNavigation() {
       this.settingsPage()
@@ -5962,9 +6312,15 @@ struct Index {
           $r('app.string.nav_sync')))
 
       TabContent() {
+        this.compactDevicesNavigation()
+      }
+        .tabBar(this.compactTabBar(1, $r('sys.symbol.desktop'),
+          $r('app.string.desktop_devices')))
+
+      TabContent() {
         this.compactSettingsNavigation()
       }
-        .tabBar(this.compactTabBar(1, $r('sys.symbol.gearshape'),
+        .tabBar(this.compactTabBar(2, $r('sys.symbol.gearshape'),
           $r('app.string.nav_settings')))
     }
     .barPosition(BarPosition.End)
@@ -5972,7 +6328,7 @@ struct Index {
     .scrollable(false)
     .barOverlap(true)
     .barFloatingStyle({
-      barWidth: { smallWidth: 200, mediumWidth: 300, largeWidth: 400 },
+      barWidth: { smallWidth: 260, mediumWidth: 360, largeWidth: 440 },
       barBottomMargin: 28,
       gradientMask: { maskColor: $r('app.color.navigation_mask'), maskHeight: 92 },
       systemMaterialEffect: {
@@ -6028,7 +6384,8 @@ struct Index {
   private largeSidebar() {
     Column({ space: 8 }) {
       this.largeSidebarItem(0, $r('sys.symbol.clipboard_sharing'), $r('app.string.nav_sync'))
-      this.largeSidebarItem(1, $r('sys.symbol.gearshape'), $r('app.string.nav_settings'))
+      this.largeSidebarItem(1, $r('sys.symbol.desktop'), $r('app.string.desktop_devices'))
+      this.largeSidebarItem(2, $r('sys.symbol.gearshape'), $r('app.string.nav_settings'))
       Blank()
       this.statusPill()
     }
@@ -6043,7 +6400,9 @@ struct Index {
   private largeDestination(name: string, _param: Object) {
     HdsNavDestination() {
       Column() {
-        if (name === 'settings') {
+        if (name === 'devices') {
+          this.desktopDeviceWorkspace()
+        } else if (name === 'settings') {
           this.settingsPage()
         } else {
           this.syncPage()
@@ -6058,7 +6417,8 @@ struct Index {
     .titleBar({
       content: {
         title: {
-          mainTitle: name === 'settings' ? $r('app.string.nav_settings') : $r('app.string.nav_sync')
+          mainTitle: name === 'devices' ? $r('app.string.desktop_devices') :
+            (name === 'settings' ? $r('app.string.nav_settings') : $r('app.string.nav_sync'))
         }
       }
     })
@@ -6073,7 +6433,7 @@ struct Index {
         .fontColor([this.largeSection === index ? this.accentColor() :
           $r('app.color.text_secondary')])
       Text(label)
-        .fontSize($r('app.float.font_caption_medium'))
+        .fontSize($r('app.float.font_desktop_rail_label'))
         .fontWeight(this.largeSection === index ? FontWeight.Medium : FontWeight.Regular)
         .maxLines(1)
         .fontColor(this.largeSection === index ? this.accentColor() :
@@ -6096,7 +6456,7 @@ struct Index {
         .fontSize(24)
         .fontColor([$r('app.color.text_secondary')])
       Text($r('app.string.nav_feedback'))
-        .fontSize($r('app.float.font_caption_medium'))
+        .fontSize($r('app.float.font_desktop_rail_label'))
         .fontWeight(FontWeight.Regular)
         .maxLines(1)
         .fontColor($r('app.color.text_secondary'))
@@ -6536,6 +6896,106 @@ struct Index {
     }
     .width('100%')
     .height(54)
+  }
+
+  @Builder
+  private compactFileComposer() {
+    Column({ space: 12 }) {
+      Row({ space: 10 }) {
+        SymbolGlyph($r('sys.symbol.folder'))
+          .fontSize(26)
+          .fontColor([$r('app.color.text_secondary')])
+          .width(46)
+        Column({ space: 3 }) {
+          Text($r('app.string.file_composer_title'))
+            .fontSize($r('app.float.font_body_medium'))
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('app.color.text_primary'))
+            .width('100%')
+          if (this.fileTransferState === 1) {
+            Text($r('app.string.file_selecting'))
+              .fontSize($r('app.float.font_body_small'))
+              .fontColor($r('app.color.text_secondary'))
+              .width('100%')
+          } else if (this.fileTransferState === 2) {
+            Text(this.composerFileName)
+              .fontSize($r('app.float.font_body_small'))
+              .fontColor($r('app.color.success'))
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .width('100%')
+          } else if (this.fileTransferState === 3) {
+            Text($r('app.string.file_sending'))
+              .fontSize($r('app.float.font_body_small'))
+              .fontColor($r('app.color.text_secondary'))
+              .width('100%')
+          } else if (this.fileTransferState === 4) {
+            Text($r('app.string.file_send_failed'))
+              .fontSize($r('app.float.font_body_small'))
+              .fontColor($r('app.color.danger'))
+              .maxLines(2)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .width('100%')
+          } else if (this.fileTransferState === 5) {
+            Text($r('app.string.file_too_large'))
+              .fontSize($r('app.float.font_body_small'))
+              .fontColor($r('app.color.danger'))
+              .width('100%')
+          } else if (this.fileTransferState === 6) {
+            Text($r('app.string.file_send_success'))
+              .fontSize($r('app.float.font_body_small'))
+              .fontColor($r('app.color.success'))
+              .width('100%')
+          } else if (this.fileTransferState === 7) {
+            Text($r('app.string.file_send_pending'))
+              .fontSize($r('app.float.font_body_small'))
+              .fontColor($r('app.color.text_secondary'))
+              .maxLines(2)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .width('100%')
+          } else {
+            Text($r('app.string.file_empty'))
+              .fontSize($r('app.float.font_body_small'))
+              .fontColor($r('app.color.text_secondary'))
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .width('100%')
+          }
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+      }
+      .width('100%')
+      Row({ space: 10 }) {
+        Button(this.fileTransferState === 1 ? $r('app.string.file_selecting') :
+          $r('app.string.select_file_action'), { type: ButtonType.Normal })
+          .layoutWeight(1)
+          .height(46)
+          .fontSize($r('app.float.font_body_medium'))
+          .fontColor($r('app.color.text_primary'))
+          .backgroundColor($r('app.color.surface_muted'))
+          .borderRadius($r('app.float.corner_radius_level10'))
+          .enabled(!this.busy && this.fileTransferState !== 1)
+          .onClick((): void => {
+            this.selectFile();
+          })
+        Button(this.fileTransferState === 3 ? $r('app.string.file_sending') :
+          $r('app.string.send_file_action'), { type: ButtonType.Normal })
+          .layoutWeight(1)
+          .height(46)
+          .fontSize($r('app.float.font_body_medium'))
+          .fontColor($r('app.color.on_accent'))
+          .backgroundColor(this.accentColor())
+          .borderRadius($r('app.float.corner_radius_level10'))
+          .enabled(!this.busy && this.composerFileUri.length > 0 && this.spaceJoined)
+          .onClick((): void => {
+            this.sendFile();
+          })
+      }
+      .width('100%')
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
   }
 
   @Builder
@@ -7379,7 +7839,7 @@ struct Index {
   }
 
   @Builder
-  private desktopInvitationCard() {
+  private spaceInvitationCard() {
     Column({ space: 9 }) {
       Text($r('app.string.space_invitation_title'))
         .fontSize($r('app.float.font_body_medium'))
@@ -7415,7 +7875,7 @@ struct Index {
         .width('100%')
         .justifyContent(FlexAlign.Center)
         .padding({ top: 5, bottom: 5 })
-        Text($r('app.string.space_manual_link_title'))
+        Text($r('app.string.space_invitation_code_label'))
           .fontSize($r('app.float.font_body_small'))
           .fontWeight(FontWeight.Medium)
           .fontColor($r('app.color.text_primary'))
@@ -7449,6 +7909,21 @@ struct Index {
           }
           .width('100%')
         }
+        Text($r('app.string.space_share_invitation_note'))
+          .fontSize($r('app.float.font_caption_medium'))
+          .lineHeight(15)
+          .fontColor($r('app.color.text_secondary'))
+          .width('100%')
+        Button($r('app.string.space_share_invitation_action'), { type: ButtonType.Normal })
+          .width('100%')
+          .height(42)
+          .fontSize($r('app.float.font_body_medium'))
+          .fontColor($r('app.color.on_accent'))
+          .backgroundColor(this.accentColor())
+          .borderRadius($r('app.float.corner_radius_level10'))
+          .onClick((): void => {
+            this.shareCurrentSpaceInvitation();
+          })
       }
       Text(this.spaceCreateState === 3 ? $r('app.string.space_invitation_failed') :
         $r('app.string.space_invitation_note'))
@@ -7539,6 +8014,50 @@ struct Index {
   }
 
   @Builder
+  private desktopPairedDeviceContextMenu(device: NativeSpaceDevice) {
+    Menu() {
+      if (device.isLocal) {
+        MenuItem({
+          content: $r('app.string.desktop_this_device')
+        }).enabled(false)
+      } else {
+        MenuItem({
+          symbolStartIcon: this.historyDeleteMenuSymbol(),
+          content: $r('app.string.space_revoke_device_confirm')
+        })
+          .enabled(!this.desktopDeviceMutationBusy)
+          .onClick((): void => {
+            this.revokeSpaceDevice(device);
+          })
+      }
+    }.menuItemDivider({
+      strokeWidth: LengthMetrics.vp(1),
+      color: $r('app.color.divider'),
+      startMargin: LengthMetrics.vp(12),
+      endMargin: LengthMetrics.vp(12)
+    })
+  }
+
+  @Builder
+  private desktopMobileDeviceContextMenu(device: NativeMobileSyncDevice) {
+    Menu() {
+      MenuItem({
+        symbolStartIcon: this.historyDeleteMenuSymbol(),
+        content: $r('app.string.mobile_sync_revoke_confirm')
+      })
+        .enabled(!this.desktopDeviceMutationBusy)
+        .onClick((): void => {
+          this.revokeMobileSyncDevice(device);
+        })
+    }.menuItemDivider({
+      strokeWidth: LengthMetrics.vp(1),
+      color: $r('app.color.divider'),
+      startMargin: LengthMetrics.vp(12),
+      endMargin: LengthMetrics.vp(12)
+    })
+  }
+
+  @Builder
   private desktopPairedDeviceRow(device: NativeSpaceDevice) {
     Row({ space: 11 }) {
       Stack({ alignContent: Alignment.BottomEnd }) {
@@ -7588,7 +8107,7 @@ struct Index {
           .fontColor(device.online ? $r('app.color.success') : $r('app.color.text_primary'))
           .backgroundColor($r('app.color.surface'))
           .borderRadius($r('app.float.corner_radius_level4'))
-          .enabled(!device.online && !this.spaceConnectBusy)
+          .enabled(!device.online && !this.spaceConnectBusy && !this.desktopDeviceMutationBusy)
           .onClick((): void => {
             this.connectSpaceDevice(device);
           })
@@ -7599,6 +8118,7 @@ struct Index {
     .padding({ left: 10, right: 12 })
     .borderRadius($r('app.float.corner_radius_level10'))
     .backgroundColor($r('app.color.surface_muted'))
+    .bindContextMenu(this.desktopPairedDeviceContextMenu(device), ResponseType.LongPress)
   }
 
   @Builder
@@ -7652,6 +8172,7 @@ struct Index {
     .padding({ left: 10, right: 12 })
     .borderRadius($r('app.float.corner_radius_level10'))
     .backgroundColor($r('app.color.surface_muted'))
+    .bindContextMenu(this.desktopMobileDeviceContextMenu(device), ResponseType.LongPress)
   }
 
   @Builder
@@ -7684,7 +8205,8 @@ struct Index {
               .fontColor($r('app.color.text_primary'))
               .backgroundColor($r('app.color.surface_muted'))
               .borderRadius($r('app.float.corner_radius_level10'))
-              .enabled(!this.spaceDeviceRefreshBusy && !this.spaceConnectBusy)
+              .enabled(!this.spaceDeviceRefreshBusy && !this.spaceConnectBusy &&
+                !this.desktopDeviceMutationBusy)
               .onClick((): void => {
                 this.refreshSpaceDevices();
               })
@@ -7696,7 +8218,7 @@ struct Index {
               .fontColor($r('app.color.on_accent'))
               .backgroundColor(this.accentColor())
               .borderRadius($r('app.float.corner_radius_level10'))
-              .enabled(!this.spaceConnectBusy)
+              .enabled(!this.spaceConnectBusy && !this.desktopDeviceMutationBusy)
               .onClick((): void => {
                 this.connectAllSpaceDevices();
               })
@@ -7829,7 +8351,7 @@ struct Index {
             .fontColor($r('app.color.text_primary'))
             .backgroundColor($r('app.color.surface_muted'))
             .borderRadius($r('app.float.corner_radius_level10'))
-            .enabled(!this.spaceConnectBusy)
+            .enabled(!this.spaceConnectBusy && !this.desktopDeviceMutationBusy)
             .onClick((): void => {
               this.connectAllSpaceDevices();
             })
@@ -7902,7 +8424,7 @@ struct Index {
             .fontColor($r('app.color.text_secondary'))
             .width('100%')
             .padding({ bottom: 10 })
-          this.desktopInvitationCard()
+          this.spaceInvitationCard()
         }
         this.mobileSyncManagementCard()
         Text($r('app.string.desktop_sync_policy'))
@@ -8141,7 +8663,7 @@ struct Index {
     .border({ width: 1, color: $r('app.color.divider') })
     Column({ space: 12 }) {
       Row() {
-        Text($r('app.string.space_manual_link_title'))
+        Text($r('app.string.legacy_service_form_title'))
           .fontSize(16)
           .fontWeight(FontWeight.Medium)
           .fontColor($r('app.color.text_primary'))
@@ -8149,7 +8671,7 @@ struct Index {
         this.statusPill()
       }
       .width('100%')
-      Text($r('app.string.server_url_label'))
+      Text($r('app.string.legacy_server_url_label'))
         .fontSize(12)
         .fontColor($r('app.color.text_secondary'))
         .width('100%')

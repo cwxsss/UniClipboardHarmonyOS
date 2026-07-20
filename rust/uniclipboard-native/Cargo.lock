@@ -7372,6 +7372,7 @@ dependencies = [
  "tokio",
  "uc-application",
  "uc-bootstrap",
+ "uc-content-hash",
  "uc-core",
  "uc-mobile",
  "uc-mobile-proto",

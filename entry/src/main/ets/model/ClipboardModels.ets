@@ -6,6 +6,22 @@ export interface ServerConfig {
   password: string;
 }
 
+export class LinkPreview {
+  url: string = '';
+  title: string = '';
+  description: string = '';
+  siteName: string = '';
+  imageUrl: string = '';
+
+  constructor(url: string, title: string, description: string, siteName: string, imageUrl: string) {
+    this.url = url;
+    this.title = title;
+    this.description = description;
+    this.siteName = siteName;
+    this.imageUrl = imageUrl;
+  }
+}
+
 export class ClipboardHistoryItem {
   id: string = '';
   text: string = '';
@@ -67,17 +83,19 @@ export class ServerHistoryItem {
   time: string = '';
   starred: boolean = false;
   pinned: boolean = false;
+  hasData: boolean = false;
   version: number = 0;
   timestampMs: number = 0;
 
   constructor(id: string, text: string, kind: string, time: string, starred: boolean, pinned: boolean,
-    version: number, timestampMs: number) {
+    hasData: boolean, version: number, timestampMs: number) {
     this.id = id;
     this.text = text;
     this.kind = kind;
     this.time = time;
     this.starred = starred;
     this.pinned = pinned;
+    this.hasData = hasData;
     this.version = version;
     this.timestampMs = timestampMs;
   }

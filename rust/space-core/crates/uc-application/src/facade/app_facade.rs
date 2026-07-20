@@ -36,8 +36,9 @@ use crate::facade::roster::{MemberSummary, PeerSnapshotView, RosterError};
 use crate::facade::settings::{GeneralSettingsPatch, SettingsPatch};
 use crate::facade::space_setup::{EnsureReachableAllError, EnsureReachableAllReport};
 use crate::facade::space_setup::{
-    InitializeSpaceError, InitializeSpaceInput, InitializeSpaceResult, IssuePairingInvitationError,
-    IssuePairingInvitationResult, MigrationProgress, PairingInvitationAddressCandidate,
+    FactoryResetError, InitializeSpaceError, InitializeSpaceInput, InitializeSpaceResult,
+    IssuePairingInvitationError, IssuePairingInvitationResult, MigrationProgress,
+    PairingInvitationAddressCandidate,
     PairingOutcome, QueryMigrationProgressError, RedeemPairingInvitationError,
     RedeemPairingInvitationInput, RedeemPairingInvitationResult, SwitchSpaceError,
     SwitchSpaceInput, SwitchSpaceResult, TryResumeSessionError,
@@ -237,6 +238,18 @@ impl AppFacade {
             .await
     }
 
+    /// 清除当前空间的密钥与 setup 状态，为用户主动创建新空间做准备。
+    pub async fn factory_reset_space(&self) -> Result<(), FactoryResetError> {
+        self.space_setup
+            .get()
+            .cloned()
+            .ok_or_else(|| {
+                FactoryResetError::StorageFailed("space setup facade unavailable".to_string())
+            })?
+            .factory_reset()
+            .await
+    }
+
     /// 尝试静默恢复空间会话。
     pub async fn try_resume_session(&self) -> Result<bool, TryResumeSessionError> {
         self.space_setup
@@ -291,6 +304,20 @@ impl AppFacade {
             .cloned()
             .ok_or_else(|| PresenceError::Internal("space setup facade unavailable".to_string()))?
             .ensure_reachable_one(device)
+            .await
+    }
+
+    /// 强制重新验证单个 peer，绕过仍被 QUIC 视为存活的缓存连接。移动端从
+    /// 锁屏或网络暂停恢复时使用，避免等待缓存 TTL 或空闲超时后才重拨。
+    pub async fn verify_reachable_one(
+        &self,
+        device: &DeviceId,
+    ) -> Result<ReachabilityState, PresenceError> {
+        self.space_setup
+            .get()
+            .cloned()
+            .ok_or_else(|| PresenceError::Internal("space setup facade unavailable".to_string()))?
+            .verify_reachable_one(device)
             .await
     }
 
@@ -414,6 +441,16 @@ impl AppFacade {
             .cloned()
             .ok_or(RosterError::Unavailable)?
             .list_with_presence()
+            .await
+    }
+
+    /// 从成员、地址和信任仓库中级联移除一个旧空间成员。
+    pub async fn revoke_member(&self, device_id: &str) -> Result<(), RosterError> {
+        self.member_roster
+            .get()
+            .cloned()
+            .ok_or(RosterError::Unavailable)?
+            .revoke_member(device_id)
             .await
     }
 

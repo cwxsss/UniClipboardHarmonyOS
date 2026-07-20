@@ -160,7 +160,11 @@ export class ClipboardService {
     let file: fileIo.File = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY);
     try {
       let stat: fileIo.Stat = fileIo.statSync(file.fd);
-      return new ClipboardFileSelection(this.fileNameFromUri(uri), uri, stat.size);
+      let fileName: string = file.name.trim();
+      if (fileName.length === 0) {
+        fileName = this.fileNameFromUri(uri);
+      }
+      return new ClipboardFileSelection(fileName, uri, stat.size);
     } finally {
       fileIo.closeSync(file.fd);
     }

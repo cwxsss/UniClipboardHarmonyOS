@@ -1,6 +1,8 @@
 use std::collections::{HashMap, VecDeque};
+use std::io::Read;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use napi_derive_ohos::napi;
 use napi_ohos::bindgen_prelude::Uint8Array;
@@ -10,7 +12,13 @@ use uc_mobile::{
     ServerConfig as MobileServerConfig, SseHandle, SseListener,
 };
 use uc_mobile::client::{HistoryQuery, HistoryRecord};
-use uc_application::facade::space_setup::{InitializeSpaceInput, RedeemPairingInvitationInput};
+use uc_application::facade::space_setup::{
+    InitializeSpaceInput, RedeemPairingInvitationInput, SwitchSpaceInput,
+};
+use uc_application::facade::mobile_sync::{
+    RegisterMobileShortcutDeviceInput, RevokeMobileDeviceInput,
+    UpdateMobileSyncSettingsInput,
+};
 use uc_application::facade::{
     decode_v3_bytes_to_snapshot, decode_v3_bytes_to_snapshot_and_blob_refs, BatchPosition,
     ClipboardHostEvent, ClipboardOriginKind, EmitError, FetchBlobToPathCommand,
@@ -19,10 +27,13 @@ use uc_application::facade::{
 };
 use uc_bootstrap::CliAppRuntime;
 use uc_core::ids::{DeviceId, EntryId, FormatId, RepresentationId};
+use uc_core::mobile_sync::MobileDeviceId;
 use uc_core::ports::ReachabilityState;
 use uc_core::{
     ClipboardChangeOrigin, MimeType, ObservedClipboardRepresentation, SystemClipboardSnapshot,
 };
+
+mod mobile_sync_server;
 
 static MOBILE_CLIENT: OnceLock<Arc<MobileSyncClient>> = OnceLock::new();
 static SSE_HANDLE: OnceLock<Mutex<Option<Arc<SseHandle>>>> = OnceLock::new();
@@ -34,6 +45,8 @@ static SPACE_KEEPALIVE_TASK: OnceLock<Mutex<Option<tokio::task::JoinHandle<()>>>
 static SPACE_MATERIALIZED_FILE_TASK: OnceLock<Mutex<Option<tokio::task::JoinHandle<()>>>> =
     OnceLock::new();
 static SPACE_KEEPALIVE_WAKE: OnceLock<Arc<tokio::sync::Notify>> = OnceLock::new();
+static SPACE_KEEPALIVE_FORCE_VERIFY: AtomicBool = AtomicBool::new(false);
+static SPACE_BACKGROUND_SYNC_ACTIVE: AtomicBool = AtomicBool::new(false);
 static SPACE_TEXT_EVENTS: OnceLock<Mutex<VecDeque<SpaceTextEventData>>> = OnceLock::new();
 static SPACE_IMAGE_EVENTS: OnceLock<Mutex<VecDeque<SpaceImageEventData>>> = OnceLock::new();
 static SPACE_FILE_EVENTS: OnceLock<Mutex<VecDeque<SpaceFileEventData>>> = OnceLock::new();
@@ -54,6 +67,7 @@ const SPACE_FILE_CHUNK_BYTES: usize = 512 * 1024;
 const SPACE_FILE_HEADER_BYTES: usize = 27;
 const SPACE_DEVICE_PROFILE_MIME: &str = "application/x-uniclipboard-device-profile";
 const SPACE_FILE_MIME: &str = "application/x-uniclipboard-file";
+const SPACE_BACKGROUND_VERIFY_INTERVAL: Duration = Duration::from_secs(15);
 
 struct HarmonyPlatformBridge;
 
@@ -325,6 +339,47 @@ pub struct NativeSpaceDevice {
     pub state: String,
 }
 
+#[napi(object)]
+pub struct NativeMobileSyncStatus {
+    pub enabled: bool,
+    pub lan_listen_enabled: bool,
+    pub running: bool,
+    pub port: u32,
+    pub urls: Vec<String>,
+}
+
+#[napi(object)]
+pub struct NativeMobileSyncDevice {
+    pub device_id: String,
+    pub label: String,
+    pub username: String,
+    pub online: bool,
+    pub created_at_ms: f64,
+    pub last_seen_at_ms: f64,
+    pub last_seen_ip: String,
+}
+
+#[napi(object)]
+pub struct NativeMobileSyncCredential {
+    pub device_id: String,
+    pub label: String,
+    pub username: String,
+    pub password: String,
+    pub connect_uri: String,
+    pub urls: Vec<String>,
+}
+
+#[napi(object)]
+pub struct NativeMobileSyncInboundEvent {
+    pub kind: String,
+    pub text: String,
+    pub data_name: String,
+    pub mime_type: String,
+    pub data: Uint8Array,
+    pub content_id: String,
+    pub source_label: String,
+}
+
 impl From<NativeServerConfig> for MobileServerConfig {
     fn from(config: NativeServerConfig) -> Self {
         Self {
@@ -407,6 +462,28 @@ fn space_file_assemblies() -> &'static Mutex<HashMap<String, SpaceFileAssembly>>
 
 fn space_device_types() -> &'static Mutex<HashMap<String, String>> {
     SPACE_DEVICE_TYPES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn clear_space_transient_state() {
+    if let Ok(mut queue) = space_text_events().lock() {
+        queue.clear();
+    }
+    if let Ok(mut queue) = space_image_events().lock() {
+        queue.clear();
+    }
+    if let Ok(mut queue) = space_file_events().lock() {
+        queue.clear();
+    }
+    if let Ok(mut queue) = space_file_status_events().lock() {
+        queue.clear();
+    }
+    if let Ok(mut assemblies) = space_file_assemblies().lock() {
+        assemblies.clear();
+    }
+    if let Ok(mut device_types) = space_device_types().lock() {
+        device_types.clear();
+    }
+    SPACE_PROFILE_ANNOUNCED.store(false, Ordering::Release);
 }
 
 fn space_local_device_type() -> &'static Mutex<String> {
@@ -659,6 +736,19 @@ fn history_kind(kind: ClipboardKind) -> String {
     .to_string()
 }
 
+fn parse_history_kind(kind: &str) -> Result<ClipboardKind> {
+    match kind {
+        "Text" => Ok(ClipboardKind::Text),
+        "Image" => Ok(ClipboardKind::Image),
+        "File" => Ok(ClipboardKind::File),
+        "Group" | "Folder" => Ok(ClipboardKind::Group),
+        _ => Err(Error::new(
+            Status::InvalidArg,
+            format!("unsupported clipboard history kind: {kind}"),
+        )),
+    }
+}
+
 fn native_history_item(record: HistoryRecord) -> NativeHistoryItem {
     let timestamp_ms = record
         .last_modified_ms
@@ -746,13 +836,39 @@ pub async fn start_space_node(
         // Mobile hosts do not run the desktop daemon's peer scheduler. Keep
         // dialing from the native node itself so connection recovery does not
         // depend on which ArkUI page is visible or which device opened first.
+        let mut last_background_verify: Option<Instant> = None;
         loop {
+            let background_active = SPACE_BACKGROUND_SYNC_ACTIVE.load(Ordering::Acquire);
+            let periodic_force_verify = if background_active {
+                match last_background_verify {
+                    Some(last_verify) => {
+                        last_verify.elapsed() >= SPACE_BACKGROUND_VERIFY_INTERVAL
+                    }
+                    None => true,
+                }
+            } else {
+                last_background_verify = None;
+                false
+            };
             if let Ok(peers) = keepalive_facade.list_paired_peer_device_ids().await {
+                let requested_force_verify =
+                    SPACE_KEEPALIVE_FORCE_VERIFY.swap(false, Ordering::AcqRel);
+                let force_verify = requested_force_verify || periodic_force_verify;
+                if force_verify {
+                    last_background_verify = Some(Instant::now());
+                }
                 let mut set = tokio::task::JoinSet::new();
                 for peer in peers {
                     let facade = keepalive_facade.clone();
                     set.spawn(async move {
-                        let _ = facade.ensure_reachable_one(&peer).await;
+                        let result = if force_verify {
+                            facade.verify_reachable_one(&peer).await
+                        } else {
+                            facade.ensure_reachable_one(&peer).await
+                        };
+                        if let Err(error) = result {
+                            eprintln!("UniClipboard peer recovery failed: {error}");
+                        }
                     });
                 }
                 while set.join_next().await.is_some() {}
@@ -1064,11 +1180,27 @@ pub async fn get_space_status() -> Result<NativeSpaceStatus> {
     current_space_status().await
 }
 
-/// Wake the native peer scheduler immediately, for example when the
-/// HarmonyOS ability returns to the foreground or network access resumes.
+/// Wake the native peer scheduler and force-revalidate cached connections.
+/// HarmonyOS calls this after returning to the foreground so a connection
+/// invalidated by lock-screen network suspension is redialed immediately
+/// instead of waiting for the 30-second fast-path TTL or QUIC idle timeout.
 #[napi]
 pub fn wake_space_connections() {
+    SPACE_KEEPALIVE_FORCE_VERIFY.store(true, Ordering::Release);
     space_keepalive_wake().notify_one();
+}
+
+/// Enable or disable the stricter background connection monitor. While a
+/// HarmonyOS long-running task is active, cached peer connections are
+/// revalidated every 15 seconds so lock-screen network suspension cannot
+/// leave the application silently attached to a dead QUIC connection.
+#[napi]
+pub fn set_space_background_mode(active: bool) {
+    SPACE_BACKGROUND_SYNC_ACTIVE.store(active, Ordering::Release);
+    if active {
+        SPACE_KEEPALIVE_FORCE_VERIFY.store(true, Ordering::Release);
+        space_keepalive_wake().notify_one();
+    }
 }
 
 /// Actively dial one paired space device instead of waiting for the periodic
@@ -1170,6 +1302,25 @@ pub async fn get_space_devices() -> Result<Vec<NativeSpaceDevice>> {
     Ok(devices)
 }
 
+/// Remove a paired device from the current space. The target device will be
+/// evicted from the member roster, its peer address cache, and the trusted
+/// peer table so it must re-pair to rejoin.
+#[napi]
+pub async fn revoke_space_member(device_id: String) -> Result<()> {
+    let app_facade = {
+        let guard = space_runtime().lock().await;
+        guard
+            .as_ref()
+            .map(|runtime| runtime.app_facade.clone())
+            .ok_or_else(|| Error::new(Status::GenericFailure, "space node has not been started"))?
+    };
+    app_facade
+        .revoke_member(&device_id)
+        .await
+        .map_err(space_error)?;
+    Ok(())
+}
+
 /// Initialize a new encrypted UniClipboard space on this device. Invitation
 /// issuance is intentionally a separate action so the owner can retry or
 /// refresh a code without attempting to initialize the space again.
@@ -1264,6 +1415,114 @@ pub async fn join_space(
     Ok(NativeJoinSpaceResult {
         space_id: result.space_id.to_string(),
         sponsor_device_id: result.sponsor_device_id.to_string(),
+        self_device_id: result.self_device_id.to_string(),
+    })
+}
+
+/// Switch an already configured device to another encrypted space. Local
+/// clipboard history is preserved by the application layer's crash-safe
+/// re-encryption migration; the invitation must be issued by a member of the
+/// target space.
+#[napi]
+pub async fn switch_space(
+    invitation_code: String,
+    new_passphrase: String,
+) -> Result<NativeJoinSpaceResult> {
+    let code = invitation_code.trim().to_ascii_uppercase();
+    if code.is_empty() || new_passphrase.is_empty() {
+        return Err(Error::new(
+            Status::InvalidArg,
+            "invitation code and target space passphrase are required",
+        ));
+    }
+    let app_facade = {
+        let guard = space_runtime().lock().await;
+        guard
+            .as_ref()
+            .map(|runtime| runtime.app_facade.clone())
+            .ok_or_else(|| {
+                Error::new(Status::GenericFailure, "space node has not been started")
+            })?
+    };
+    let result = app_facade
+        .switch_space(SwitchSpaceInput {
+            code,
+            new_passphrase,
+        })
+        .await
+        .map_err(space_error)?;
+
+    // Do not surface already-buffered clipboard frames or remote device
+    // profile announcements from the previous space after the selector moves
+    // to the new active space.
+    clear_space_transient_state();
+    wake_space_connections();
+
+    Ok(NativeJoinSpaceResult {
+        space_id: result.space_id.to_string(),
+        sponsor_device_id: result.sponsor_device_id.to_string(),
+        self_device_id: result.self_device_id.to_string(),
+    })
+}
+
+/// Replace the currently active space with a newly self-owned space without
+/// uninstalling the application. Old peer membership/trust records are
+/// removed before the new owner record is created.
+#[napi]
+pub async fn replace_space(
+    passphrase: String,
+    device_name: String,
+) -> Result<NativeCreateSpaceResult> {
+    let name = device_name.trim().to_string();
+    if passphrase.len() < 8 || name.is_empty() {
+        return Err(Error::new(
+            Status::InvalidArg,
+            "space passphrase must contain at least 8 characters and device name is required",
+        ));
+    }
+    let app_facade = {
+        let guard = space_runtime().lock().await;
+        guard
+            .as_ref()
+            .map(|runtime| runtime.app_facade.clone())
+            .ok_or_else(|| {
+                Error::new(Status::GenericFailure, "space node has not been started")
+            })?
+    };
+
+    // Snapshot peer ids before reset. The local owner row is retained and
+    // overwritten by InitializeSpaceUseCase; every non-local row is revoked
+    // through the roster facade so member/address/trust invariants stay intact.
+    let roster = app_facade
+        .list_roster_entries()
+        .await
+        .map_err(space_error)?;
+    app_facade
+        .factory_reset_space()
+        .await
+        .map_err(space_error)?;
+    for entry in roster {
+        if !entry.is_local {
+            app_facade
+                .revoke_member(entry.device_id.as_str())
+                .await
+                .map_err(space_error)?;
+        }
+    }
+
+    let result = app_facade
+        .initialize_space(InitializeSpaceInput {
+            passphrase: passphrase.clone(),
+            passphrase_confirm: passphrase,
+            device_name: Some(name),
+        })
+        .await
+        .map_err(space_error)?;
+    clear_space_transient_state();
+    wake_space_connections();
+
+    Ok(NativeCreateSpaceResult {
+        space_id: result.space_id.to_string(),
         self_device_id: result.self_device_id.to_string(),
     })
 }
@@ -1616,6 +1875,7 @@ pub fn drain_space_file_status_events() -> Vec<NativeSpaceFileStatusEvent> {
 
 #[napi]
 pub async fn stop_space_node() {
+    mobile_sync_server::stop();
     abort_space_inbound_task();
     abort_space_keepalive_task();
     abort_space_materialized_file_task();
@@ -1661,6 +1921,267 @@ pub async fn stop_space_node() {
     if let Some(runtime) = runtime {
         runtime.shutdown().await;
     }
+}
+
+fn mobile_sync_error(error: impl std::fmt::Display) -> Error {
+    Error::new(Status::GenericFailure, error.to_string())
+}
+
+async fn mobile_sync_app_facade() -> Result<Arc<uc_application::facade::AppFacade>> {
+    let guard = space_runtime().lock().await;
+    guard
+        .as_ref()
+        .map(|runtime| runtime.app_facade.clone())
+        .ok_or_else(|| Error::new(Status::GenericFailure, "native node is not ready"))
+}
+
+async fn mobile_sync_urls(
+    facade: &uc_application::facade::MobileSyncFacade,
+    port: u16,
+) -> Result<Vec<String>> {
+    let interfaces = facade
+        .list_lan_interfaces()
+        .await
+        .map_err(mobile_sync_error)?;
+    Ok(interfaces
+        .into_iter()
+        .map(|interface| format!("http://{}:{port}", interface.ipv4))
+        .collect())
+}
+
+/// Return persisted mobile-sync settings plus the actual in-process listener state.
+#[napi]
+pub async fn get_mobile_sync_server_status() -> Result<NativeMobileSyncStatus> {
+    let app_facade = mobile_sync_app_facade().await?;
+    let facade = app_facade
+        .mobile_sync
+        .get()
+        .cloned()
+        .ok_or_else(|| Error::new(Status::GenericFailure, "mobile sync is unavailable"))?;
+    let settings = facade.get_settings().await.map_err(mobile_sync_error)?;
+    let port = settings.lan_port.unwrap_or(42720);
+    let urls = mobile_sync_urls(&facade, port).await.unwrap_or_else(|_| Vec::new());
+    Ok(NativeMobileSyncStatus {
+        enabled: settings.enabled,
+        lan_listen_enabled: settings.lan_listen_enabled,
+        running: mobile_sync_server::running_port() == port,
+        port: u32::from(port),
+        urls,
+    })
+}
+
+/// Enable/disable the embedded SyncClipboard-compatible LAN HTTP server.
+#[napi]
+pub async fn set_mobile_sync_server_enabled(enabled: bool, port: u32) -> Result<NativeMobileSyncStatus> {
+    if port == 0 || port > u32::from(u16::MAX) {
+        return Err(Error::new(Status::InvalidArg, "port must be in 1..=65535"));
+    }
+    let port = port as u16;
+    let app_facade = mobile_sync_app_facade().await?;
+    let facade = app_facade
+        .mobile_sync
+        .get()
+        .cloned()
+        .ok_or_else(|| Error::new(Status::GenericFailure, "mobile sync is unavailable"))?;
+    facade
+        .update_settings(UpdateMobileSyncSettingsInput {
+            enabled: Some(enabled),
+            lan_listen_enabled: Some(enabled),
+            lan_advertise_ip: None,
+            lan_advertise_base_url: None,
+            lan_port: Some(Some(port)),
+        })
+        .await
+        .map_err(mobile_sync_error)?;
+    if enabled {
+        mobile_sync_server::start(app_facade, port)
+            .await
+            .map_err(mobile_sync_error)?;
+    } else {
+        mobile_sync_server::stop();
+    }
+    let urls = mobile_sync_urls(&facade, port).await.unwrap_or_else(|_| Vec::new());
+    Ok(NativeMobileSyncStatus {
+        enabled,
+        lan_listen_enabled: enabled,
+        running: enabled && mobile_sync_server::running_port() == port,
+        port: u32::from(port),
+        urls,
+    })
+}
+
+/// Create long-lived Basic Auth credentials and the official UniClipboard connect URI.
+#[napi]
+pub async fn register_mobile_sync_device(
+    label: String,
+    custom_username: String,
+    custom_password: String,
+    port: u32,
+) -> Result<NativeMobileSyncCredential> {
+    if port == 0 || port > u32::from(u16::MAX) {
+        return Err(Error::new(Status::InvalidArg, "port must be in 1..=65535"));
+    }
+    let port = port as u16;
+    let app_facade = mobile_sync_app_facade().await?;
+    let facade = app_facade
+        .mobile_sync
+        .get()
+        .cloned()
+        .ok_or_else(|| Error::new(Status::GenericFailure, "mobile sync is unavailable"))?;
+    facade
+        .update_settings(UpdateMobileSyncSettingsInput {
+            enabled: Some(true),
+            lan_listen_enabled: Some(true),
+            lan_advertise_ip: None,
+            lan_advertise_base_url: None,
+            lan_port: Some(Some(port)),
+        })
+        .await
+        .map_err(mobile_sync_error)?;
+    mobile_sync_server::start(app_facade, port)
+        .await
+        .map_err(mobile_sync_error)?;
+    let username = if custom_username.trim().is_empty() {
+        None
+    } else {
+        Some(custom_username.trim().to_string())
+    };
+    let password = if custom_password.is_empty() {
+        None
+    } else {
+        Some(custom_password)
+    };
+    let output = facade
+        .register_device(RegisterMobileShortcutDeviceInput {
+            label: label.trim().to_string(),
+            username,
+            password,
+        })
+        .await
+        .map_err(mobile_sync_error)?;
+    let payload = uc_mobile_proto::parse_mobile_sync_connect_uri(&output.connect_uri)
+        .map_err(mobile_sync_error)?;
+    Ok(NativeMobileSyncCredential {
+        device_id: output.device.device_id.into_string(),
+        label: output.device.label,
+        username: output.username,
+        password: output.password,
+        connect_uri: output.connect_uri,
+        urls: payload.urls,
+    })
+}
+
+#[napi]
+pub async fn list_mobile_sync_devices() -> Result<Vec<NativeMobileSyncDevice>> {
+    let app_facade = mobile_sync_app_facade().await?;
+    let facade = app_facade
+        .mobile_sync
+        .get()
+        .cloned()
+        .ok_or_else(|| Error::new(Status::GenericFailure, "mobile sync is unavailable"))?;
+    let devices = facade.list_devices().await.map_err(mobile_sync_error)?;
+    Ok(devices
+        .into_iter()
+        .map(|device| {
+            let device_id: String = device.device_id.into_string();
+            let live_activity_ms: u64 = mobile_sync_server::device_last_activity_ms(&device_id);
+            let stored_activity_ms: u64 = device.last_seen_at_ms.unwrap_or(0).max(0) as u64;
+            NativeMobileSyncDevice {
+                online: mobile_sync_server::is_device_online(&device_id),
+                device_id,
+                label: device.label,
+                username: device.username,
+                created_at_ms: device.created_at_ms as f64,
+                last_seen_at_ms: live_activity_ms.max(stored_activity_ms) as f64,
+                last_seen_ip: device.last_seen_ip.unwrap_or_default(),
+            }
+        })
+        .collect())
+}
+
+#[napi]
+pub async fn revoke_mobile_sync_device(device_id: String) -> Result<()> {
+    let app_facade = mobile_sync_app_facade().await?;
+    let facade = app_facade
+        .mobile_sync
+        .get()
+        .cloned()
+        .ok_or_else(|| Error::new(Status::GenericFailure, "mobile sync is unavailable"))?;
+    facade
+        .revoke_device(RevokeMobileDeviceInput {
+            device_id: MobileDeviceId::new(device_id),
+        })
+        .await
+        .map_err(mobile_sync_error)
+}
+
+#[napi]
+pub fn publish_mobile_sync_text(text: String) -> Result<String> {
+    if mobile_sync_server::running_port() == 0 {
+        return Err(Error::new(Status::GenericFailure, "mobile sync server is not running"));
+    }
+    Ok(mobile_sync_server::publish_text(text))
+}
+
+#[napi]
+pub fn publish_mobile_sync_image(data: Uint8Array, mime_type: String) -> Result<String> {
+    if mobile_sync_server::running_port() == 0 {
+        return Err(Error::new(Status::GenericFailure, "mobile sync server is not running"));
+    }
+    Ok(mobile_sync_server::publish_data(
+        "image",
+        "image.png".to_string(),
+        "image.png".to_string(),
+        mime_type,
+        data.to_vec(),
+    ))
+}
+
+#[napi]
+pub fn publish_mobile_sync_file_from_fd(
+    fd: i32,
+    file_size: f64,
+    file_name: String,
+    mime_type: String,
+) -> Result<String> {
+    if mobile_sync_server::running_port() == 0 {
+        return Err(Error::new(Status::GenericFailure, "mobile sync server is not running"));
+    }
+    if file_size <= 0.0 || file_size > (64 * 1024 * 1024) as f64 {
+        return Err(Error::new(Status::InvalidArg, "file must be between 1 byte and 64 MiB"));
+    }
+    let mut file = std::fs::File::open(format!("/proc/self/fd/{fd}"))
+        .map_err(mobile_sync_error)?;
+    let mut data = Vec::with_capacity(file_size as usize);
+    file.take(file_size as u64)
+        .read_to_end(&mut data)
+        .map_err(mobile_sync_error)?;
+    if data.len() != file_size as usize {
+        return Err(Error::new(Status::GenericFailure, "selected file changed while reading"));
+    }
+    Ok(mobile_sync_server::publish_data(
+        "file",
+        file_name.clone(),
+        file_name,
+        mime_type,
+        data,
+    ))
+}
+
+#[napi]
+pub fn drain_mobile_sync_inbound_events() -> Vec<NativeMobileSyncInboundEvent> {
+    mobile_sync_server::drain_events()
+        .into_iter()
+        .map(|event| NativeMobileSyncInboundEvent {
+            kind: event.kind,
+            text: event.text,
+            data_name: event.data_name,
+            mime_type: event.mime_type,
+            data: event.data.into(),
+            content_id: event.content_id,
+            source_label: event.source_label,
+        })
+        .collect()
 }
 
 #[napi]
@@ -1776,6 +2297,59 @@ pub async fn put_image(config: NativeServerConfig, data: Uint8Array) -> Result<O
         .map_err(sync_error)
 }
 
+/// Upload a user-selected file to the configured desktop mobile-sync endpoint
+/// and activate it there. The descriptor remains owned by ArkTS; this bridge
+/// only reads it through `/proc/self/fd/<n>` while the async call is pending.
+#[napi]
+pub async fn put_file_from_fd(
+    config: NativeServerConfig,
+    fd: i32,
+    file_size: f64,
+    file_name: String,
+) -> Result<Option<String>> {
+    if fd < 0 || !file_size.is_finite() || file_size <= 0.0 {
+        return Err(Error::new(Status::InvalidArg, "valid non-empty file is required"));
+    }
+    if file_size > MAX_SPACE_FILE_BYTES as f64 {
+        return Err(Error::new(
+            Status::InvalidArg,
+            "file exceeds the 64 MiB mobile relay limit",
+        ));
+    }
+    let normalized_name = file_name.trim();
+    if normalized_name.is_empty() {
+        return Err(Error::new(Status::InvalidArg, "valid file name is required"));
+    }
+
+    let fd_path = std::path::PathBuf::from(format!("/proc/self/fd/{fd}"));
+    let bytes = tokio::fs::read(fd_path).await.map_err(space_error)?;
+    if bytes.is_empty() {
+        return Err(Error::new(Status::InvalidArg, "file is empty"));
+    }
+    if bytes.len() > MAX_SPACE_FILE_BYTES {
+        return Err(Error::new(
+            Status::InvalidArg,
+            "file exceeds the 64 MiB mobile relay limit",
+        ));
+    }
+
+    let client = mobile_client()?;
+    let (entry, payload) = uc_mobile_proto::publish_file(normalized_name, &bytes);
+    let meta = ClipboardMeta {
+        kind: ClipboardKind::File,
+        text: entry.text,
+        data_name: entry.data_name,
+        has_data: entry.has_data,
+        size: entry.size.unwrap_or(0).max(0) as u64,
+        hash: entry.hash,
+        content_id: None,
+    };
+    client
+        .put_clipboard(config.into(), meta, Some(payload))
+        .await
+        .map_err(sync_error)
+}
+
 #[napi]
 pub async fn query_text_history(
     config: NativeServerConfig,
@@ -1807,6 +2381,55 @@ pub async fn query_text_history(
         .filter(|record| !record.is_deleted && record.kind == ClipboardKind::Text)
         .map(native_history_item)
         .collect())
+}
+
+#[napi]
+pub async fn query_clipboard_history(
+    config: NativeServerConfig,
+    page: i32,
+    search_text: String,
+    starred_only: bool,
+) -> Result<Vec<NativeHistoryItem>> {
+    let client = mobile_client()?;
+    let query = HistoryQuery {
+        page: Some(i64::from(page.max(1))),
+        before_ms: None,
+        after_ms: None,
+        modified_after_ms: None,
+        types: Some(1 | 2 | 4 | 8),
+        search_text: if search_text.trim().is_empty() {
+            None
+        } else {
+            Some(search_text)
+        },
+        starred: if starred_only { Some(true) } else { None },
+        sort_by_last_accessed: None,
+    };
+    let records = client
+        .query_history(config.into(), query)
+        .await
+        .map_err(sync_error)?;
+    Ok(records
+        .into_iter()
+        .filter(|record| !record.is_deleted)
+        .map(native_history_item)
+        .collect())
+}
+
+#[napi]
+pub async fn get_history_payload(
+    config: NativeServerConfig,
+    kind: String,
+    hash: String,
+) -> Result<Uint8Array> {
+    let parsed_kind = parse_history_kind(kind.trim())?;
+    let profile_id = format!("{}-{hash}", history_kind(parsed_kind));
+    let client = mobile_client()?;
+    let data = client
+        .get_history_payload(config.into(), profile_id)
+        .await
+        .map_err(sync_error)?;
+    Ok(data.into())
 }
 
 #[napi]
@@ -1914,6 +2537,86 @@ pub async fn delete_text_history(
         },
     )
     .await
+}
+
+#[napi]
+pub async fn set_history_starred(
+    config: NativeServerConfig,
+    kind: String,
+    hash: String,
+    starred: bool,
+    version: f64,
+) -> Result<NativeHistoryItem> {
+    patch_history(
+        config,
+        kind,
+        hash,
+        HistoryPatch {
+            starred: Some(starred),
+            pinned: None,
+            is_delete: None,
+            version: Some(version.max(0.0) as i64),
+        },
+    )
+    .await
+}
+
+#[napi]
+pub async fn set_history_pinned(
+    config: NativeServerConfig,
+    kind: String,
+    hash: String,
+    pinned: bool,
+    version: f64,
+) -> Result<NativeHistoryItem> {
+    patch_history(
+        config,
+        kind,
+        hash,
+        HistoryPatch {
+            starred: None,
+            pinned: Some(pinned),
+            is_delete: None,
+            version: Some(version.max(0.0) as i64),
+        },
+    )
+    .await
+}
+
+#[napi]
+pub async fn delete_history(
+    config: NativeServerConfig,
+    kind: String,
+    hash: String,
+    version: f64,
+) -> Result<NativeHistoryItem> {
+    patch_history(
+        config,
+        kind,
+        hash,
+        HistoryPatch {
+            starred: None,
+            pinned: None,
+            is_delete: Some(true),
+            version: Some(version.max(0.0) as i64),
+        },
+    )
+    .await
+}
+
+async fn patch_history(
+    config: NativeServerConfig,
+    kind: String,
+    hash: String,
+    patch: HistoryPatch,
+) -> Result<NativeHistoryItem> {
+    let parsed_kind = parse_history_kind(kind.trim())?;
+    let client = mobile_client()?;
+    let record = client
+        .patch_history(config.into(), parsed_kind, hash, patch)
+        .await
+        .map_err(sync_error)?;
+    Ok(native_history_item(record))
 }
 
 async fn patch_text_history(

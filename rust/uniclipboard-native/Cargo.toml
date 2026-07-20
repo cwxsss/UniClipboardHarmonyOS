@@ -16,7 +16,8 @@ uc-mobile-proto = { path = "../space-core/crates/uc-mobile-proto" }
 uc-application = { path = "../space-core/crates/uc-application" }
 uc-bootstrap = { path = "../space-core/crates/uc-bootstrap", features = ["blobs"] }
 uc-core = { path = "../space-core/crates/uc-core" }
-tokio = { version = "1", features = ["rt", "sync", "time"] }
+uc-content-hash = { path = "../space-core/crates/uc-content-hash" }
+tokio = { version = "1", features = ["rt", "sync", "time", "net", "io-util"] }
 
 [build-dependencies]
 napi-build-ohos = "1.0"

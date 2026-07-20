@@ -17,14 +17,21 @@ import { AbilityConstant, ConfigurationConstant, UIAbility, Want } from '@kit.Ab
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
-import { stopSpaceNode, wakeSpaceConnections } from 'uniclipboard_native';
+import { setSpaceBackgroundMode, stopSpaceNode, wakeSpaceConnections } from 'uniclipboard_native';
 import { AppearanceStorageService } from '../service/AppearanceStorageService';
+import {
+  BackgroundSyncPreferenceService,
+  BackgroundSyncTaskService
+} from '../service/BackgroundSyncService';
 
 const DOMAIN = 0x0000;
 
 export default class EntryAbility extends UIAbility {
   private mainWindow: window.Window | null = null;
   private appearanceStorageService: AppearanceStorageService = new AppearanceStorageService();
+  private backgroundSyncPreferenceService: BackgroundSyncPreferenceService =
+    new BackgroundSyncPreferenceService();
+  private backgroundSyncTaskService: BackgroundSyncTaskService = new BackgroundSyncTaskService();
 
   private avoidAreaChangeCallback = (data: window.AvoidAreaOptions): void => {
     if (this.mainWindow === null) {
@@ -39,6 +46,9 @@ export default class EntryAbility extends UIAbility {
   };
 
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
+    let backgroundSyncEnabled: boolean = this.backgroundSyncPreferenceService.load(this.context);
+    AppStorage.setOrCreate('backgroundSyncEnabled', backgroundSyncEnabled);
+    AppStorage.setOrCreate('spaceJoined', false);
     try {
       let appearanceMode: string = this.appearanceStorageService.load(this.context);
       this.context.getApplicationContext().setColorMode(
@@ -50,6 +60,10 @@ export default class EntryAbility extends UIAbility {
   }
 
   onDestroy(): void {
+    setSpaceBackgroundMode(false);
+    this.backgroundSyncTaskService.stop(this.context).catch((): void => {
+      hilog.warn(DOMAIN, 'testTag', 'Background sync task shutdown did not complete cleanly.');
+    });
     stopSpaceNode().catch((): void => {
       hilog.warn(DOMAIN, 'testTag', 'Space node shutdown did not complete cleanly.');
     });
@@ -82,15 +96,26 @@ export default class EntryAbility extends UIAbility {
   }
 
   onWindowStageDestroy(): void {
-    if (this.mainWindow !== null) {
-      this.mainWindow.off('avoidAreaChange', this.avoidAreaChangeCallback);
-      this.mainWindow = null;
+    let mainWindow: window.Window | null = this.mainWindow;
+    this.mainWindow = null;
+    if (mainWindow !== null) {
+      try {
+        mainWindow.off('avoidAreaChange', this.avoidAreaChangeCallback);
+      } catch (error) {
+        // The system can invalidate the native window before this lifecycle
+        // callback runs. Listener cleanup must not terminate the ability.
+        hilog.warn(DOMAIN, 'testTag', 'Avoid-area listener was already released with the window.');
+      }
     }
     // Main window is destroyed, release UI related resources
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onWindowStageDestroy');
   }
 
   onForeground(): void {
+    setSpaceBackgroundMode(false);
+    this.backgroundSyncTaskService.stop(this.context).catch((): void => {
+      hilog.warn(DOMAIN, 'testTag', 'Background sync task cleanup did not complete cleanly.');
+    });
     // HarmonyOS may suspend timers and network work while the ability is in
     // background. Wake the native peer scheduler as soon as the app returns.
     wakeSpaceConnections();
@@ -98,7 +123,19 @@ export default class EntryAbility extends UIAbility {
   }
 
   onBackground(): void {
-    // Ability has back to background
+    let backgroundSyncEnabled: boolean | undefined = AppStorage.get<boolean>('backgroundSyncEnabled');
+    let spaceJoined: boolean | undefined = AppStorage.get<boolean>('spaceJoined');
+    if (backgroundSyncEnabled === true && spaceJoined === true) {
+      setSpaceBackgroundMode(true);
+      this.backgroundSyncTaskService.start(this.context).catch((): void => {
+        hilog.warn(DOMAIN, 'testTag', 'Background sync task startup did not complete cleanly.');
+      });
+    } else {
+      setSpaceBackgroundMode(false);
+      this.backgroundSyncTaskService.stop(this.context).catch((): void => {
+        hilog.warn(DOMAIN, 'testTag', 'Background sync task cleanup did not complete cleanly.');
+      });
+    }
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onBackground');
   }
 }

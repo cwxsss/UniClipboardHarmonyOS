@@ -43,6 +43,43 @@ export interface NativeJoinSpaceResult {
   selfDeviceId: string
 }
 
+export interface NativeMobileSyncCredential {
+  deviceId: string
+  label: string
+  username: string
+  password: string
+  connectUri: string
+  urls: Array<string>
+}
+
+export interface NativeMobileSyncDevice {
+  deviceId: string
+  label: string
+  username: string
+  online: boolean
+  createdAtMs: number
+  lastSeenAtMs: number
+  lastSeenIp: string
+}
+
+export interface NativeMobileSyncInboundEvent {
+  kind: string
+  text: string
+  dataName: string
+  mimeType: string
+  data: Uint8Array
+  contentId: string
+  sourceLabel: string
+}
+
+export interface NativeMobileSyncStatus {
+  enabled: boolean
+  lanListenEnabled: boolean
+  running: boolean
+  port: number
+  urls: Array<string>
+}
+
 export interface NativeServerConfig {
   baseUrl: string
   username: string
@@ -124,7 +161,11 @@ export declare function copySpaceFileToFd(sourcePath: string, targetFd: number):
   */
 export declare function createSpace(passphrase: string, deviceName: string): Promise<NativeCreateSpaceResult>
 
+export declare function deleteHistory(config: NativeServerConfig, kind: string, hash: string, version: number): Promise<NativeHistoryItem>
+
 export declare function deleteTextHistory(config: NativeServerConfig, hash: string, version: number): Promise<NativeHistoryItem>
+
+export declare function drainMobileSyncInboundEvents(): Array<NativeMobileSyncInboundEvent>
 
 /** Drain file clipboard frames received from peers since the previous call. */
 export declare function drainSpaceFileEvents(): Array<NativeSpaceFileEvent>
@@ -140,9 +181,14 @@ export declare function drainSpaceTextEvents(): Array<NativeSpaceTextEvent>
 
 export declare function drainSseEvents(): Array<NativeSseEvent>
 
+export declare function getHistoryPayload(config: NativeServerConfig, kind: string, hash: string): Promise<Uint8Array>
+
 export declare function getLatestContent(config: NativeServerConfig): Promise<NativeClipboardContent>
 
 export declare function getLatestText(config: NativeServerConfig): Promise<LatestText>
+
+/** Return persisted mobile-sync settings plus the actual in-process listener state. */
+export declare function getMobileSyncServerStatus(): Promise<NativeMobileSyncStatus>
 
 /**
   * Return the persisted member roster enriched with live reachability and the
@@ -157,15 +203,51 @@ export declare function issueSpaceInvitation(): Promise<NativeSpaceInvitation>
 
 export declare function joinSpace(invitationCode: string, passphrase: string, deviceName: string): Promise<NativeJoinSpaceResult>
 
+export declare function listMobileSyncDevices(): Promise<Array<NativeMobileSyncDevice>>
+
 export declare function parseConnectUri(uri: string): ConnectPayload
 
 export declare function probeServer(config: NativeServerConfig): Promise<void>
+
+export declare function publishMobileSyncFileFromFd(fd: number, fileSize: number, fileName: string, mimeType: string): string
+
+export declare function publishMobileSyncImage(data: Uint8Array, mimeType: string): string
+
+export declare function publishMobileSyncText(text: string): string
+
+/**
+  * Upload a user-selected file to the configured desktop mobile-sync endpoint
+  * and activate it there. The descriptor remains owned by ArkTS; this bridge
+  * only reads it through `/proc/self/fd/<n>` while the async call is pending.
+  */
+export declare function putFileFromFd(config: NativeServerConfig, fd: number, fileSize: number, fileName: string): Promise<string | null>
 
 export declare function putImage(config: NativeServerConfig, data: Uint8Array): Promise<string | null>
 
 export declare function putText(config: NativeServerConfig, text: string): Promise<string | null>
 
+export declare function queryClipboardHistory(config: NativeServerConfig, page: number, searchText: string, starredOnly: boolean): Promise<Array<NativeHistoryItem>>
+
 export declare function queryTextHistory(config: NativeServerConfig, page: number, searchText: string, starredOnly: boolean): Promise<Array<NativeHistoryItem>>
+
+/** Create long-lived Basic Auth credentials and the official UniClipboard connect URI. */
+export declare function registerMobileSyncDevice(label: string, customUsername: string, customPassword: string, port: number): Promise<NativeMobileSyncCredential>
+
+/**
+  * Replace the currently active space with a newly self-owned space without
+  * uninstalling the application. Old peer membership/trust records are
+  * removed before the new owner record is created.
+  */
+export declare function replaceSpace(passphrase: string, deviceName: string): Promise<NativeCreateSpaceResult>
+
+export declare function revokeMobileSyncDevice(deviceId: string): Promise<void>
+
+/**
+  * Remove a paired device from the current space. The target device will be
+  * evicted from the member roster, its peer address cache, and the trusted
+  * peer table so it must re-pair to rejoin.
+  */
+export declare function revokeSpaceMember(deviceId: string): Promise<void>
 
 /** Dispatch one user-selected file through the joined encrypted space in bounded chunks. */
 export declare function sendSpaceFile(data: Uint8Array, fileName: string): Promise<number>
@@ -190,6 +272,21 @@ export declare function sendSpaceImage(data: Uint8Array, mimeType: string): Prom
   */
 export declare function sendSpaceText(text: string): Promise<number>
 
+export declare function setHistoryPinned(config: NativeServerConfig, kind: string, hash: string, pinned: boolean, version: number): Promise<NativeHistoryItem>
+
+export declare function setHistoryStarred(config: NativeServerConfig, kind: string, hash: string, starred: boolean, version: number): Promise<NativeHistoryItem>
+
+/** Enable/disable the embedded SyncClipboard-compatible LAN HTTP server. */
+export declare function setMobileSyncServerEnabled(enabled: boolean, port: number): Promise<NativeMobileSyncStatus>
+
+/**
+  * Enable or disable the stricter background connection monitor. While a
+  * HarmonyOS long-running task is active, cached peer connections are
+  * revalidated every 15 seconds so lock-screen network suspension cannot
+  * leave the application silently attached to a dead QUIC connection.
+  */
+export declare function setSpaceBackgroundMode(active: boolean): void
+
 export declare function setTextHistoryPinned(config: NativeServerConfig, hash: string, pinned: boolean, version: number): Promise<NativeHistoryItem>
 
 export declare function setTextHistoryStarred(config: NativeServerConfig, hash: string, starred: boolean, version: number): Promise<NativeHistoryItem>
@@ -209,7 +306,17 @@ export declare function stopSpaceNode(): Promise<void>
 export declare function stopSse(): void
 
 /**
-  * Wake the native peer scheduler immediately, for example when the
-  * HarmonyOS ability returns to the foreground or network access resumes.
+  * Switch an already configured device to another encrypted space. Local
+  * clipboard history is preserved by the application layer's crash-safe
+  * re-encryption migration; the invitation must be issued by a member of the
+  * target space.
+  */
+export declare function switchSpace(invitationCode: string, newPassphrase: string): Promise<NativeJoinSpaceResult>
+
+/**
+  * Wake the native peer scheduler and force-revalidate cached connections.
+  * HarmonyOS calls this after returning to the foreground so a connection
+  * invalidated by lock-screen network suspension is redialed immediately
+  * instead of waiting for the 30-second fast-path TTL or QUIC idle timeout.
   */
 export declare function wakeSpaceConnections(): void

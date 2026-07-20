@@ -387,10 +387,17 @@ impl SpaceSetupFacade {
             return Ok(false);
         }
 
-        // The adapter keys off the current profile, so the `SpaceId`
-        // passed here is an opaque handle rather than a lookup key.
-        // Minting a fresh UUID matches how A2 `unlock` does it.
-        let space_id = SpaceId::new();
+        // Session crypto is profile-scoped, but the `ActiveSpace` identity is
+        // not an opaque handle: peers must retain the exact space id accepted
+        // during initialize/join. Re-minting it here makes every process start
+        // appear to belong to a different space even though the key and member
+        // roster are unchanged. Legacy/incomplete setup records without an id
+        // cannot be resumed safely; require the user to repair/rejoin instead
+        // of silently inventing a new space.
+        let Some(space_id) = status.space_id else {
+            warn!("setup is marked complete but has no persisted space id; skipping session resume");
+            return Ok(false);
+        };
         let resumed = match self.resume_session.try_resume_session(&space_id).await {
             Ok(Some(_)) => true,
             // Keyslot missing despite has_completed == true — treat
@@ -774,6 +781,16 @@ impl SpaceSetupFacade {
         self.presence.ensure_reachable(device).await
     }
 
+    /// Force-revalidate one peer, bypassing the cached live-connection fast
+    /// path. Mobile hosts use this after returning from a suspended network
+    /// state, where QUIC may not have observed the stale connection yet.
+    pub async fn verify_reachable_one(
+        &self,
+        device: &DeviceId,
+    ) -> Result<ReachabilityState, PresenceError> {
+        self.presence.verify_reachable(device).await
+    }
+
     /// F2 · Tear down facade-owned background work cleanly on app exit.
     ///
     /// Slice 4 P5c: 历史上还会调 `network_control.stop_network()`,libp2p 走
@@ -872,6 +889,8 @@ mod tests {
         unlock_err: StdMutex<Option<SpaceAccessError>>,
         factory_reset_calls: StdMutex<u32>,
         factory_reset_err: StdMutex<Option<SpaceAccessError>>,
+        resume_returns_session: StdMutex<bool>,
+        resumed_space_id: StdMutex<Option<SpaceId>>,
     }
 
     #[async_trait]
@@ -923,9 +942,14 @@ mod tests {
     impl ResumeSpaceSessionPort for FakeSpaceAccess {
         async fn try_resume_session(
             &self,
-            _space_id: &SpaceId,
+            space_id: &SpaceId,
         ) -> Result<Option<ActiveSpace>, SpaceAccessError> {
-            Ok(None)
+            *self.resumed_space_id.lock().unwrap() = Some(space_id.clone());
+            if *self.resume_returns_session.lock().unwrap() {
+                Ok(Some(ActiveSpace::new(space_id.clone())))
+            } else {
+                Ok(None)
+            }
         }
     }
     #[async_trait]
@@ -2054,5 +2078,30 @@ mod tests {
         let resumed = facade.try_resume_session().await.expect("resume ok");
         // FakeSpaceAccess.try_resume_session 默认 Ok(None) → "nothing to resume"
         assert!(!resumed);
+    }
+
+    #[tokio::test]
+    async fn try_resume_session_reuses_persisted_space_id() {
+        let persisted_space_id = SpaceId::new();
+        let setup_status = InMemorySetupStatus::default();
+        *setup_status.status.lock().unwrap() = SetupStatus {
+            has_completed: true,
+            space_id: Some(persisted_space_id.clone()),
+        };
+        let space_access = Arc::new(FakeSpaceAccess::default());
+        *space_access.resume_returns_session.lock().unwrap() = true;
+        let (facade, _inv, _peer) = make_facade(
+            space_access.clone(),
+            Arc::new(setup_status),
+            Arc::new(InMemorySettings::default()),
+        );
+
+        let resumed = facade.try_resume_session().await.expect("resume ok");
+
+        assert!(resumed);
+        assert_eq!(
+            space_access.resumed_space_id.lock().unwrap().as_ref(),
+            Some(&persisted_space_id)
+        );
     }
 }

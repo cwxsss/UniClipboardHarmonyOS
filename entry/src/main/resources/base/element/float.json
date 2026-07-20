@@ -3,6 +3,86 @@
     {
       "name": "page_text_font_size",
       "value": "50fp"
+    },
+    {
+      "name": "corner_radius_level2",
+      "value": "4vp"
+    },
+    {
+      "name": "corner_radius_level4",
+      "value": "8vp"
+    },
+    {
+      "name": "corner_radius_level8",
+      "value": "16vp"
+    },
+    {
+      "name": "corner_radius_level10",
+      "value": "20vp"
+    },
+    {
+      "name": "corner_radius_level16",
+      "value": "32vp"
+    },
+    {
+      "name": "padding_level1",
+      "value": "2vp"
+    },
+    {
+      "name": "padding_level2",
+      "value": "4vp"
+    },
+    {
+      "name": "padding_level4",
+      "value": "8vp"
+    },
+    {
+      "name": "padding_level6",
+      "value": "12vp"
+    },
+    {
+      "name": "padding_level8",
+      "value": "16vp"
+    },
+    {
+      "name": "padding_level12",
+      "value": "24vp"
+    },
+    {
+      "name": "padding_level16",
+      "value": "32vp"
+    },
+    {
+      "name": "padding_level20",
+      "value": "40vp"
+    },
+    {
+      "name": "font_title_small",
+      "value": "20fp"
+    },
+    {
+      "name": "font_subtitle_large",
+      "value": "18fp"
+    },
+    {
+      "name": "font_body_large",
+      "value": "16fp"
+    },
+    {
+      "name": "font_body_medium",
+      "value": "14fp"
+    },
+    {
+      "name": "font_body_small",
+      "value": "12fp"
+    },
+    {
+      "name": "font_caption_medium",
+      "value": "10fp"
+    },
+    {
+      "name": "font_desktop_rail_label",
+      "value": "11fp"
     }
   ]
 }
