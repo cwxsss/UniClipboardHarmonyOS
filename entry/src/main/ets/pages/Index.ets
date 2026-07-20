@@ -1,10 +1,7 @@
-import { mediaquery, window } from '@kit.ArkUI';
+import { LengthMetrics, mediaquery, SymbolGlyphModifier, window } from '@kit.ArkUI';
 import {
-  abilityAccessCtrl,
   common,
-  ConfigurationConstant,
-  PermissionRequestResult,
-  Permissions
+  ConfigurationConstant
 } from '@kit.AbilityKit';
 import { BusinessError, deviceInfo } from '@kit.BasicServicesKit';
 import { scanBarcode, scanCore } from '@kit.ScanKit';
@@ -21,6 +18,7 @@ import {
   HdsNavigation,
   HdsNavigationTitleMode,
   HdsTabs,
+  IconType,
   IconStyleMode,
   ScrollEffectType
 } from '@kit.UIDesignKit';
@@ -36,12 +34,16 @@ import {
   APPEARANCE_MODE_DARK,
   APPEARANCE_MODE_LIGHT,
   APPEARANCE_MODE_SYSTEM,
+  APPEARANCE_THEME_DEFAULT,
   AppearanceStorageService
 } from '../service/AppearanceStorageService';
 import { ConfigStorageService } from '../service/ConfigStorageService';
+import { BackgroundSyncPreferenceService } from '../service/BackgroundSyncService';
 import { HistoryStorageService } from '../service/HistoryStorageService';
 import { MobileSyncClient } from '../service/MobileSyncClient';
+import { MobileSyncServerService } from '../service/MobileSyncServerService';
 import { NativeProtocolService } from '../service/NativeProtocolService';
+import { ReceivedNotificationService } from '../service/NotificationService';
 import { SpaceNodeService } from '../service/SpaceNodeService';
 import {
   NativeCreateSpaceResult,
@@ -53,7 +55,11 @@ import {
   NativeSpaceImageEvent,
   NativeSpaceInvitation,
   NativeSpaceStatus,
-  NativeSpaceTextEvent
+  NativeSpaceTextEvent,
+  NativeMobileSyncCredential,
+  NativeMobileSyncDevice,
+  NativeMobileSyncInboundEvent,
+  NativeMobileSyncStatus
 } from 'uniclipboard_native';
 
 class AudioLyricLine {
@@ -65,6 +71,29 @@ class AudioLyricLine {
     this.text = text;
   }
 }
+
+class AppearanceThemeOption {
+  id: string = '';
+  primaryColor: string = '';
+  secondaryColor: string = '';
+
+  constructor(id: string, primaryColor: string, secondaryColor: string) {
+    this.id = id;
+    this.primaryColor = primaryColor;
+    this.secondaryColor = secondaryColor;
+  }
+}
+
+const APPEARANCE_THEME_OPTIONS: AppearanceThemeOption[] = [
+  new AppearanceThemeOption(APPEARANCE_THEME_DEFAULT, '#0A59F7', '#317AF7'),
+  new AppearanceThemeOption('sky_cyan', '#3EB4F8', '#5DEAB5'),
+  new AppearanceThemeOption('aurora_green', '#5DEAB5', '#AF64EE'),
+  new AppearanceThemeOption('nebula_purple', '#AF64EE', '#FB638D'),
+  new AppearanceThemeOption('sunset_orange', '#F99844', '#FFE345'),
+  new AppearanceThemeOption('blossom_pink', '#FB638D', '#AF64EE')
+];
+
+const FEEDBACK_EMAIL: string = '3514795319@qq.com';
 
 @Entry
 @Component
@@ -103,11 +132,14 @@ struct Index {
   @State historySearchText: string = '';
   @State historyStarredOnly: boolean = false;
   @State historyMutationBusy: boolean = false;
+  @State desktopRefreshBusy: boolean = false;
   @State realtimeActive: boolean = false;
   @State showAboutSheet: boolean = false;
+  @State showFeedbackSheet: boolean = false;
+  @State feedbackText: string = '';
   @State aboutMaterialLevel: hdsMaterial.MaterialLevel = hdsMaterial.MaterialLevel.SMOOTH;
   @State spaceNodeState: number = 0;
-  @State spaceJoined: boolean = false;
+  @StorageLink('spaceJoined') spaceJoined: boolean = false;
   @State spacePeerConnected: boolean = false;
   @State spaceDevices: NativeSpaceDevice[] = [];
   @State spaceDeviceName: string = '';
@@ -116,8 +148,10 @@ struct Index {
   @State spaceJoinDeviceName: string = '';
   @State spaceJoinBusy: boolean = false;
   @State spaceJoinState: number = 0;
+  @State spaceSwitchOpen: boolean = false;
   @State spaceActionMode: number = 0;
   @State spaceCreateDeviceName: string = '';
+  @State spaceCreateDeviceNameRecommended: boolean = false;
   @State spaceCreatePassphrase: string = '';
   @State spaceCreatePassphraseConfirm: string = '';
   @State spaceCreateBusy: boolean = false;
@@ -135,6 +169,7 @@ struct Index {
   @State desktopSelectedId: string = '';
   @State desktopSelectedText: string = '';
   @State desktopSelectedMeta: string = '';
+  @State desktopSelectedDirection: string = '';
   @State desktopSelectedImage: image.PixelMap | null = null;
   @State desktopSelectedImageRevision: number = 0;
   @State desktopFilePreviewState: number = 0;
@@ -152,19 +187,49 @@ struct Index {
   @State desktopAudioPlainLyrics: string = '';
   @State desktopAudioMetadataState: number = 0;
   @State desktopGestureShareState: number = 0;
-  @State desktopFilter: number = 0;
+  @State desktopGestureShareHintDismissed: boolean = false;
+  @State desktopStarredOnly: boolean = false;
+  @State desktopTypeFilter: number = 0;
+  @State desktopTagFilter: number = 0;
+  @State desktopSourceFilter: number = 0;
+  @State desktopTimeFilter: number = 0;
+  @State desktopExtensionFilter: string = '';
   @State appearanceMode: string = APPEARANCE_MODE_SYSTEM;
+  @State appearanceThemeId: string = APPEARANCE_THEME_DEFAULT;
+  @State latestContentPulse: number = 1;
+  @State historyPulse: number = 1;
+  @StorageLink('backgroundSyncEnabled') backgroundSyncEnabled: boolean = false;
+  @State mobileSyncEnabled: boolean = false;
+  @State mobileSyncRunning: boolean = false;
+  @State mobileSyncPort: string = '42720';
+  @State mobileSyncUrls: string[] = [];
+  @State mobileSyncDevices: NativeMobileSyncDevice[] = [];
+  @State mobileSyncBusy: boolean = false;
+  @State mobileSyncState: number = 0;
+  @State mobileSyncAddOpen: boolean = false;
+  @State mobileSyncAdvancedOpen: boolean = false;
+  @State mobileSyncDeviceName: string = '';
+  @State mobileSyncCustomUsername: string = '';
+  @State mobileSyncCustomPassword: string = '';
+  @State mobileSyncCredential: NativeMobileSyncCredential | null = null;
+  @State mobileSyncPasswordVisible: boolean = false;
 
   private clipboardService: ClipboardService = new ClipboardService();
   private appearanceStorageService: AppearanceStorageService = new AppearanceStorageService();
   private configStorageService: ConfigStorageService = new ConfigStorageService();
+  private backgroundSyncPreferenceService: BackgroundSyncPreferenceService =
+    new BackgroundSyncPreferenceService();
   private historyStorageService: HistoryStorageService = new HistoryStorageService();
+  private mobileSyncServerService: MobileSyncServerService = new MobileSyncServerService();
+  private receivedNotificationService: ReceivedNotificationService =
+    ReceivedNotificationService.getInstance();
   private nativeProtocolService: NativeProtocolService = new NativeProtocolService();
   private spaceNodeService: SpaceNodeService = new SpaceNodeService();
   private largeNavStack: NavPathStack = new NavPathStack();
   private wideScreenListener: mediaquery.MediaQueryListener | null = null;
   private largeScreenListener: mediaquery.MediaQueryListener | null = null;
   private sseTimerId: number = -1;
+  private historySearchTimerId: number = -1;
   private sseEventBusy: boolean = false;
   private spaceDeviceRefreshBusy: boolean = false;
   private historyResetPending: boolean = false;
@@ -173,6 +238,8 @@ struct Index {
   private historySaveBusy: boolean = false;
   private historySavePending: boolean = false;
   private realtimeTick: number = 0;
+  private realtimeAutoConnect: boolean = false;
+  private mobileSyncDeviceRefreshBusy: boolean = false;
   private syncScroller: Scroller = new Scroller();
   private settingsScroller: Scroller = new Scroller();
   private aboutScroller: Scroller = new Scroller();
@@ -180,8 +247,10 @@ struct Index {
   private composerFileData: Uint8Array | null = null;
   private composerFileUri: string = '';
   private composerFileSize: number = 0;
+  private composerFileHistoryId: string = '';
   private latestFileData: Uint8Array | null = null;
   private latestFilePath: string = '';
+  private latestCachedFilePath: string = '';
   private desktopSelectedFileData: Uint8Array | null = null;
   private desktopSelectedFilePath: string = '';
   private desktopVideoRatioKey: string = '';
@@ -206,6 +275,9 @@ struct Index {
     this.isWideScreen = wideListener.matches;
     wideListener.on('change', (result: mediaquery.MediaQueryResult): void => {
       this.isWideScreen = result.matches;
+      if (!result.matches && this.desktopSelectedId.length > 0) {
+        this.showLatestClipboardContent();
+      }
     });
     let largeListener: mediaquery.MediaQueryListener = this.getUIContext().getMediaQuery()
       .matchMediaSync('(1200vp<=width)');
@@ -214,12 +286,15 @@ struct Index {
     largeListener.on('change', (result: mediaquery.MediaQueryResult): void => {
       this.isLargeScreen = result.matches;
     });
+    this.initializeRecommendedSpaceDeviceName();
     this.selectPage(this.selectedTab);
     this.sseTimerId = setInterval(() => {
       this.consumeRealtimeEvents();
     }, 1000);
     this.restoreConfig();
+    this.restoreBackgroundSyncPreference();
     this.restoreAppearanceMode();
+    this.restoreAppearanceTheme();
     this.restoreLocalHistory();
     this.initializeSpaceNode();
   }
@@ -247,11 +322,36 @@ struct Index {
       clearInterval(this.sseTimerId);
       this.sseTimerId = -1;
     }
+    if (this.historySearchTimerId >= 0) {
+      clearTimeout(this.historySearchTimerId);
+      this.historySearchTimerId = -1;
+    }
     let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
     client.stopRealtime();
     this.realtimeActive = false;
     this.desktopGestureSharePageVisible = false;
     this.unregisterDesktopGestureShare();
+    this.releaseDesktopAudio();
+    this.removeLatestCachedFile();
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context !== undefined && this.composerFileHistoryId.length > 0 && this.composerFileUri.length > 0) {
+      this.historyStorageService.discardManagedFile(context, this.composerFileUri);
+      this.composerFileHistoryId = '';
+      this.composerFileUri = '';
+    }
+  }
+
+  private showLatestClipboardContent(): void {
+    this.desktopSelectedId = '';
+    this.desktopSelectedText = '';
+    this.desktopSelectedMeta = '';
+    this.desktopSelectedDirection = '';
+    this.desktopGestureShareHintDismissed = false;
+    this.desktopSelectedImage = null;
+    this.desktopSelectedFileData = null;
+    this.desktopSelectedFilePath = '';
+    this.desktopFilePreviewState = 0;
+    this.resetDesktopVideoAspectRatio();
     this.releaseDesktopAudio();
   }
 
@@ -278,6 +378,10 @@ struct Index {
       this.serverUrl = config.baseUrl;
       this.username = config.username;
       this.password = config.password;
+      if (this.hasConfig()) {
+        this.realtimeAutoConnect = true;
+        this.startRealtime();
+      }
     } catch (error) {
       this.statusCode = 3;
     }
@@ -291,12 +395,37 @@ struct Index {
     this.configStorageService.save(context, this.getConfig());
   }
 
+  private restoreBackgroundSyncPreference(): void {
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context === undefined) {
+      return;
+    }
+    this.backgroundSyncEnabled = this.backgroundSyncPreferenceService.load(context);
+  }
+
+  private setBackgroundSyncEnabled(enabled: boolean): void {
+    this.backgroundSyncEnabled = enabled;
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context !== undefined) {
+      this.backgroundSyncPreferenceService.save(context, enabled);
+    }
+  }
+
   private restoreAppearanceMode(): void {
     let context: common.Context | undefined = this.getUIContext().getHostContext();
     if (context === undefined) {
       return;
     }
     this.appearanceMode = this.appearanceStorageService.load(context);
+  }
+
+  private restoreAppearanceTheme(): void {
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context === undefined) {
+      return;
+    }
+    let storedThemeId: string = this.appearanceStorageService.loadTheme(context);
+    this.appearanceThemeId = this.getAppearanceTheme(storedThemeId).id;
   }
 
   private selectAppearanceMode(mode: string): void {
@@ -312,6 +441,96 @@ struct Index {
     } catch (error) {
       console.error('UniClipboard failed to update the appearance mode.');
     }
+  }
+
+  private selectAppearanceTheme(themeId: string): void {
+    let theme: AppearanceThemeOption = this.getAppearanceTheme(themeId);
+    this.appearanceThemeId = theme.id;
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context !== undefined) {
+      this.appearanceStorageService.saveTheme(context, theme.id);
+    }
+  }
+
+  private getAppearanceTheme(themeId: string): AppearanceThemeOption {
+    for (let index: number = 0; index < APPEARANCE_THEME_OPTIONS.length; index++) {
+      let option: AppearanceThemeOption = APPEARANCE_THEME_OPTIONS[index];
+      if (option.id === themeId) {
+        return option;
+      }
+    }
+    return APPEARANCE_THEME_OPTIONS[0];
+  }
+
+  private appearanceThemeLabel(themeId: string): Resource {
+    if (themeId === 'sky_cyan') {
+      return $r('app.string.appearance_theme_sky_cyan');
+    }
+    if (themeId === 'aurora_green') {
+      return $r('app.string.appearance_theme_aurora_green');
+    }
+    if (themeId === 'nebula_purple') {
+      return $r('app.string.appearance_theme_nebula_purple');
+    }
+    if (themeId === 'sunset_orange') {
+      return $r('app.string.appearance_theme_sunset_orange');
+    }
+    if (themeId === 'blossom_pink') {
+      return $r('app.string.appearance_theme_blossom_pink');
+    }
+    return $r('app.string.appearance_theme_default');
+  }
+
+  private accentColor(): ResourceColor {
+    if (this.appearanceThemeId === APPEARANCE_THEME_DEFAULT) {
+      return $r('app.color.accent');
+    }
+    return this.getAppearanceTheme(this.appearanceThemeId).primaryColor;
+  }
+
+  private accentSecondaryColor(): ResourceColor {
+    if (this.appearanceThemeId === APPEARANCE_THEME_DEFAULT) {
+      return $r('app.color.accent_secondary');
+    }
+    return this.getAppearanceTheme(this.appearanceThemeId).secondaryColor;
+  }
+
+  private historyMenuSymbol(symbol: Resource): SymbolGlyphModifier {
+    let modifier: SymbolGlyphModifier = new SymbolGlyphModifier(symbol);
+    modifier.fontSize('20vp');
+    modifier.fontColor([this.accentSecondaryColor()]);
+    return modifier;
+  }
+
+  private historyDeleteMenuSymbol(): SymbolGlyphModifier {
+    let modifier: SymbolGlyphModifier = new SymbolGlyphModifier($r('sys.symbol.xmark'));
+    modifier.fontSize('20vp');
+    modifier.fontColor([$r('app.color.danger')]);
+    return modifier;
+  }
+
+  private accentSoftColor(): ResourceColor {
+    if (this.appearanceThemeId === APPEARANCE_THEME_DEFAULT) {
+      return $r('app.color.accent_soft');
+    }
+    return '#19' + this.getAppearanceTheme(this.appearanceThemeId).primaryColor.substring(1);
+  }
+
+  private accentMediumColor(): ResourceColor {
+    if (this.appearanceThemeId === APPEARANCE_THEME_DEFAULT) {
+      return $r('app.color.accent_medium');
+    }
+    return '#33' + this.getAppearanceTheme(this.appearanceThemeId).primaryColor.substring(1);
+  }
+
+  private titleBarConnectionIcon(): IconType {
+    if (this.isConnectionAvailable()) {
+      return $r('sys.symbol.connection');
+    }
+    const modifier: SymbolGlyphModifier =
+      new SymbolGlyphModifier($r('sys.symbol.unconnection'));
+    modifier.fontColor([$r('app.color.danger')]);
+    return modifier;
   }
 
   private async restoreLocalHistory(): Promise<void> {
@@ -404,15 +623,221 @@ struct Index {
       if (this.spaceJoined) {
         await this.refreshSpaceDevices();
       }
+      await this.initializeMobileSyncServer();
     } catch (error) {
       this.spaceNodeState = 3;
     }
   }
 
+  private async initializeMobileSyncServer(): Promise<void> {
+    try {
+      let status: NativeMobileSyncStatus = await this.mobileSyncServerService.status();
+      this.mobileSyncEnabled = status.enabled;
+      this.mobileSyncRunning = status.running;
+      this.mobileSyncPort = status.port.toString();
+      this.mobileSyncUrls = status.urls;
+      await this.refreshMobileSyncDevices();
+      if (status.enabled && !status.running) {
+        let restarted: NativeMobileSyncStatus = await this.mobileSyncServerService.setEnabled(
+          true, this.mobileSyncPortNumber());
+        this.mobileSyncRunning = restarted.running;
+        this.mobileSyncUrls = restarted.urls;
+      }
+    } catch (error) {
+      this.mobileSyncState = 3;
+      this.mobileSyncRunning = false;
+    }
+  }
+
+  private mobileSyncPortNumber(): number {
+    let port: number = parseInt(this.mobileSyncPort.trim(), 10);
+    if (isNaN(port) || port < 1 || port > 65535) {
+      return 42720;
+    }
+    return port;
+  }
+
+  private async refreshMobileSyncDevices(): Promise<void> {
+    if (this.mobileSyncDeviceRefreshBusy) {
+      return;
+    }
+    this.mobileSyncDeviceRefreshBusy = true;
+    try {
+      this.mobileSyncDevices = await this.mobileSyncServerService.listDevices();
+    } catch (error) {
+      this.mobileSyncDevices = [];
+    } finally {
+      this.mobileSyncDeviceRefreshBusy = false;
+    }
+  }
+
+  private async toggleMobileSyncServer(enabled: boolean): Promise<void> {
+    if (this.mobileSyncBusy) {
+      return;
+    }
+    this.mobileSyncBusy = true;
+    this.mobileSyncState = 0;
+    try {
+      let status: NativeMobileSyncStatus = await this.mobileSyncServerService.setEnabled(
+        enabled, this.mobileSyncPortNumber());
+      this.mobileSyncEnabled = status.enabled;
+      this.mobileSyncRunning = status.running;
+      this.mobileSyncPort = status.port.toString();
+      this.mobileSyncUrls = status.urls;
+      if (enabled && !status.running) {
+        this.mobileSyncState = 3;
+      }
+      await this.refreshMobileSyncDevices();
+    } catch (error) {
+      this.mobileSyncEnabled = false;
+      this.mobileSyncRunning = false;
+      this.mobileSyncState = 3;
+    } finally {
+      this.mobileSyncBusy = false;
+    }
+  }
+
+  private async createMobileSyncDevice(): Promise<void> {
+    if (this.mobileSyncBusy || this.mobileSyncDeviceName.trim().length === 0) {
+      return;
+    }
+    this.mobileSyncBusy = true;
+    this.mobileSyncState = 0;
+    this.mobileSyncCredential = null;
+    try {
+      let credential: NativeMobileSyncCredential = await this.mobileSyncServerService.registerDevice(
+        this.mobileSyncDeviceName.trim(), this.mobileSyncCustomUsername.trim(),
+        this.mobileSyncCustomPassword, this.mobileSyncPortNumber());
+      this.mobileSyncCredential = credential;
+      this.mobileSyncEnabled = true;
+      this.mobileSyncRunning = true;
+      this.mobileSyncUrls = credential.urls;
+      await this.refreshMobileSyncDevices();
+      this.mobileSyncState = 2;
+      this.mobileSyncCustomPassword = '';
+    } catch (error) {
+      this.mobileSyncState = 3;
+    } finally {
+      this.mobileSyncBusy = false;
+    }
+  }
+
+  private async revokeMobileSyncDevice(device: NativeMobileSyncDevice): Promise<void> {
+    try {
+      let result = await this.getUIContext().getPromptAction().showDialog({
+        title: $r('app.string.mobile_sync_revoke_title'),
+        message: $r('app.string.mobile_sync_revoke_message'),
+        buttons: [
+          { text: $r('app.string.cancel_action'), color: $r('app.color.text_secondary') },
+          { text: $r('app.string.mobile_sync_revoke_confirm'), color: $r('app.color.danger') }
+        ]
+      });
+      if (result.index !== 1) {
+        return;
+      }
+      await this.mobileSyncServerService.revokeDevice(device.deviceId);
+      await this.refreshMobileSyncDevices();
+    } catch (error) {
+      this.mobileSyncState = 3;
+    }
+  }
+
+  private async consumeMobileSyncEvents(): Promise<void> {
+    let events: NativeMobileSyncInboundEvent[] = this.mobileSyncServerService.drainInboundEvents();
+    for (let index: number = 0; index < events.length; index++) {
+      let event: NativeMobileSyncInboundEvent = events[index];
+      this.latestContentId = event.contentId;
+      if (event.kind === 'Text') {
+        this.latestText = event.text;
+        this.latestKind = 'Text';
+        this.latestImage = null;
+        this.addHistory(event.text, 'received');
+        try {
+          await this.clipboardService.writeText(event.text);
+          this.notifyReceivedContent('Text', event.text, null, 0, event.sourceLabel);
+        } catch (error) {
+          this.statusCode = 3;
+        }
+      } else if (event.kind === 'Image') {
+        try {
+          let pixelMap: image.PixelMap = await this.clipboardService.decodeImage(event.data);
+          this.latestImage = pixelMap;
+          this.latestImageRevision += 1;
+          this.latestKind = 'Image';
+          this.latestText = event.dataName.length > 0 ? event.dataName : 'image.png';
+          this.addHistory(this.latestText, 'received', 'Image', pixelMap);
+          await this.clipboardService.writeImage(pixelMap);
+          this.notifyReceivedContent('Image', this.latestText, pixelMap, event.data.length,
+            event.sourceLabel);
+        } catch (error) {
+          this.statusCode = 3;
+        }
+      } else if (event.kind === 'File') {
+        let fileName: string = event.dataName.length > 0 ? event.dataName : event.text;
+        let filePreview: image.PixelMap | null = null;
+        if (this.isImageFileName(fileName) && event.data.length > 0) {
+          try {
+            filePreview = await this.clipboardService.decodeImage(event.data);
+          } catch (error) {
+            filePreview = null;
+          }
+        }
+        this.latestKind = 'File';
+        this.latestText = fileName;
+        this.latestFileName = fileName;
+        this.latestFileData = event.data;
+        this.latestFilePath = '';
+        this.latestFileRevision += 1;
+        this.addHistory(fileName, 'received', 'File', null, event.data);
+        this.notifyReceivedContent('File', fileName, filePreview, event.data.length,
+          event.sourceLabel);
+      }
+      this.statusCode = 2;
+      this.animateLatestContent();
+    }
+    if (events.length > 0) {
+      await this.refreshMobileSyncDevices();
+    }
+  }
+
+  private async initializeRecommendedSpaceDeviceName(): Promise<void> {
+    if (this.spaceCreateDeviceName.trim().length > 0) {
+      return;
+    }
+    let recommendedName: string = deviceInfo.marketName.trim();
+    if (recommendedName.length === 0) {
+      let context: common.Context | undefined = this.getUIContext().getHostContext();
+      if (context !== undefined) {
+        try {
+          if (deviceInfo.deviceType === 'phone') {
+            recommendedName = await context.resourceManager.getStringByName('space_device_recommended_phone');
+          } else if (deviceInfo.deviceType === 'tablet') {
+            recommendedName = await context.resourceManager.getStringByName('space_device_recommended_tablet');
+          } else if (deviceInfo.deviceType === '2in1') {
+            recommendedName = await context.resourceManager.getStringByName('space_device_recommended_computer');
+          } else {
+            recommendedName = await context.resourceManager.getStringByName('space_device_recommended_default');
+          }
+        } catch (error) {
+          console.error('UniClipboard failed to load the recommended device name.');
+        }
+      }
+    }
+    if (recommendedName.length > 0) {
+      this.spaceCreateDeviceName = recommendedName;
+      this.spaceCreateDeviceNameRecommended = true;
+    }
+  }
+
   private canJoinSpace(): boolean {
-    return this.spaceNodeState === 2 && !this.spaceJoined && !this.spaceJoinBusy &&
-      this.spaceInvitationCode.trim().length > 0 && this.spacePassphrase.length > 0 &&
-      this.spaceJoinDeviceName.trim().length > 0;
+    if (this.spaceNodeState !== 2 || this.spaceJoinBusy ||
+      this.spaceInvitationCode.trim().length === 0 || this.spacePassphrase.length === 0) {
+      return false;
+    }
+    if (this.spaceJoined) {
+      return this.spaceSwitchOpen;
+    }
+    return this.spaceJoinDeviceName.trim().length > 0;
   }
 
   private async joinCurrentSpace(): Promise<void> {
@@ -422,12 +847,21 @@ struct Index {
     this.spaceJoinBusy = true;
     this.spaceJoinState = 0;
     try {
+      let switching: boolean = this.spaceJoined;
       let deviceName: string = this.spaceJoinDeviceName.trim();
-      let result: NativeJoinSpaceResult = await this.spaceNodeService.join(
-        this.spaceInvitationCode.trim(), this.spacePassphrase, deviceName);
+      let result: NativeJoinSpaceResult;
+      if (switching) {
+        result = await this.spaceNodeService.switchTo(
+          this.spaceInvitationCode.trim(), this.spacePassphrase);
+      } else {
+        result = await this.spaceNodeService.join(
+          this.spaceInvitationCode.trim(), this.spacePassphrase, deviceName);
+      }
       this.spaceJoined = result.spaceId.length > 0;
-      this.spacePeerConnected = this.spaceJoined;
-      this.spaceDeviceName = deviceName;
+      this.spacePeerConnected = false;
+      if (!switching) {
+        this.spaceDeviceName = deviceName;
+      }
       this.spaceCreatedId = result.spaceId;
       this.spaceCreatePassphrase = this.spacePassphrase;
       this.spaceInvitationCode = '';
@@ -435,6 +869,9 @@ struct Index {
       this.spaceJoinDeviceName = '';
       this.spaceJoinState = 1;
       await this.refreshSpaceDevices();
+      if (switching) {
+        this.spaceSwitchOpen = false;
+      }
     } catch (error) {
       let errorMessage: string = 'unavailable';
       if (error instanceof Error) {
@@ -449,37 +886,63 @@ struct Index {
   }
 
   private canCreateSpace(): boolean {
-    return this.spaceNodeState === 2 && !this.spaceJoined && !this.spaceCreateBusy &&
+    return this.spaceNodeState === 2 && (!this.spaceJoined || this.spaceSwitchOpen) && !this.spaceCreateBusy &&
       this.spaceCreateDeviceName.trim().length > 0 && this.spaceCreatePassphrase.length >= 8 &&
       this.spaceCreatePassphrase === this.spaceCreatePassphraseConfirm;
+  }
+
+  private async confirmReplaceCurrentSpace(): Promise<boolean> {
+    try {
+      let result = await this.getUIContext().getPromptAction().showDialog({
+        title: $r('app.string.space_replace_confirm_title'),
+        message: $r('app.string.space_replace_confirm_message'),
+        buttons: [
+          { text: $r('app.string.cancel_action'), color: $r('app.color.text_secondary') },
+          { text: $r('app.string.space_replace_confirm_action'), color: $r('app.color.danger') }
+        ]
+      });
+      return result.index === 1;
+    } catch (error) {
+      return false;
+    }
   }
 
   private async createCurrentSpace(): Promise<void> {
     if (!this.canCreateSpace()) {
       return;
     }
+    let replacing: boolean = this.spaceJoined;
+    if (replacing) {
+      let confirmed: boolean = await this.confirmReplaceCurrentSpace();
+      if (!confirmed) {
+        return;
+      }
+    }
     this.spaceCreateBusy = true;
     this.spaceCreateState = 0;
-    let created: boolean = false;
     try {
       let deviceName: string = this.spaceCreateDeviceName.trim();
-      let result: NativeCreateSpaceResult = await this.spaceNodeService.create(
-        this.spaceCreatePassphrase, deviceName);
+      let result: NativeCreateSpaceResult;
+      if (replacing) {
+        result = await this.spaceNodeService.replace(this.spaceCreatePassphrase, deviceName);
+      } else {
+        result = await this.spaceNodeService.create(this.spaceCreatePassphrase, deviceName);
+      }
       this.spaceJoined = result.spaceId.length > 0;
       this.spacePeerConnected = false;
       this.spaceCreatedId = result.spaceId;
       this.spaceDeviceName = deviceName;
+      this.spaceDevices = [];
       this.spaceCreatePassphraseConfirm = '';
       this.spaceCreateState = 1;
-      created = this.spaceJoined;
       await this.refreshSpaceDevices();
+      if (replacing) {
+        this.spaceSwitchOpen = false;
+      }
     } catch (error) {
       this.spaceCreateState = 2;
     } finally {
       this.spaceCreateBusy = false;
-    }
-    if (created) {
-      await this.issueCurrentSpaceInvitation();
     }
   }
 
@@ -603,15 +1066,18 @@ struct Index {
       Row({ space: 10 }) {
         SymbolGlyph($r('sys.symbol.connection'))
           .fontSize(24)
-          .fontColor([$r('app.color.accent')])
+          .fontColor([this.accentColor()])
         Column({ space: 3 }) {
-          Text($r('app.string.space_join_title'))
-            .fontSize(17)
+          Text(!this.spaceJoined && this.spaceActionMode === 0 ? $r('app.string.space_create_title') :
+            $r('app.string.space_join_title'))
+            .fontSize($r('app.float.font_subtitle_large'))
             .fontWeight(FontWeight.Bold)
             .fontColor($r('app.color.text_primary'))
           Text(this.spaceJoined ?
             (this.spacePeerConnected ? $r('app.string.space_peer_online') :
-              $r('app.string.space_peer_waiting')) : $r('app.string.space_join_note'))
+              $r('app.string.space_peer_waiting')) :
+            (this.spaceActionMode === 0 ? $r('app.string.space_create_note') :
+              $r('app.string.space_join_note')))
             .fontSize(12)
             .lineHeight(18)
             .fontColor($r('app.color.text_secondary'))
@@ -623,12 +1089,12 @@ struct Index {
 
       if (this.spaceNodeState === 1) {
         Text($r('app.string.space_node_starting'))
-          .fontSize(13)
+          .fontSize($r('app.float.font_body_medium'))
           .fontColor($r('app.color.text_secondary'))
           .width('100%')
       } else if (this.spaceNodeState === 3) {
         Text($r('app.string.space_node_failed'))
-          .fontSize(13)
+          .fontSize($r('app.float.font_body_medium'))
           .fontColor($r('app.color.danger'))
           .width('100%')
         Button($r('app.string.space_node_retry'), { type: ButtonType.Normal })
@@ -636,7 +1102,7 @@ struct Index {
           .width('100%')
           .fontColor($r('app.color.text_primary'))
           .backgroundColor($r('app.color.surface_muted'))
-          .borderRadius(14)
+          .borderRadius($r('app.float.corner_radius_level10'))
           .onClick((): void => {
             this.initializeSpaceNode();
           })
@@ -662,7 +1128,7 @@ struct Index {
             .width('100%')
           if (this.spaceCreatedId.length > 0) {
             Text($r('app.string.desktop_space_id'))
-              .fontSize(11)
+              .fontSize($r('app.float.font_body_small'))
               .fontColor($r('app.color.text_secondary'))
               .width('100%')
             Text(this.spaceCreatedId)
@@ -674,15 +1140,144 @@ struct Index {
         }
         .width('100%')
         .padding(14)
-        .borderRadius(14)
+        .borderRadius($r('app.float.corner_radius_level10'))
         .backgroundColor($r('app.color.surface_muted'))
-      } else if (this.spaceNodeState === 2) {
-        Button($r('app.string.space_scan_invitation'), { type: ButtonType.Normal })
+        if (this.spaceJoinState === 1 && !this.spaceSwitchOpen) {
+          Text($r('app.string.space_switch_success'))
+            .fontSize(12)
+            .fontColor($r('app.color.success'))
+            .width('100%')
+        }
+        Button(this.spaceSwitchOpen ? $r('app.string.space_switch_cancel') :
+          $r('app.string.space_switch_open'), { type: ButtonType.Normal })
           .height(46)
           .width('100%')
           .fontColor($r('app.color.text_primary'))
           .backgroundColor($r('app.color.surface_muted'))
-          .borderRadius(14)
+          .borderRadius($r('app.float.corner_radius_level10'))
+          .enabled(!this.spaceJoinBusy)
+          .onClick((): void => {
+            this.getUIContext().animateTo({
+              duration: 380,
+              curve: Curve.EaseOut
+            }, (): void => {
+              this.spaceSwitchOpen = !this.spaceSwitchOpen;
+              this.spaceInvitationCode = '';
+              this.spacePassphrase = '';
+              this.spaceJoinState = 0;
+              this.spaceInvitationScanState = 0;
+            });
+          })
+        if (this.spaceSwitchOpen) {
+          Column({ space: 10 }) {
+            Row({ space: 4 }) {
+              this.spaceModeButton(0, $r('app.string.space_create_new_mode'))
+              this.spaceModeButton(1, $r('app.string.space_join_other_mode'))
+            }
+            .width('100%')
+            .padding(3)
+            .borderRadius($r('app.float.corner_radius_level10'))
+            .backgroundColor($r('app.color.surface_muted'))
+            if (this.spaceActionMode === 0) {
+              this.desktopCreateSpaceForm()
+            } else {
+              this.desktopJoinSpaceForm()
+            }
+          }
+          .transition({ type: TransitionType.Insert, opacity: 0, translate: { y: 24 } })
+          .transition({ type: TransitionType.Delete, opacity: 0, translate: { y: -16 } })
+        }
+      } else if (this.spaceNodeState === 2) {
+        Row({ space: 4 }) {
+          this.spaceModeButton(0, $r('app.string.space_create_mode'))
+          this.spaceModeButton(1, $r('app.string.space_join_mode'))
+        }
+        .width('100%')
+        .padding(3)
+        .borderRadius($r('app.float.corner_radius_level10'))
+        .backgroundColor($r('app.color.surface_muted'))
+        if (this.spaceActionMode === 0) {
+          Text($r('app.string.space_create_note'))
+            .fontSize(12)
+            .lineHeight(18)
+            .fontColor($r('app.color.text_secondary'))
+            .width('100%')
+          TextInput({
+            placeholder: $r('app.string.space_create_device_placeholder'),
+            text: this.spaceCreateDeviceName
+          })
+            .height(50)
+            .fontSize($r('app.float.font_body_large'))
+            .fontColor(this.spaceCreateDeviceNameRecommended ? $r('app.color.text_secondary') :
+              $r('app.color.text_primary'))
+            .backgroundColor($r('app.color.surface_muted'))
+            .borderRadius($r('app.float.corner_radius_level10'))
+            .onFocus((): void => {
+              this.spaceCreateDeviceNameRecommended = false;
+            })
+            .onChange((value: string): void => {
+              this.spaceCreateDeviceName = value;
+              this.spaceCreateDeviceNameRecommended = false;
+              this.spaceCreateState = 0;
+            })
+          TextInput({
+            placeholder: $r('app.string.space_passphrase_placeholder'),
+            text: this.spaceCreatePassphrase
+          })
+            .type(InputType.Password)
+            .height(50)
+            .fontSize($r('app.float.font_body_large'))
+            .fontColor($r('app.color.text_primary'))
+            .backgroundColor($r('app.color.surface_muted'))
+            .borderRadius($r('app.float.corner_radius_level10'))
+            .onChange((value: string): void => {
+              this.spaceCreatePassphrase = value;
+              this.spaceCreateState = 0;
+            })
+          TextInput({
+            placeholder: $r('app.string.space_create_confirm_placeholder'),
+            text: this.spaceCreatePassphraseConfirm
+          })
+            .type(InputType.Password)
+            .height(50)
+            .fontSize($r('app.float.font_body_large'))
+            .fontColor($r('app.color.text_primary'))
+            .backgroundColor($r('app.color.surface_muted'))
+            .borderRadius($r('app.float.corner_radius_level10'))
+            .onChange((value: string): void => {
+              this.spaceCreatePassphraseConfirm = value;
+              this.spaceCreateState = 0;
+            })
+          Text($r('app.string.space_create_requirement'))
+            .fontSize(12)
+            .lineHeight(18)
+            .fontColor($r('app.color.text_secondary'))
+            .width('100%')
+          if (this.spaceCreateState === 2) {
+            Text($r('app.string.space_create_failed'))
+              .fontSize(12)
+              .fontColor($r('app.color.danger'))
+              .width('100%')
+          }
+          Button(this.spaceCreateBusy ? $r('app.string.space_creating_action') :
+            $r('app.string.space_create_action'), { type: ButtonType.Normal })
+            .height(50)
+            .width('100%')
+            .fontSize($r('app.float.font_body_large'))
+            .fontColor($r('app.color.on_accent'))
+            .backgroundColor(this.accentColor())
+            .borderRadius($r('app.float.corner_radius_level10'))
+            .enabled(this.canCreateSpace())
+            .onClick((): void => {
+              this.createCurrentSpace();
+            })
+        } else {
+          Button($r('app.string.space_scan_invitation'), { type: ButtonType.Normal })
+          .height(46)
+          .width('100%')
+          .fontColor($r('app.color.text_primary'))
+          .backgroundColor($r('app.color.surface_muted'))
+          .borderRadius($r('app.float.corner_radius_level10'))
           .onClick((): void => {
             this.scanSpaceInvitation();
           })
@@ -707,10 +1302,10 @@ struct Index {
           text: this.spaceJoinDeviceName
         })
           .height(50)
-          .fontSize(15)
+          .fontSize($r('app.float.font_body_large'))
           .fontColor($r('app.color.text_primary'))
           .backgroundColor($r('app.color.surface_muted'))
-          .borderRadius(14)
+          .borderRadius($r('app.float.corner_radius_level10'))
           .onChange((value: string): void => {
             this.spaceJoinDeviceName = value;
             this.spaceJoinState = 0;
@@ -723,7 +1318,7 @@ struct Index {
           .fontSize(16)
           .fontColor($r('app.color.text_primary'))
           .backgroundColor($r('app.color.surface_muted'))
-          .borderRadius(14)
+          .borderRadius($r('app.float.corner_radius_level10'))
           .onChange((value: string): void => {
             this.spaceInvitationCode = value.toUpperCase();
             this.spaceJoinState = 0;
@@ -734,10 +1329,10 @@ struct Index {
         })
           .type(InputType.Password)
           .height(50)
-          .fontSize(15)
+          .fontSize($r('app.float.font_body_large'))
           .fontColor($r('app.color.text_primary'))
           .backgroundColor($r('app.color.surface_muted'))
-          .borderRadius(14)
+          .borderRadius($r('app.float.corner_radius_level10'))
           .onChange((value: string): void => {
             this.spacePassphrase = value;
             this.spaceJoinState = 0;
@@ -753,23 +1348,24 @@ struct Index {
             .fontColor($r('app.color.danger'))
             .width('100%')
         }
-        Button(this.spaceJoinBusy ? $r('app.string.space_joining_action') :
-          $r('app.string.space_join_action'), { type: ButtonType.Normal })
-          .height(50)
-          .width('100%')
-          .fontSize(15)
-          .fontColor(Color.White)
-          .backgroundColor($r('app.color.accent'))
-          .borderRadius(14)
-          .enabled(this.canJoinSpace())
-          .onClick((): void => {
-            this.joinCurrentSpace();
-          })
+          Button(this.spaceJoinBusy ? $r('app.string.space_joining_action') :
+            $r('app.string.space_join_action'), { type: ButtonType.Normal })
+            .height(50)
+            .width('100%')
+            .fontSize($r('app.float.font_body_large'))
+            .fontColor($r('app.color.on_accent'))
+            .backgroundColor(this.accentColor())
+            .borderRadius($r('app.float.corner_radius_level10'))
+            .enabled(this.canJoinSpace())
+            .onClick((): void => {
+              this.joinCurrentSpace();
+            })
+        }
       }
     }
     .width('100%')
-    .padding(18)
-    .borderRadius(24)
+    .padding($r('app.float.padding_level8'))
+    .borderRadius($r('app.float.corner_radius_level8'))
     .backgroundColor($r('app.color.surface'))
   }
 
@@ -786,6 +1382,65 @@ struct Index {
     this.selectPage(1);
   }
 
+  private openFeedback(): void {
+    this.showFeedbackSheet = true;
+  }
+
+  private openFeedbackFromAbout(): void {
+    this.showAboutSheet = false;
+    setTimeout((): void => {
+      this.showFeedbackSheet = true;
+    }, 220);
+  }
+
+  private showFeedbackToast(message: Resource): void {
+    try {
+      this.getUIContext().getPromptAction().showToast({ message: message });
+    } catch (error) {
+      console.error('UniClipboard failed to show feedback status.');
+    }
+  }
+
+  private async submitFeedback(): Promise<void> {
+    let feedback: string = this.feedbackText.trim();
+    if (feedback.length === 0) {
+      this.showFeedbackToast($r('app.string.feedback_empty_hint'));
+      return;
+    }
+
+    try {
+      await this.clipboardService.writeText(feedback);
+      this.showFeedbackToast($r('app.string.feedback_copied'));
+    } catch (error) {
+      this.showFeedbackToast($r('app.string.feedback_copy_failed'));
+    }
+
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context === undefined) {
+      this.showFeedbackToast($r('app.string.feedback_email_open_failed'));
+      return;
+    }
+
+    let subject: string = 'UniClipboard Feedback';
+    try {
+      subject = await context.resourceManager.getStringByName('feedback_email_subject');
+    } catch (error) {
+      console.error('UniClipboard failed to load the feedback email subject.');
+    }
+    let abilityContext: common.UIAbilityContext = context as common.UIAbilityContext;
+    let emailUri: string = 'mailto:' + FEEDBACK_EMAIL + '?subject=' + encodeURIComponent(subject) +
+      '&body=' + encodeURIComponent(feedback);
+    abilityContext.startAbility({
+      action: 'ohos.want.action.sendToData',
+      uri: emailUri
+    }).then((): void => {
+      this.showFeedbackSheet = false;
+    }).catch((error: BusinessError): void => {
+      console.error('UniClipboard failed to open the email app: ' + error.code.toString());
+      this.showFeedbackToast($r('app.string.feedback_email_open_failed'));
+    });
+  }
+
   private selectLargeSection(index: number): void {
     this.largeSection = index;
     this.selectedTab = index === 2 ? 1 : 0;
@@ -793,9 +1448,40 @@ struct Index {
       index === 1 ? 'desktopDevices' : 'desktopSettings';
     this.largeNavStack.clear(false);
     this.largeNavStack.pushPath({ name: destinationName }, false);
-    if (index === 1 && this.spaceJoined) {
-      this.refreshSpaceDevices();
+    if (index === 1) {
+      this.refreshMobileSyncDevices();
+      if (this.spaceJoined) {
+        this.refreshSpaceDevices();
+      }
     }
+  }
+
+  private animateLatestContent(): void {
+    this.getUIContext().animateTo({
+      duration: 300,
+      curve: Curve.EaseOut,
+      iterations: 2,
+      playMode: PlayMode.Alternate,
+      onFinish: (): void => {
+        this.latestContentPulse = 1;
+      }
+    }, (): void => {
+      this.latestContentPulse = 1.025;
+    });
+  }
+
+  private animateHistoryUpdate(): void {
+    this.getUIContext().animateTo({
+      duration: 320,
+      curve: Curve.EaseOut,
+      iterations: 2,
+      playMode: PlayMode.Alternate,
+      onFinish: (): void => {
+        this.historyPulse = 1;
+      }
+    }, (): void => {
+      this.historyPulse = 1.018;
+    });
   }
 
   private async refreshSpaceDevices(): Promise<void> {
@@ -872,55 +1558,347 @@ struct Index {
     }
   }
 
-  private applyDesktopFilter(index: number): void {
-    let starredOnly: boolean = index === 1;
-    let shouldReload: boolean = this.historyStarredOnly !== starredOnly;
-    this.desktopFilter = index;
-    this.historyStarredOnly = starredOnly;
+  private async refreshDesktopMessages(): Promise<void> {
+    if (this.desktopRefreshBusy) {
+      return;
+    }
+    this.desktopRefreshBusy = true;
+    try {
+      if (this.spaceJoined) {
+        this.spaceNodeService.wakeConnections();
+        await this.connectAllSpaceDevices();
+        await this.consumeSpaceTextEvents();
+      }
+      if (this.hasConfig()) {
+        await this.loadServerHistory(true);
+      } else if (!this.spaceJoined) {
+        this.statusCode = 3;
+      }
+    } finally {
+      this.desktopRefreshBusy = false;
+    }
+  }
+
+  private desktopAllFiltersClear(): boolean {
+    return !this.desktopStarredOnly && this.desktopTypeFilter === 0 && this.desktopTagFilter === 0 &&
+      this.desktopSourceFilter === 0 && this.desktopTimeFilter === 0 && this.desktopExtensionFilter.length === 0;
+  }
+
+  private desktopSearchMatches(text: string): boolean {
+    let query: string = this.historySearchText.trim().toLowerCase();
+    return query.length === 0 || text.toLowerCase().indexOf(query) >= 0;
+  }
+
+  private scheduleDesktopHistorySearch(value: string): void {
+    this.historySearchText = value;
+    if (this.historySearchTimerId >= 0) {
+      clearTimeout(this.historySearchTimerId);
+      this.historySearchTimerId = -1;
+    }
+    if (!this.hasConfig()) {
+      return;
+    }
+    this.historySearchTimerId = setTimeout((): void => {
+      this.historySearchTimerId = -1;
+      this.loadServerHistory(true);
+    }, 300);
+  }
+
+  private submitDesktopHistorySearch(): void {
+    if (this.historySearchTimerId >= 0) {
+      clearTimeout(this.historySearchTimerId);
+      this.historySearchTimerId = -1;
+    }
+    if (this.hasConfig()) {
+      this.loadServerHistory(true);
+    }
+  }
+
+  private desktopFilterSelected(group: number, value: number): boolean {
+    if (group === 0) {
+      return value === 0 ? this.desktopAllFiltersClear() : this.desktopStarredOnly;
+    }
+    if (group === 1) {
+      return this.desktopTypeFilter === value;
+    }
+    if (group === 2) {
+      return this.desktopTagFilter === value;
+    }
+    if (group === 3) {
+      return this.desktopSourceFilter === value;
+    }
+    return this.desktopTimeFilter === value;
+  }
+
+  private applyDesktopFilter(group: number, value: number): void {
+    let previousStarredOnly: boolean = this.desktopStarredOnly;
+    if (group === 0 && value === 0) {
+      this.desktopStarredOnly = false;
+      this.desktopTypeFilter = 0;
+      this.desktopTagFilter = 0;
+      this.desktopSourceFilter = 0;
+      this.desktopTimeFilter = 0;
+      this.desktopExtensionFilter = '';
+    } else if (group === 0) {
+      this.desktopStarredOnly = !this.desktopStarredOnly;
+    } else if (group === 1) {
+      this.desktopTypeFilter = this.desktopTypeFilter === value ? 0 : value;
+    } else if (group === 2) {
+      this.desktopTagFilter = this.desktopTagFilter === value ? 0 : value;
+    } else if (group === 3) {
+      this.desktopSourceFilter = value;
+    } else {
+      this.desktopTimeFilter = value;
+    }
+    let shouldReload: boolean = previousStarredOnly !== this.desktopStarredOnly;
+    this.historyStarredOnly = this.desktopStarredOnly;
     if (shouldReload && this.hasConfig()) {
       this.loadServerHistory(true);
     }
   }
 
-  private desktopKindMatchesFilter(kind: string): boolean {
-    if (this.desktopFilter === 2) {
-      return kind === 'Text';
+  private applyDesktopExtensionFilter(extension: string): void {
+    this.desktopExtensionFilter = this.desktopExtensionFilter === extension ? '' : extension;
+  }
+
+  private desktopTextLooksRich(text: string): boolean {
+    let lowerText: string = text.toLowerCase();
+    return lowerText.indexOf('<p') >= 0 || lowerText.indexOf('<div') >= 0 ||
+      lowerText.indexOf('<span') >= 0 || lowerText.indexOf('<strong') >= 0 ||
+      lowerText.indexOf('<html') >= 0;
+  }
+
+  private desktopLinkHostIsValid(host: string): boolean {
+    if (host.length === 0 || host.endsWith('.')) {
+      return false;
     }
-    if (this.desktopFilter === 3) {
+    if (host === 'localhost') {
+      return true;
+    }
+    let portIndex: number = host.lastIndexOf(':');
+    let hostWithoutPort: string = portIndex > 0 ? host.substring(0, portIndex) : host;
+    let dotIndex: number = hostWithoutPort.indexOf('.');
+    return dotIndex > 0 && dotIndex < hostWithoutPort.length - 1;
+  }
+
+  private desktopTextLooksLikeLink(text: string): boolean {
+    let candidate: string = text.trim().toLowerCase();
+    if (candidate.length === 0 || candidate.indexOf(' ') >= 0 || candidate.indexOf('\n') >= 0 ||
+      candidate.indexOf('\r') >= 0 || candidate.indexOf('\t') >= 0) {
+      return false;
+    }
+    if (candidate.indexOf('mailto:') === 0) {
+      let email: string = candidate.substring(7);
+      let atIndex: number = email.indexOf('@');
+      let dotIndex: number = email.lastIndexOf('.');
+      return atIndex > 0 && dotIndex > atIndex + 1 && dotIndex < email.length - 1;
+    }
+    let hostStart: number = -1;
+    if (candidate.indexOf('https://') === 0) {
+      hostStart = 8;
+    } else if (candidate.indexOf('http://') === 0) {
+      hostStart = 7;
+    } else if (candidate.indexOf('ftp://') === 0) {
+      hostStart = 6;
+    } else if (candidate.indexOf('www.') === 0) {
+      hostStart = 0;
+    }
+    if (hostStart < 0 || hostStart >= candidate.length) {
+      return false;
+    }
+    let hostEnd: number = candidate.length;
+    let pathIndex: number = candidate.indexOf('/', hostStart);
+    if (pathIndex >= 0 && pathIndex < hostEnd) {
+      hostEnd = pathIndex;
+    }
+    let queryIndex: number = candidate.indexOf('?', hostStart);
+    if (queryIndex >= 0 && queryIndex < hostEnd) {
+      hostEnd = queryIndex;
+    }
+    let fragmentIndex: number = candidate.indexOf('#', hostStart);
+    if (fragmentIndex >= 0 && fragmentIndex < hostEnd) {
+      hostEnd = fragmentIndex;
+    }
+    return this.desktopLinkHostIsValid(candidate.substring(hostStart, hostEnd));
+  }
+
+  private desktopTextLooksLikeCode(text: string): boolean {
+    let sourceText: string = text.trim();
+    if (sourceText.length === 0 || this.desktopTextLooksLikeLink(sourceText)) {
+      return false;
+    }
+    let normalizedText: string = sourceText.toLowerCase();
+    let score: number = 0;
+    if (normalizedText.indexOf('import ') === 0 || normalizedText.indexOf('export ') === 0 ||
+      normalizedText.indexOf('package ') === 0 || normalizedText.indexOf('#include') === 0 ||
+      normalizedText.indexOf('using ') === 0 || normalizedText.indexOf('namespace ') === 0 ||
+      normalizedText.indexOf('fn ') === 0 || normalizedText.indexOf('func ') === 0) {
+      score += 2;
+    }
+    if (normalizedText.indexOf('function ') >= 0 || normalizedText.indexOf('class ') >= 0 ||
+      normalizedText.indexOf('interface ') >= 0 || normalizedText.indexOf('struct ') >= 0 ||
+      normalizedText.indexOf('enum ') >= 0 || normalizedText.indexOf('const ') >= 0 ||
+      normalizedText.indexOf('let ') >= 0 || normalizedText.indexOf('public ') >= 0 ||
+      normalizedText.indexOf('private ') >= 0) {
+      score += 2;
+    }
+    if (sourceText.indexOf('=>') >= 0 || sourceText.indexOf('===') >= 0 ||
+      sourceText.indexOf('!==') >= 0 || sourceText.indexOf('::') >= 0 ||
+      sourceText.indexOf('->') >= 0 || sourceText.indexOf(':=') >= 0) {
+      score += 2;
+    }
+    if (sourceText.indexOf('\n') >= 0 || sourceText.indexOf('\r') >= 0) {
+      score += 1;
+    }
+    if (sourceText.indexOf('{') >= 0 && sourceText.indexOf('}') >= 0) {
+      score += 1;
+    }
+    if (sourceText.indexOf('(') >= 0 && sourceText.indexOf(')') >= 0) {
+      score += 1;
+    }
+    if (sourceText.indexOf(';') >= 0) {
+      score += 1;
+    }
+    if (sourceText.indexOf('```') >= 0 || normalizedText.indexOf('#!/') === 0) {
+      score += 3;
+    }
+    if ((sourceText.indexOf('{') === 0 || sourceText.indexOf('[') === 0) &&
+      sourceText.indexOf('\":') >= 0) {
+      score += 3;
+    }
+    if ((normalizedText.indexOf('select ') === 0 && normalizedText.indexOf(' from ') > 0) ||
+      normalizedText.indexOf('insert into ') === 0 || normalizedText.indexOf('create table ') === 0) {
+      score += 3;
+    }
+    return score >= 3;
+  }
+
+  private desktopContentExtension(text: string): string {
+    let normalizedText: string = text.trim().toLowerCase();
+    let queryIndex: number = normalizedText.indexOf('?');
+    if (queryIndex >= 0) {
+      normalizedText = normalizedText.substring(0, queryIndex);
+    }
+    let fragmentIndex: number = normalizedText.indexOf('#');
+    if (fragmentIndex >= 0) {
+      normalizedText = normalizedText.substring(0, fragmentIndex);
+    }
+    let slashIndex: number = normalizedText.lastIndexOf('/');
+    let backslashIndex: number = normalizedText.lastIndexOf('\\');
+    let separatorIndex: number = slashIndex > backslashIndex ? slashIndex : backslashIndex;
+    let fileName: string = normalizedText.substring(separatorIndex + 1);
+    let dotIndex: number = fileName.lastIndexOf('.');
+    if (dotIndex <= 0 || dotIndex >= fileName.length - 1) {
+      return '';
+    }
+    let extension: string = fileName.substring(dotIndex + 1);
+    return extension.length <= 10 ? extension : '';
+  }
+
+  private desktopExtensionIsImage(extension: string): boolean {
+    return extension === 'jpg' || extension === 'jpeg' || extension === 'png' || extension === 'gif' ||
+      extension === 'webp' || extension === 'bmp' || extension === 'svg' || extension === 'heic';
+  }
+
+  private desktopExtensionIsCode(extension: string): boolean {
+    return extension === 'ts' || extension === 'ets' || extension === 'js' || extension === 'json' ||
+      extension === 'rs' || extension === 'go' || extension === 'py' || extension === 'java' ||
+      extension === 'c' || extension === 'h' || extension === 'cpp' || extension === 'css' ||
+      extension === 'html' || extension === 'xml';
+  }
+
+  private desktopTypeMatchesFilter(kind: string, text: string): boolean {
+    if (this.desktopTypeFilter === 1) {
+      return kind === 'Text' && !this.desktopTextLooksRich(text);
+    }
+    if (this.desktopTypeFilter === 2) {
+      return kind === 'RichText' || kind === 'Html' ||
+        (kind === 'Text' && this.desktopTextLooksRich(text));
+    }
+    if (this.desktopTypeFilter === 3) {
       return kind === 'Image';
     }
-    if (this.desktopFilter === 4) {
-      return kind === 'File';
+    if (this.desktopTypeFilter === 4) {
+      return kind === 'File' || kind === 'Folder';
     }
     return true;
   }
 
+  private desktopTagMatchesFilter(kind: string, text: string): boolean {
+    if (this.desktopTagFilter === 0) {
+      return true;
+    }
+    let normalizedText: string = text.trim().toLowerCase();
+    let extension: string = this.desktopContentExtension(text);
+    if (this.desktopTagFilter === 1) {
+      return this.desktopTextLooksLikeLink(text);
+    }
+    if (this.desktopTagFilter === 2) {
+      return this.desktopExtensionIsCode(extension) || this.desktopTextLooksLikeCode(text);
+    }
+    if (this.desktopTagFilter === 3) {
+      return kind === 'Image' || this.desktopExtensionIsImage(extension);
+    }
+    return kind === 'Folder' || normalizedText.endsWith('/') || normalizedText.endsWith('\\');
+  }
+
+  private desktopSourceMatchesFilter(serverItem: boolean): boolean {
+    if (this.desktopSourceFilter === 1) {
+      return serverItem;
+    }
+    if (this.desktopSourceFilter === 2) {
+      return !serverItem;
+    }
+    return true;
+  }
+
+  private desktopExtensionMatchesFilter(text: string): boolean {
+    if (this.desktopExtensionFilter.length === 0) {
+      return true;
+    }
+    return this.desktopContentExtension(text) === this.desktopExtensionFilter;
+  }
+
   private desktopTimeMatchesFilter(timestampMs: number): boolean {
-    if (this.desktopFilter !== 5 && this.desktopFilter !== 6) {
+    if (this.desktopTimeFilter === 0) {
       return true;
     }
     if (timestampMs <= 0) {
       return false;
     }
     let nowMs: number = Date.now();
-    if (this.desktopFilter === 6) {
-      let recentDurationMs: number = 7 * 24 * 60 * 60 * 1000;
-      return timestampMs >= nowMs - recentDurationMs && timestampMs <= nowMs;
+    let nowDate: Date = new Date(nowMs);
+    let todayStartMs: number = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate()).getTime();
+    let oneDayMs: number = 24 * 60 * 60 * 1000;
+    if (this.desktopTimeFilter === 1) {
+      return timestampMs >= todayStartMs && timestampMs <= nowMs;
     }
-    let itemDate: Date = new Date(timestampMs);
-    let today: Date = new Date(nowMs);
-    return itemDate.getFullYear() === today.getFullYear() &&
-      itemDate.getMonth() === today.getMonth() &&
-      itemDate.getDate() === today.getDate();
+    if (this.desktopTimeFilter === 2) {
+      return timestampMs >= todayStartMs - oneDayMs && timestampMs < todayStartMs;
+    }
+    if (this.desktopTimeFilter === 3) {
+      return timestampMs >= nowMs - 7 * oneDayMs && timestampMs <= nowMs;
+    }
+    if (this.desktopTimeFilter === 4) {
+      return timestampMs >= nowMs - 30 * oneDayMs && timestampMs <= nowMs;
+    }
+    if (this.desktopTimeFilter === 5) {
+      let weekDay: number = nowDate.getDay();
+      let daysFromMonday: number = weekDay === 0 ? 6 : weekDay - 1;
+      return timestampMs >= todayStartMs - daysFromMonday * oneDayMs && timestampMs <= nowMs;
+    }
+    let monthStartMs: number = new Date(nowDate.getFullYear(), nowDate.getMonth(), 1).getTime();
+    return timestampMs >= monthStartMs && timestampMs <= nowMs;
   }
 
   private desktopFilteredServerHistory(): ServerHistoryItem[] {
     let items: ServerHistoryItem[] = [];
     for (let index: number = 0; index < this.serverHistory.length; index++) {
       let item: ServerHistoryItem = this.serverHistory[index];
-      let starredMatches: boolean = this.desktopFilter !== 1 || item.starred;
-      if (starredMatches && this.desktopKindMatchesFilter(item.kind) &&
-        this.desktopTimeMatchesFilter(item.timestampMs)) {
+      let starredMatches: boolean = !this.desktopStarredOnly || item.starred;
+      if (starredMatches && this.desktopSearchMatches(item.text) && this.desktopSourceMatchesFilter(true) &&
+        this.desktopTypeMatchesFilter(item.kind, item.text) && this.desktopTagMatchesFilter(item.kind, item.text) &&
+        this.desktopTimeMatchesFilter(item.timestampMs) && this.desktopExtensionMatchesFilter(item.text)) {
         items.push(item);
       }
     }
@@ -931,19 +1909,22 @@ struct Index {
     let items: ClipboardHistoryItem[] = [];
     for (let index: number = 0; index < this.history.length; index++) {
       let item: ClipboardHistoryItem = this.history[index];
-      let starredMatches: boolean = this.desktopFilter !== 1 || item.starred;
-      if (starredMatches && this.desktopKindMatchesFilter(item.kind) &&
-        this.desktopTimeMatchesFilter(item.timestampMs)) {
+      let starredMatches: boolean = !this.desktopStarredOnly || item.starred;
+      if (starredMatches && this.desktopSearchMatches(item.text) && this.desktopSourceMatchesFilter(false) &&
+        this.desktopTypeMatchesFilter(item.kind, item.text) && this.desktopTagMatchesFilter(item.kind, item.text) &&
+        this.desktopTimeMatchesFilter(item.timestampMs) && this.desktopExtensionMatchesFilter(item.text)) {
         items.push(item);
       }
     }
     return items;
   }
 
-  private selectDesktopServerItem(item: ServerHistoryItem): void {
+  private async selectDesktopServerItem(item: ServerHistoryItem): Promise<void> {
     this.desktopSelectedId = item.id;
     this.desktopSelectedText = item.text;
     this.desktopSelectedMeta = item.kind + ' · ' + item.time;
+    this.desktopSelectedDirection = '';
+    this.desktopGestureShareHintDismissed = false;
     this.desktopSelectedImage = null;
     this.desktopSelectedImageRevision += 1;
     this.desktopSelectedFileData = null;
@@ -951,12 +1932,52 @@ struct Index {
     this.desktopFilePreviewState = 0;
     this.resetDesktopVideoAspectRatio();
     this.releaseDesktopAudio();
+    if (!item.hasData || (item.kind !== 'File' && item.kind !== 'Image')) {
+      return;
+    }
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context === undefined) {
+      this.desktopFilePreviewState = 2;
+      return;
+    }
+    if (item.kind === 'File') {
+      let cachedPath: string = this.historyStorageService.findServerFile(context, item.id, item.text);
+      if (cachedPath.length > 0) {
+        this.desktopSelectedFilePath = cachedPath;
+        return;
+      }
+    }
+    this.desktopFilePreviewState = 1;
+    try {
+      let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
+      let data: Uint8Array = await client.getHistoryPayload(item);
+      if (this.desktopSelectedId !== item.id || data.length === 0) {
+        return;
+      }
+      if (item.kind === 'Image') {
+        this.desktopSelectedImage = await this.clipboardService.decodeImage(data);
+        this.desktopSelectedImageRevision += 1;
+      } else {
+        let filePath: string = this.historyStorageService.storeServerFile(context, item.id, item.text, data);
+        if (filePath.length === 0) {
+          throw new Error('failed to persist server history file');
+        }
+        this.desktopSelectedFilePath = filePath;
+      }
+      this.desktopFilePreviewState = 0;
+    } catch (error) {
+      if (this.desktopSelectedId === item.id) {
+        this.desktopFilePreviewState = 2;
+      }
+    }
   }
 
   private selectDesktopSessionItem(item: ClipboardHistoryItem): void {
     this.desktopSelectedId = item.id;
     this.desktopSelectedText = item.text;
-    this.desktopSelectedMeta = item.direction === 'sent' ? '↑ ' + item.time : '↓ ' + item.time;
+    this.desktopSelectedMeta = item.time;
+    this.desktopSelectedDirection = item.direction;
+    this.desktopGestureShareHintDismissed = false;
     this.desktopSelectedImage = item.imagePreview;
     this.desktopSelectedImageRevision += 1;
     this.desktopSelectedFileData = item.fileData;
@@ -1788,6 +2809,22 @@ struct Index {
     return 1;
   }
 
+  private latestImageAspectRatio(): number {
+    let pixelMap: image.PixelMap | null = this.latestImage;
+    if (pixelMap === null) {
+      return 1;
+    }
+    try {
+      let imageInfo: image.ImageInfo = pixelMap.getImageInfoSync();
+      if (imageInfo.size.width > 0 && imageInfo.size.height > 0) {
+        return imageInfo.size.width / imageInfo.size.height;
+      }
+    } catch (error) {
+      console.error('UniClipboard failed to read the latest image preview size.');
+    }
+    return 1;
+  }
+
   private resetDesktopVideoAspectRatio(): void {
     this.desktopVideoAspectRatio = 16 / 9;
     this.desktopVideoRatioKey = '';
@@ -1893,6 +2930,97 @@ struct Index {
     }
   }
 
+  private async copyServerHistoryItem(item: ServerHistoryItem): Promise<void> {
+    await this.selectDesktopServerItem(item);
+    await this.copyDesktopSelection();
+  }
+
+  private async copyLocalHistoryItem(item: ClipboardHistoryItem): Promise<void> {
+    try {
+      if (item.kind === 'Image' && item.imagePreview !== null) {
+        await this.clipboardService.writeImage(item.imagePreview);
+      } else if (item.text.length > 0) {
+        await this.clipboardService.writeText(item.text);
+      }
+      this.statusCode = 2;
+    } catch (error) {
+      this.statusCode = 3;
+    }
+  }
+
+  private toggleLocalHistoryStarred(item: ClipboardHistoryItem): void {
+    let items: ClipboardHistoryItem[] = [];
+    for (let index: number = 0; index < this.history.length; index++) {
+      let current: ClipboardHistoryItem = this.history[index];
+      if (current.id === item.id) {
+        current.starred = !current.starred;
+      }
+      items.push(current);
+    }
+    this.history = items;
+    this.animateHistoryUpdate();
+    this.scheduleHistorySave();
+  }
+
+  private async sendLocalHistoryItem(item: ClipboardHistoryItem): Promise<void> {
+    if (item.kind === 'Image' && item.imagePreview !== null) {
+      this.composerImage = item.imagePreview;
+      await this.sendImage();
+      return;
+    }
+    if (item.kind === 'File' && item.filePath.length > 0) {
+      try {
+        let sourceFile: fileIo.File = fileIo.openSync(item.filePath, fileIo.OpenMode.READ_ONLY);
+        let sourceStat: fileIo.Stat = fileIo.statSync(sourceFile.fd);
+        fileIo.closeSync(sourceFile.fd);
+        this.composerFileUri = item.filePath;
+        this.composerFileSize = sourceStat.size;
+        this.composerFileName = item.text;
+        await this.sendFile();
+      } catch (error) {
+        this.statusCode = 3;
+      }
+      return;
+    }
+    this.composerText = item.text;
+    await this.sendText();
+  }
+
+  private async sendServerHistoryItem(item: ServerHistoryItem): Promise<void> {
+    await this.selectDesktopServerItem(item);
+    if (item.kind === 'Image' && this.desktopSelectedImage !== null) {
+      this.composerImage = this.desktopSelectedImage;
+      await this.sendImage();
+      return;
+    }
+    if (item.kind === 'File' && this.desktopSelectedFilePath.length > 0) {
+      try {
+        let sourceFile: fileIo.File = fileIo.openSync(this.desktopSelectedFilePath, fileIo.OpenMode.READ_ONLY);
+        let sourceStat: fileIo.Stat = fileIo.statSync(sourceFile.fd);
+        fileIo.closeSync(sourceFile.fd);
+        this.composerFileUri = this.desktopSelectedFilePath;
+        this.composerFileSize = sourceStat.size;
+        this.composerFileName = item.text;
+        await this.sendFile();
+      } catch (error) {
+        this.statusCode = 3;
+      }
+      return;
+    }
+    this.composerText = item.text;
+    await this.sendText();
+  }
+
+  private async sendServerHistoryItemToTarget(item: ServerHistoryItem, target: string): Promise<void> {
+    console.info('UniClipboard history send target: ' + target);
+    await this.sendServerHistoryItem(item);
+  }
+
+  private async sendLocalHistoryItemToTarget(item: ClipboardHistoryItem, target: string): Promise<void> {
+    console.info('UniClipboard history send target: ' + target);
+    await this.sendLocalHistoryItem(item);
+  }
+
   private toggleDesktopSelectedStar(): void {
     for (let index: number = 0; index < this.serverHistory.length; index++) {
       let item: ServerHistoryItem = this.serverHistory[index];
@@ -1910,6 +3038,7 @@ struct Index {
       items.push(item);
     }
     this.history = items;
+    this.animateHistoryUpdate();
     this.scheduleHistorySave();
   }
 
@@ -1977,6 +3106,7 @@ struct Index {
       this.desktopSelectedId = '';
       this.desktopSelectedText = '';
       this.desktopSelectedMeta = '';
+      this.desktopSelectedDirection = '';
       this.desktopSelectedImage = null;
       this.desktopSelectedFileData = null;
       this.desktopSelectedFilePath = '';
@@ -2006,19 +3136,22 @@ struct Index {
 
   private addHistory(text: string, direction: string, kind: string = 'Text',
     imagePreview: image.PixelMap | null = null, fileData: Uint8Array | null = null,
-    filePath: string = ''): void {
+    filePath: string = '', historyId: string = ''): void {
     let timestampMs: number = Date.now();
+    let itemId: string = historyId.length > 0 ? historyId : timestampMs.toString();
     let item: ClipboardHistoryItem = new ClipboardHistoryItem(
-      timestampMs.toString(), text, direction, this.currentTime(), kind, imagePreview, fileData, filePath, timestampMs);
+      itemId, text, direction, this.currentTime(), kind, imagePreview, fileData, filePath, timestampMs);
     let items: ClipboardHistoryItem[] = [item];
     for (let index: number = 0; index < this.history.length && items.length < 200; index++) {
       items.push(this.history[index]);
     }
     this.history = items;
+    this.animateHistoryUpdate();
     this.scheduleHistorySave();
   }
 
   private connectionChanged(): void {
+    this.realtimeAutoConnect = false;
     if (this.realtimeActive) {
       this.stopRealtime();
     }
@@ -2043,6 +3176,7 @@ struct Index {
       let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
       await client.probe();
       this.saveConfig();
+      this.startRealtime();
       this.statusCode = 2;
     } catch (error) {
       this.statusCode = 3;
@@ -2066,6 +3200,8 @@ struct Index {
       this.connectUriState = 1;
       this.statusCode = 0;
       this.saveConfig();
+      this.startRealtime();
+      this.pullLatest();
     } catch (error) {
       this.connectUriState = 2;
     }
@@ -2112,6 +3248,7 @@ struct Index {
       this.desktopSelectedId = '';
       this.desktopSelectedText = '';
       this.desktopSelectedMeta = '';
+      this.desktopSelectedDirection = '';
       this.desktopSelectedImage = null;
       this.desktopSelectedFileData = null;
       this.desktopSelectedFilePath = '';
@@ -2127,13 +3264,32 @@ struct Index {
   }
 
   private async applyLatestContent(result: SyncContent, recordHistory: boolean): Promise<void> {
+    if (this.latestContentId !== result.contentId) {
+      this.desktopGestureShareHintDismissed = false;
+    }
     let pixelMap: image.PixelMap | null = null;
     let displayText: string = this.contentDisplayText(result);
+    if (this.desktopSelectedId.length === 0) {
+      await this.releaseDesktopAudio();
+      this.resetDesktopVideoAspectRatio();
+    }
     if (result.kind === 'Image') {
       if (result.data.length === 0) {
         throw new Error('image payload is empty');
       }
       pixelMap = await this.clipboardService.decodeImage(result.data);
+    }
+    let fileData: Uint8Array | null = null;
+    let filePath: string = '';
+    let fileName: string = '';
+    if (result.kind === 'File') {
+      fileName = result.dataName.length > 0 ? result.dataName : displayText;
+      if (result.data.length > 0) {
+        fileData = result.data;
+        filePath = this.cacheLatestFile(result.data);
+      }
+    } else {
+      this.removeLatestCachedFile();
     }
     this.latestKind = result.kind;
     this.latestText = displayText;
@@ -2141,9 +3297,55 @@ struct Index {
     if (pixelMap !== null) {
       this.latestImageRevision += 1;
     }
+    this.latestFileName = fileName;
+    this.latestFileData = fileData;
+    this.latestFilePath = filePath;
+    if (result.kind === 'File') {
+      this.latestFileRevision += 1;
+      this.desktopFilePreviewState = 0;
+    }
     this.latestContentId = result.contentId;
+    this.animateLatestContent();
     if (recordHistory) {
-      this.addHistory(displayText, 'received', result.kind, pixelMap);
+      this.addHistory(displayText, 'received', result.kind, pixelMap, fileData, filePath);
+    }
+  }
+
+  private cacheLatestFile(data: Uint8Array): string {
+    this.removeLatestCachedFile();
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context === undefined || data.length === 0) {
+      return '';
+    }
+    let targetPath: string = context.cacheDir + '/uniclipboard_latest_file_' + Date.now().toString();
+    try {
+      let targetFile: fileIo.File = fileIo.openSync(targetPath,
+        fileIo.OpenMode.CREATE | fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.TRUNC);
+      try {
+        fileIo.writeSync(targetFile.fd, data.buffer);
+      } finally {
+        fileIo.closeSync(targetFile.fd);
+      }
+      this.latestCachedFilePath = targetPath;
+      return targetPath;
+    } catch (error) {
+      try {
+        fileIo.unlinkSync(targetPath);
+      } catch (unlinkError) {
+      }
+      return '';
+    }
+  }
+
+  private removeLatestCachedFile(): void {
+    let cachedPath: string = this.latestCachedFilePath;
+    this.latestCachedFilePath = '';
+    if (cachedPath.length === 0) {
+      return;
+    }
+    try {
+      fileIo.unlinkSync(cachedPath);
+    } catch (error) {
     }
   }
 
@@ -2185,28 +3387,9 @@ struct Index {
         this.composerText = '';
         return;
       }
-      if (!await this.requestClipboardPermission()) {
-        this.statusCode = 3;
-        return;
-      }
       this.composerText = await this.clipboardService.readText();
     } catch (error) {
       this.statusCode = 3;
-    }
-  }
-
-  private async requestClipboardPermission(): Promise<boolean> {
-    let context: common.Context | undefined = this.getUIContext().getHostContext();
-    if (context === undefined) {
-      return false;
-    }
-    let permissions: Permissions[] = ['ohos.permission.READ_PASTEBOARD'];
-    let atManager: abilityAccessCtrl.AtManager = abilityAccessCtrl.createAtManager();
-    try {
-      let result: PermissionRequestResult = await atManager.requestPermissionsFromUser(context, permissions);
-      return result.authResults.length > 0 && result.authResults[0] === 0;
-    } catch (error) {
-      return false;
     }
   }
 
@@ -2217,11 +3400,6 @@ struct Index {
     this.imageReadState = 1;
     this.imageSendState = 0;
     try {
-      if (!await this.requestClipboardPermission()) {
-        this.imageReadState = 4;
-        this.statusCode = 3;
-        return;
-      }
       let pixelMap: image.PixelMap | null = await this.clipboardService.readImage();
       this.composerImage = pixelMap;
       if (pixelMap !== null) {
@@ -2243,7 +3421,7 @@ struct Index {
     if (text.length === 0) {
       return;
     }
-    if (!this.spaceJoined && !this.hasConfig()) {
+    if (!this.spaceJoined && !this.hasConfig() && !this.mobileSyncRunning) {
       this.statusCode = 3;
       this.openConnectionSettings();
       return;
@@ -2251,17 +3429,48 @@ struct Index {
     this.busy = true;
     this.statusCode = 1;
     try {
-      if (this.spaceJoined) {
-        let acceptedCount: number = await this.spaceNodeService.sendText(text);
-        console.info('UniClipboard P2P accepted peer count: ' + acceptedCount.toString());
-        if (acceptedCount <= 0) {
-          throw new Error('no online space peer accepted the clipboard');
+      let delivered: boolean = false;
+      let mobilePublished: boolean = false;
+      if (this.mobileSyncRunning) {
+        try {
+          this.latestContentId = this.mobileSyncServerService.publishText(text);
+          mobilePublished = true;
+        } catch (error) {
+          mobilePublished = false;
         }
-        this.spacePeerConnected = true;
-        this.latestContentId = '';
-      } else {
-        let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
-        this.latestContentId = await client.putText(text);
+      }
+      if (this.hasConfig()) {
+        try {
+          let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
+          this.latestContentId = await client.putText(text);
+          delivered = true;
+          console.info('UniClipboard text sent through desktop relay');
+        } catch (error) {
+          console.warn('UniClipboard desktop relay unavailable, trying P2P');
+        }
+      }
+      if (!delivered && this.spaceJoined) {
+        try {
+          let acceptedCount: number = await this.spaceNodeService.sendText(text);
+          console.info('UniClipboard P2P accepted peer count: ' + acceptedCount.toString());
+          if (acceptedCount > 0) {
+            this.spacePeerConnected = true;
+            this.latestContentId = '';
+            delivered = true;
+          } else if (!mobilePublished) {
+            throw new Error('no online space peer accepted the clipboard');
+          }
+        } catch (error) {
+          if (!mobilePublished) {
+            throw new Error('space text delivery failed');
+          }
+        }
+      }
+      if (!delivered && mobilePublished) {
+        delivered = true;
+      }
+      if (!delivered) {
+        throw new Error('no desktop or space peer accepted the clipboard');
       }
       this.latestText = text;
       this.latestKind = 'Text';
@@ -2283,7 +3492,7 @@ struct Index {
   }
 
   private async sendImage(): Promise<void> {
-    if (!this.spaceJoined && !this.hasConfig()) {
+    if (!this.spaceJoined && !this.hasConfig() && !this.mobileSyncRunning) {
       this.statusCode = 3;
       this.openConnectionSettings();
       return;
@@ -2296,21 +3505,53 @@ struct Index {
     this.statusCode = 1;
     this.imageSendState = 1;
     try {
-      if (this.spaceJoined) {
-        let data: Uint8Array = await this.clipboardService.encodeSpaceImage(pixelMap);
-        let acceptedCount: number = await this.spaceNodeService.sendImage(data);
-        console.info('UniClipboard P2P image accepted peer count: ' + acceptedCount.toString());
-        if (acceptedCount <= 0) {
-          throw new Error('no online space peer accepted the clipboard image');
+      let delivered: boolean = false;
+      let mobilePublished: boolean = false;
+      if (this.mobileSyncRunning) {
+        try {
+          let mobileData: Uint8Array = await this.clipboardService.encodePng(pixelMap);
+          this.latestContentId = this.mobileSyncServerService.publishImage(mobileData);
+          mobilePublished = true;
+        } catch (error) {
+          mobilePublished = false;
         }
-        this.spacePeerConnected = true;
-        this.latestContentId = '';
-        this.latestText = 'image.jpg';
-      } else {
-        let data: Uint8Array = await this.clipboardService.encodePng(pixelMap);
-        let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
-        this.latestContentId = await client.putImage(data);
-        this.latestText = 'image.png';
+      }
+      if (this.hasConfig()) {
+        try {
+          let data: Uint8Array = await this.clipboardService.encodePng(pixelMap);
+          let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
+          this.latestContentId = await client.putImage(data);
+          this.latestText = 'image.png';
+          delivered = true;
+          console.info('UniClipboard image sent through desktop relay');
+        } catch (error) {
+          console.warn('UniClipboard desktop image relay unavailable, trying P2P');
+        }
+      }
+      if (!delivered && this.spaceJoined) {
+        try {
+          let data: Uint8Array = await this.clipboardService.encodeSpaceImage(pixelMap);
+          let acceptedCount: number = await this.spaceNodeService.sendImage(data);
+          console.info('UniClipboard P2P image accepted peer count: ' + acceptedCount.toString());
+          if (acceptedCount > 0) {
+            this.spacePeerConnected = true;
+            this.latestContentId = '';
+            this.latestText = 'image.jpg';
+            delivered = true;
+          } else if (!mobilePublished) {
+            throw new Error('no online space peer accepted the clipboard image');
+          }
+        } catch (error) {
+          if (!mobilePublished) {
+            throw new Error('space image delivery failed');
+          }
+        }
+      }
+      if (!delivered && mobilePublished) {
+        delivered = true;
+      }
+      if (!delivered) {
+        throw new Error('no desktop or space peer accepted the clipboard image');
       }
       this.latestKind = 'Image';
       this.latestImage = pixelMap;
@@ -2333,6 +3574,20 @@ struct Index {
     }
   }
 
+  private resetComposerFile(removeStagedFile: boolean): void {
+    if (removeStagedFile && this.composerFileHistoryId.length > 0 && this.composerFileUri.length > 0) {
+      let context: common.Context | undefined = this.getUIContext().getHostContext();
+      if (context !== undefined) {
+        this.historyStorageService.discardManagedFile(context, this.composerFileUri);
+      }
+    }
+    this.composerFileData = null;
+    this.composerFileUri = '';
+    this.composerFileSize = 0;
+    this.composerFileName = '';
+    this.composerFileHistoryId = '';
+  }
+
   private async selectFile(): Promise<void> {
     let context: common.Context | undefined = this.getUIContext().getHostContext();
     if (context === undefined) {
@@ -2351,23 +3606,29 @@ struct Index {
       }
       let selection: ClipboardFileSelection = this.clipboardService.inspectFile(uris[0]);
       if (selection.size <= 0) {
-        this.composerFileData = null;
-        this.composerFileUri = '';
-        this.composerFileSize = 0;
-        this.composerFileName = '';
+        this.resetComposerFile(true);
         this.fileTransferState = 5;
         return;
       }
+      let historyId: string = Date.now().toString();
+      let stagedPath: string = this.historyStorageService.stageFile(
+        context, selection.uri, historyId, selection.fileName);
+      if (stagedPath.length === 0) {
+        throw new Error('failed to persist selected file');
+      }
+      let previousPath: string = this.composerFileUri;
+      let previousHistoryId: string = this.composerFileHistoryId;
       this.composerFileData = null;
-      this.composerFileUri = selection.uri;
+      this.composerFileUri = stagedPath;
       this.composerFileSize = selection.size;
       this.composerFileName = selection.fileName;
+      this.composerFileHistoryId = historyId;
+      if (previousHistoryId.length > 0 && previousPath.length > 0 && previousPath !== stagedPath) {
+        this.historyStorageService.discardManagedFile(context, previousPath);
+      }
       this.fileTransferState = 2;
     } catch (error) {
-      this.composerFileData = null;
-      this.composerFileUri = '';
-      this.composerFileSize = 0;
-      this.composerFileName = '';
+      this.resetComposerFile(true);
       this.fileTransferState = 4;
     }
   }
@@ -2375,7 +3636,8 @@ struct Index {
   private async sendFile(): Promise<void> {
     let sourceUri: string = this.composerFileUri;
     let sourceSize: number = this.composerFileSize;
-    if (!this.spaceJoined || sourceUri.length === 0 || sourceSize <= 0 || this.composerFileName.length === 0) {
+    if ((!this.spaceJoined && !this.hasConfig() && !this.mobileSyncRunning) || sourceUri.length === 0 ||
+      sourceSize <= 0 || this.composerFileName.length === 0) {
       this.fileTransferState = 4;
       return;
     }
@@ -2383,13 +3645,53 @@ struct Index {
     this.statusCode = 1;
     this.fileTransferState = 3;
     try {
-      let sendResult: NativeSpaceFileSendResult = await this.spaceNodeService.sendFileFromUri(
-        sourceUri, sourceSize, this.composerFileName);
-      if (sendResult.acceptedCount <= 0) {
-        throw new Error('no online space peer accepted the file');
+      let delivered: boolean = false;
+      let mobilePublished: boolean = false;
+      if (this.mobileSyncRunning) {
+        try {
+          this.latestContentId = this.mobileSyncServerService.publishFile(
+            sourceUri, sourceSize, this.composerFileName);
+          mobilePublished = true;
+        } catch (error) {
+          mobilePublished = false;
+        }
       }
-      this.pendingFileTransferId = sendResult.transferId;
-      this.spacePeerConnected = true;
+      if (this.hasConfig()) {
+        try {
+          let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
+          this.latestContentId = await client.putFileFromUri(
+            sourceUri, sourceSize, this.composerFileName);
+          this.pendingFileTransferId = '';
+          delivered = true;
+          console.info('UniClipboard file sent through desktop relay');
+        } catch (error) {
+          console.warn('UniClipboard desktop file relay unavailable, trying P2P');
+        }
+      }
+      if (!delivered && this.spaceJoined) {
+        try {
+          let sendResult: NativeSpaceFileSendResult = await this.spaceNodeService.sendFileFromUri(
+            sourceUri, sourceSize, this.composerFileName);
+          if (sendResult.acceptedCount > 0) {
+            this.pendingFileTransferId = sendResult.transferId;
+            this.latestContentId = '';
+            this.spacePeerConnected = true;
+            delivered = true;
+          } else if (!mobilePublished) {
+            throw new Error('no online space peer accepted the file');
+          }
+        } catch (error) {
+          if (!mobilePublished) {
+            throw new Error('space file delivery failed');
+          }
+        }
+      }
+      if (!delivered && mobilePublished) {
+        delivered = true;
+      }
+      if (!delivered) {
+        throw new Error('no desktop or space peer accepted the file');
+      }
       this.latestKind = 'File';
       this.latestText = this.composerFileName;
       this.latestFileName = this.composerFileName;
@@ -2401,11 +3703,9 @@ struct Index {
       if (this.desktopSelectedId.length === 0) {
         this.releaseDesktopAudio();
       }
-      this.addHistory(this.composerFileName, 'sent', 'File', null, null, sourceUri);
-      this.composerFileData = null;
-      this.composerFileUri = '';
-      this.composerFileSize = 0;
-      this.composerFileName = '';
+      this.addHistory(this.composerFileName, 'sent', 'File', null, null, sourceUri,
+        this.composerFileHistoryId);
+      this.resetComposerFile(false);
       this.fileTransferState = 7;
       this.statusCode = 2;
     } catch (error) {
@@ -2463,6 +3763,7 @@ struct Index {
       this.saveConfig();
       let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
       client.startRealtime();
+      this.realtimeAutoConnect = true;
       this.realtimeActive = true;
       this.statusCode = 1;
     } catch (error) {
@@ -2474,6 +3775,7 @@ struct Index {
   private stopRealtime(): void {
     let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
     client.stopRealtime();
+    this.realtimeAutoConnect = false;
     this.realtimeActive = false;
     this.statusCode = 0;
   }
@@ -2487,6 +3789,7 @@ struct Index {
   }
 
   private async consumeRealtimeEvents(): Promise<void> {
+    await this.consumeMobileSyncEvents();
     await this.consumeSpaceTextEvents();
     this.realtimeTick += 1;
     if (this.spaceInvitationExpiresAtMs > 0 && Date.now() >= this.spaceInvitationExpiresAtMs) {
@@ -2495,6 +3798,13 @@ struct Index {
     }
     if (this.spaceJoined && this.realtimeTick % 4 === 0) {
       this.refreshSpaceDevices();
+    }
+    if (this.mobileSyncEnabled && this.realtimeTick % 4 === 0) {
+      await this.refreshMobileSyncDevices();
+    }
+    if (this.realtimeAutoConnect && this.hasConfig() && !this.realtimeActive &&
+      this.realtimeTick % 5 === 0) {
+      this.startRealtime();
     }
     if (!this.realtimeActive || this.sseEventBusy) {
       return;
@@ -2535,6 +3845,9 @@ struct Index {
     if (!this.spaceJoined) {
       return;
     }
+    if (this.spaceDevices.length === 0) {
+      await this.refreshSpaceDevices();
+    }
     let events: NativeSpaceTextEvent[] = this.spaceNodeService.drainTextEvents();
     for (let index: number = 0; index < events.length; index++) {
       let event: NativeSpaceTextEvent = events[index];
@@ -2548,6 +3861,8 @@ struct Index {
       this.addHistory(event.text, 'received');
       try {
         await this.clipboardService.writeText(event.text);
+        this.notifyReceivedContent('Text', event.text, null, 0,
+          this.sourceLabelForDevice(event.fromDeviceId));
       } catch (error) {
         this.statusCode = 3;
       }
@@ -2571,6 +3886,8 @@ struct Index {
         this.latestContentId = event.snapshotHash;
         this.addHistory('image.jpg', 'received', 'Image', pixelMap);
         await this.clipboardService.writeImage(pixelMap);
+        this.notifyReceivedContent('Image', 'image.jpg', pixelMap, 0,
+          this.sourceLabelForDevice(event.fromDeviceId));
       } catch (error) {
         this.statusCode = 3;
       }
@@ -2582,6 +3899,14 @@ struct Index {
     let fileEvents: NativeSpaceFileEvent[] = this.spaceNodeService.drainFileEvents();
     for (let index: number = 0; index < fileEvents.length; index++) {
       let event: NativeSpaceFileEvent = fileEvents[index];
+      let filePreview: image.PixelMap | null = null;
+      if (this.isImageFileName(event.fileName) && event.data.length > 0) {
+        try {
+          filePreview = await this.clipboardService.decodeImage(event.data);
+        } catch (error) {
+          filePreview = null;
+        }
+      }
       this.latestKind = 'File';
       this.latestText = event.fileName;
       this.latestFileName = event.fileName;
@@ -2597,6 +3922,8 @@ struct Index {
       this.latestContentId = event.snapshotHash;
       this.addHistory(event.fileName, 'received', 'File', null,
         event.data.length > 0 ? event.data : null, event.localPath);
+      this.notifyReceivedContent('File', event.fileName, filePreview, event.data.length,
+        this.sourceLabelForDevice(event.fromDeviceId));
     }
     if (fileEvents.length > 0) {
       this.spacePeerConnected = true;
@@ -2618,6 +3945,9 @@ struct Index {
         this.statusCode = 3;
       }
     }
+    if (events.length > 0 || imageEvents.length > 0 || fileEvents.length > 0) {
+      this.animateLatestContent();
+    }
   }
 
   private async pullLatestFromRealtime(client: MobileSyncClient): Promise<void> {
@@ -2629,8 +3959,79 @@ struct Index {
       incomingDisplayText === this.latestText;
     if (!sameContentId && !sameLegacyContent) {
       await this.applyLatestContent(result, true);
+      let notificationPreview: image.PixelMap | null = result.kind === 'Image' ? this.latestImage : null;
+      if (result.kind === 'File' && this.isImageFileName(result.dataName) && result.data.length > 0) {
+        try {
+          notificationPreview = await this.clipboardService.decodeImage(result.data);
+        } catch (error) {
+          notificationPreview = null;
+        }
+      }
+      let notificationName: string = result.kind === 'File' && result.dataName.length > 0 ?
+        result.dataName : this.contentDisplayText(result);
+      this.notifyReceivedContent(result.kind, notificationName, notificationPreview, result.data.length);
     }
     this.statusCode = 2;
+  }
+
+  private notifyReceivedContent(kind: string, displayName: string, preview: image.PixelMap | null = null,
+    fileSize: number = 0, sourceLabel: string = ''): void {
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context === undefined) {
+      return;
+    }
+    this.receivedNotificationService.notifyReceived(context as common.UIAbilityContext, kind, displayName,
+      preview, fileSize, sourceLabel);
+  }
+
+  private sourceLabelForDevice(deviceId: string): string {
+    if (deviceId.length === 0) {
+      return '';
+    }
+    for (let index: number = 0; index < this.spaceDevices.length; index++) {
+      let device: NativeSpaceDevice = this.spaceDevices[index];
+      if (device.deviceId !== deviceId) {
+        continue;
+      }
+      let typeLabel: string = this.sourceDeviceTypeLabel(device.deviceType);
+      if (device.deviceName.length > 0) {
+        return device.deviceName + ' · ' + typeLabel;
+      }
+      return typeLabel;
+    }
+    return '远端设备';
+  }
+
+  private sourceDeviceTypeLabel(deviceType: string): string {
+    if (deviceType === 'phone') {
+      return '手机';
+    }
+    if (deviceType === 'tablet') {
+      return '平板';
+    }
+    if (deviceType === '2in1') {
+      return '电脑';
+    }
+    if (deviceType === 'tv') {
+      return '电视';
+    }
+    if (deviceType === 'wearable') {
+      return '穿戴设备';
+    }
+    if (deviceType === 'car') {
+      return '车机';
+    }
+    return '电脑';
+  }
+
+  private isImageFileName(name: string): boolean {
+    let dot: number = name.lastIndexOf('.');
+    if (dot < 0 || dot === name.length - 1) {
+      return false;
+    }
+    let extension: string = name.substring(dot + 1).toLowerCase();
+    return extension === 'jpg' || extension === 'jpeg' || extension === 'png' || extension === 'gif' ||
+      extension === 'webp' || extension === 'bmp';
   }
 
   private async loadServerHistory(reset: boolean): Promise<void> {
@@ -2761,13 +4162,145 @@ struct Index {
   }
 
   @Builder
+  private historyServerSendToMenu(item: ServerHistoryItem) {
+    Menu() {
+      MenuItem({
+        symbolStartIcon: this.historyMenuSymbol($r('sys.symbol.link')),
+        content: $r('app.string.history_send_to_all_action')
+      }).onClick((): void => {
+          this.sendServerHistoryItemToTarget(item, 'all');
+      })
+      ForEach(this.spaceDevices, (device: NativeSpaceDevice) => {
+        MenuItem({
+          content: device.deviceName
+        }).enabled(device.online).onClick((): void => {
+            this.sendServerHistoryItemToTarget(item, device.deviceName);
+        })
+      }, (device: NativeSpaceDevice): string => 'space-' + device.deviceId)
+      ForEach(this.mobileSyncDevices, (device: NativeMobileSyncDevice) => {
+        MenuItem({
+          content: device.label
+        }).enabled(device.online).onClick((): void => {
+            this.sendServerHistoryItemToTarget(item, device.label);
+        })
+      }, (device: NativeMobileSyncDevice): string => 'mobile-' + device.deviceId)
+    }.menuItemDivider({
+      strokeWidth: LengthMetrics.vp(1),
+      color: $r('app.color.divider'),
+      startMargin: LengthMetrics.vp(12),
+      endMargin: LengthMetrics.vp(12)
+    })
+  }
+
+  @Builder
+  private historyLocalSendToMenu(item: ClipboardHistoryItem) {
+    Menu() {
+      MenuItem({
+        symbolStartIcon: this.historyMenuSymbol($r('sys.symbol.link')),
+        content: $r('app.string.history_send_to_all_action')
+      }).onClick((): void => {
+          this.sendLocalHistoryItemToTarget(item, 'all');
+      })
+      ForEach(this.spaceDevices, (device: NativeSpaceDevice) => {
+        MenuItem({
+          content: device.deviceName
+        }).enabled(device.online).onClick((): void => {
+            this.sendLocalHistoryItemToTarget(item, device.deviceName);
+        })
+      }, (device: NativeSpaceDevice): string => 'space-' + device.deviceId)
+      ForEach(this.mobileSyncDevices, (device: NativeMobileSyncDevice) => {
+        MenuItem({
+          content: device.label
+        }).enabled(device.online).onClick((): void => {
+            this.sendLocalHistoryItemToTarget(item, device.label);
+        })
+      }, (device: NativeMobileSyncDevice): string => 'mobile-' + device.deviceId)
+    }.menuItemDivider({
+      strokeWidth: LengthMetrics.vp(1),
+      color: $r('app.color.divider'),
+      startMargin: LengthMetrics.vp(12),
+      endMargin: LengthMetrics.vp(12)
+    })
+  }
+
+  @Builder
+  private historyServerContextMenu(item: ServerHistoryItem) {
+    Menu() {
+      MenuItem({
+        symbolStartIcon: this.historyMenuSymbol($r('sys.symbol.clipboard_sharing')),
+        content: $r('app.string.copy_action')
+      }).onClick((): void => {
+          this.copyServerHistoryItem(item);
+      })
+      MenuItem({
+        symbolStartIcon: this.historyMenuSymbol($r('sys.symbol.star')),
+        content: item.starred ? $r('app.string.history_unstar_action') : $r('app.string.history_star_action')
+      }).onClick((): void => {
+          this.toggleHistoryStarred(item);
+      })
+      MenuItem({
+        symbolStartIcon: this.historyMenuSymbol($r('sys.symbol.link')),
+        content: $r('app.string.history_send_to_action'),
+        symbolEndIcon: this.historyMenuSymbol($r('sys.symbol.chevron_forward')),
+        builder: (): void => this.historyServerSendToMenu(item)
+      })
+      MenuItem({
+        symbolStartIcon: this.historyDeleteMenuSymbol(),
+        content: $r('app.string.history_delete_action')
+      }).onClick((): void => {
+          this.confirmDeleteHistory(item);
+      })
+    }.menuItemDivider({
+      strokeWidth: LengthMetrics.vp(1),
+      color: $r('app.color.divider'),
+      startMargin: LengthMetrics.vp(12),
+      endMargin: LengthMetrics.vp(12)
+    })
+  }
+
+  @Builder
+  private historyLocalContextMenu(item: ClipboardHistoryItem) {
+    Menu() {
+      MenuItem({
+        symbolStartIcon: this.historyMenuSymbol($r('sys.symbol.clipboard_sharing')),
+        content: $r('app.string.copy_action')
+      }).onClick((): void => {
+          this.copyLocalHistoryItem(item);
+      })
+      MenuItem({
+        symbolStartIcon: this.historyMenuSymbol($r('sys.symbol.star')),
+        content: item.starred ? $r('app.string.history_unstar_action') : $r('app.string.history_star_action')
+      }).onClick((): void => {
+          this.toggleLocalHistoryStarred(item);
+      })
+      MenuItem({
+        symbolStartIcon: this.historyMenuSymbol($r('sys.symbol.link')),
+        content: $r('app.string.history_send_to_action'),
+        symbolEndIcon: this.historyMenuSymbol($r('sys.symbol.chevron_forward')),
+        builder: (): void => this.historyLocalSendToMenu(item)
+      })
+      MenuItem({
+        symbolStartIcon: this.historyDeleteMenuSymbol(),
+        content: $r('app.string.history_delete_action')
+      }).onClick((): void => {
+          this.confirmDeleteLocalHistory(item);
+      })
+    }.menuItemDivider({
+      strokeWidth: LengthMetrics.vp(1),
+      color: $r('app.color.divider'),
+      startMargin: LengthMetrics.vp(12),
+      endMargin: LengthMetrics.vp(12)
+    })
+  }
+
+  @Builder
   private clipboardImagePreview(pixelMap: image.PixelMap, imageId: string) {
     Image(pixelMap)
       .id(imageId)
       .width('100%')
       .height(220)
       .objectFit(ImageFit.Contain)
-      .borderRadius(16)
+      .borderRadius($r('app.float.corner_radius_level4'))
       .backgroundColor($r('app.color.surface_muted'))
   }
 
@@ -2782,90 +4315,172 @@ struct Index {
           this.statusCode === 3 ? $r('app.color.danger') : $r('app.color.text_secondary'))
       if (this.isConnectionAvailable()) {
         Text($r('app.string.status_online'))
-          .fontSize(13)
+          .fontSize($r('app.float.font_body_small'))
           .fontColor($r('app.color.text_secondary'))
       } else if (this.statusCode === 0) {
         Text($r('app.string.status_offline'))
-          .fontSize(13)
+          .fontSize($r('app.float.font_body_small'))
           .fontColor($r('app.color.text_secondary'))
       } else if (this.statusCode === 1) {
         Text($r('app.string.status_working'))
-          .fontSize(13)
+          .fontSize($r('app.float.font_body_small'))
           .fontColor($r('app.color.text_secondary'))
       } else {
         Text($r('app.string.status_failed'))
-          .fontSize(13)
+          .fontSize($r('app.float.font_body_small'))
           .fontColor($r('app.color.text_secondary'))
       }
     }
-    .height(34)
+    .height(36)
     .padding({ left: 12, right: 12 })
-    .borderRadius(17)
+    .borderRadius($r('app.float.corner_radius_level10'))
     .backgroundColor($r('app.color.surface_muted'))
+    .flexShrink(0)
+  }
+
+  @Builder
+  private mobileLatestContent() {
+    if (this.desktopHasGestureShareContent() && !this.desktopGestureShareHintDismissed) {
+      this.desktopGestureShareHint()
+    }
+    if (this.latestKind === 'Image' && this.latestImage !== null) {
+      if (this.latestImageRevision % 2 === 0) {
+        Image(this.latestImage)
+          .id('latest-image-even')
+          .width('100%')
+          .aspectRatio(this.latestImageAspectRatio())
+          .constraintSize({ maxHeight: 380 })
+          .objectFit(ImageFit.Contain)
+          .borderRadius($r('app.float.corner_radius_level4'))
+          .backgroundColor($r('app.color.surface_muted'))
+      } else {
+        Image(this.latestImage)
+          .id('latest-image-odd')
+          .width('100%')
+          .aspectRatio(this.latestImageAspectRatio())
+          .constraintSize({ maxHeight: 380 })
+          .objectFit(ImageFit.Contain)
+          .borderRadius($r('app.float.corner_radius_level4'))
+          .backgroundColor($r('app.color.surface_muted'))
+      }
+      Text(this.latestText)
+        .fontSize($r('app.float.font_body_medium'))
+        .fontColor($r('app.color.text_secondary'))
+        .width('100%')
+    } else if (this.latestKind === 'File' && this.desktopShowsFile()) {
+      if (this.desktopFileIsVideo() && this.desktopFilePreviewUri().length > 0) {
+        Video({ src: this.desktopFilePreviewUri() })
+          .id('mobile-latest-video-' + this.desktopFilePreviewKey())
+          .width('100%')
+          .aspectRatio(this.desktopVideoAspectRatio)
+          .constraintSize({ maxHeight: 380 })
+          .controls(true)
+          .autoPlay(true)
+          .objectFit(ImageFit.Contain)
+          .borderRadius($r('app.float.corner_radius_level4'))
+          .backgroundColor(Color.Black)
+          .onPrepared((_preparedInfo: PreparedInfo): void => {
+            this.loadDesktopVideoAspectRatio();
+          })
+          .onError((): void => {
+            this.desktopFilePreviewState = 2;
+          })
+      } else if (this.desktopFileIsAudio()) {
+        this.desktopAudioPreview()
+      } else {
+        Column({ space: 14 }) {
+          SymbolGlyph($r('sys.symbol.doc_text'))
+            .fontSize(50)
+            .fontColor([this.accentColor()])
+          Text(this.desktopFileIsDocument() ? $r('app.string.file_preview_document') :
+            $r('app.string.file_preview_generic'))
+            .fontSize($r('app.float.font_subtitle_large'))
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('app.color.text_primary'))
+          Text($r('app.string.file_preview_system_note'))
+            .fontSize($r('app.float.font_body_medium'))
+            .lineHeight(20)
+            .textAlign(TextAlign.Center)
+            .fontColor($r('app.color.text_secondary'))
+            .maxLines(3)
+        }
+        .width('100%')
+        .height(210)
+        .justifyContent(FlexAlign.Center)
+        .padding({ left: 22, right: 22 })
+        .borderRadius($r('app.float.corner_radius_level8'))
+        .backgroundColor($r('app.color.surface_muted'))
+      }
+      Text(this.desktopFileName())
+        .fontSize($r('app.float.font_body_large'))
+        .fontWeight(FontWeight.Medium)
+        .fontColor($r('app.color.text_primary'))
+        .maxLines(2)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .width('100%')
+      Row({ space: 10 }) {
+        Button(this.desktopFilePreviewState === 1 ? $r('app.string.file_preview_opening') :
+          $r('app.string.file_preview_action'), { type: ButtonType.Normal })
+          .height(40)
+          .fontColor($r('app.color.on_accent'))
+          .backgroundColor(this.accentColor())
+          .borderRadius($r('app.float.corner_radius_level10'))
+          .enabled(this.desktopFilePreviewUri().length > 0 && this.desktopFilePreviewState !== 1)
+          .onClick((): void => {
+            this.openDesktopFilePreview();
+          })
+        if (this.desktopFilePreviewState === 2) {
+          Text($r('app.string.file_preview_failed'))
+            .fontSize(12)
+            .fontColor($r('app.color.danger'))
+            .maxLines(2)
+        }
+      }
+      .width('100%')
+    } else {
+      Text(this.latestText.length > 0 ? this.latestText : $r('app.string.latest_empty'))
+        .fontSize(16)
+        .fontColor(this.latestText.length > 0 ? $r('app.color.text_primary') :
+          $r('app.color.text_secondary'))
+        .lineHeight(24)
+        .maxLines(7)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .width('100%')
+        .padding(16)
+        .borderRadius($r('app.float.corner_radius_level8'))
+        .backgroundColor($r('app.color.surface_muted'))
+    }
   }
 
   @Builder
   private syncPage() {
     Scroll(this.syncScroller) {
-      Column({ space: 16 }) {
-        Column({ space: 14 }) {
-          Row() {
+      Column({ space: 12 }) {
+        Column({ space: 16 }) {
+          Row({ space: 8 }) {
             Text($r('app.string.latest_title'))
-              .fontSize(18)
+              .fontSize($r('app.float.font_title_small'))
               .fontWeight(FontWeight.Bold)
               .fontColor($r('app.color.text_primary'))
-            Blank()
             Text(this.history.length.toString())
               .fontSize(12)
-              .fontColor($r('app.color.accent'))
-              .padding({ left: 9, right: 9, top: 4, bottom: 4 })
-              .borderRadius(12)
-              .backgroundColor($r('app.color.accent_soft'))
+              .fontWeight(FontWeight.Medium)
+              .fontColor(this.accentColor())
+              .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+              .borderRadius($r('app.float.corner_radius_level2'))
+              .backgroundColor(this.accentSoftColor())
+            Blank()
           }
-          if (this.latestKind === 'Image' && this.latestImage !== null) {
-            if (this.latestImageRevision % 2 === 0) {
-              Image(this.latestImage)
-                .id('latest-image-even')
-                .width('100%')
-                .height(220)
-                .objectFit(ImageFit.Contain)
-                .borderRadius(16)
-                .backgroundColor($r('app.color.surface_muted'))
-            } else {
-              Image(this.latestImage)
-                .id('latest-image-odd')
-                .width('100%')
-                .height(220)
-                .objectFit(ImageFit.Contain)
-                .borderRadius(16)
-                .backgroundColor($r('app.color.surface_muted'))
-            }
-            Text(this.latestText)
-              .fontSize(13)
-              .fontColor($r('app.color.text_secondary'))
-              .width('100%')
-          } else {
-            Text(this.latestText.length > 0 ? this.latestText : $r('app.string.latest_empty'))
-              .fontSize(16)
-              .fontColor(this.latestText.length > 0 ? $r('app.color.text_primary') :
-                $r('app.color.text_secondary'))
-              .lineHeight(24)
-              .maxLines(7)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-              .width('100%')
-              .padding(16)
-              .borderRadius(16)
-              .backgroundColor($r('app.color.surface_muted'))
-          }
+          this.mobileLatestContent()
           Row({ space: 10 }) {
             Button(!this.hasConfig() && this.spaceJoined ? $r('app.string.space_refresh_sync_action') :
               $r('app.string.pull_action'), { type: ButtonType.Normal })
               .layoutWeight(1)
               .height(46)
               .fontSize(14)
-              .fontColor(Color.White)
-              .backgroundColor($r('app.color.accent'))
-              .borderRadius(14)
+              .fontColor($r('app.color.on_accent'))
+              .backgroundColor(this.accentColor())
+              .borderRadius($r('app.float.corner_radius_level10'))
               .enabled(!this.busy)
               .onClick(() => {
                 this.pullLatest();
@@ -2877,7 +4492,7 @@ struct Index {
               .fontSize(14)
               .fontColor($r('app.color.text_primary'))
               .backgroundColor($r('app.color.surface_muted'))
-              .borderRadius(14)
+              .borderRadius($r('app.float.corner_radius_level10'))
               .enabled(this.latestCopyable())
               .onClick(() => {
                 this.copyLatest();
@@ -2885,13 +4500,14 @@ struct Index {
           }
         }
         .width('100%')
-        .padding(18)
-        .borderRadius(24)
+        .padding($r('app.float.padding_level8'))
+        .borderRadius($r('app.float.corner_radius_level8'))
         .backgroundColor($r('app.color.surface'))
+        .scale({ x: this.latestContentPulse, y: this.latestContentPulse })
 
         Column({ space: 12 }) {
           Text($r('app.string.composer_title'))
-            .fontSize(18)
+            .fontSize($r('app.float.font_title_small'))
             .fontWeight(FontWeight.Bold)
             .fontColor($r('app.color.text_primary'))
             .width('100%')
@@ -2901,39 +4517,48 @@ struct Index {
             .fontColor($r('app.color.text_primary'))
             .placeholderColor($r('app.color.text_secondary'))
             .backgroundColor($r('app.color.surface_muted'))
-            .borderRadius(16)
+            .borderRadius($r('app.float.corner_radius_level8'))
             .padding(14)
             .onChange((value: string) => {
               this.composerText = value;
             })
           Row({ space: 10 }) {
-            Button($r('app.string.read_clipboard_action'), { type: ButtonType.Normal })
-              .layoutWeight(1)
+            PasteButton({
+              icon: PasteIconStyle.LINES,
+              text: PasteDescription.PASTE,
+              buttonType: ButtonType.Normal
+            })
+              .width('48%')
               .height(46)
               .fontSize(14)
-              .fontColor($r('app.color.text_primary'))
-              .backgroundColor($r('app.color.surface_muted'))
-              .borderRadius(14)
-              .onClick(() => {
-                this.readLocalClipboard();
+            .fontColor($r('app.color.text_primary'))
+            .iconColor($r('app.color.text_primary'))
+              .backgroundColor($r('app.color.paste_button_background'))
+              .borderRadius($r('app.float.corner_radius_level10'))
+              .onClick((_event: ClickEvent, result: PasteButtonOnClickResult): void => {
+                if (result === PasteButtonOnClickResult.SUCCESS) {
+                  this.readLocalClipboard();
+                } else {
+                  this.statusCode = 3;
+                }
               })
             Button($r('app.string.send_action'), { type: ButtonType.Normal })
               .layoutWeight(1)
               .height(46)
               .fontSize(14)
-              .fontColor(Color.White)
-              .backgroundColor($r('app.color.accent'))
-              .borderRadius(14)
+              .fontColor($r('app.color.on_accent'))
+              .backgroundColor(this.accentColor())
+              .borderRadius($r('app.float.corner_radius_level10'))
               .enabled(!this.busy && this.composerText.trim().length > 0)
               .onClick(() => {
                 this.sendText();
               })
           }
           Divider()
-            .color($r('app.color.surface_muted'))
+            .color($r('app.color.divider'))
             .margin({ top: 6, bottom: 2 })
           Text($r('app.string.image_composer_title'))
-            .fontSize(18)
+            .fontSize($r('app.float.font_title_small'))
             .fontWeight(FontWeight.Bold)
             .fontColor($r('app.color.text_primary'))
             .width('100%')
@@ -2944,7 +4569,7 @@ struct Index {
                 .width('100%')
                 .height(220)
                 .objectFit(ImageFit.Contain)
-                .borderRadius(16)
+                .borderRadius($r('app.float.corner_radius_level4'))
                 .backgroundColor($r('app.color.surface_muted'))
             } else {
               Image(this.composerImage)
@@ -2952,7 +4577,7 @@ struct Index {
                 .width('100%')
                 .height(220)
                 .objectFit(ImageFit.Contain)
-                .borderRadius(16)
+                .borderRadius($r('app.float.corner_radius_level4'))
                 .backgroundColor($r('app.color.surface_muted'))
             }
           } else {
@@ -2962,30 +4587,39 @@ struct Index {
               .lineHeight(22)
               .width('100%')
               .padding(14)
-              .borderRadius(16)
+              .borderRadius($r('app.float.corner_radius_level8'))
               .backgroundColor($r('app.color.surface_muted'))
           }
           Row({ space: 10 }) {
-            Button(this.imageReadState === 1 ? $r('app.string.image_reading') :
-              $r('app.string.read_image_action'), { type: ButtonType.Normal })
-              .layoutWeight(1)
+            PasteButton({
+              icon: PasteIconStyle.LINES,
+              text: PasteDescription.PASTE,
+              buttonType: ButtonType.Normal
+            })
+              .width('48%')
               .height(46)
               .fontSize(14)
-              .fontColor($r('app.color.text_primary'))
-              .backgroundColor($r('app.color.surface_muted'))
-              .borderRadius(14)
+            .fontColor($r('app.color.text_primary'))
+            .iconColor($r('app.color.text_primary'))
+              .backgroundColor($r('app.color.paste_button_background'))
+              .borderRadius($r('app.float.corner_radius_level10'))
               .enabled(!this.busy && this.imageReadState !== 1)
-              .onClick(() => {
-                this.readLocalImage();
+              .onClick((_event: ClickEvent, result: PasteButtonOnClickResult): void => {
+                if (result === PasteButtonOnClickResult.SUCCESS) {
+                  this.readLocalImage();
+                } else {
+                  this.imageReadState = 4;
+                  this.statusCode = 3;
+                }
               })
             Button(this.imageSendState === 1 ? $r('app.string.image_sending') :
               $r('app.string.send_image_action'), { type: ButtonType.Normal })
               .layoutWeight(1)
               .height(46)
               .fontSize(14)
-              .fontColor(Color.White)
-              .backgroundColor($r('app.color.accent'))
-              .borderRadius(14)
+              .fontColor($r('app.color.on_accent'))
+              .backgroundColor(this.accentColor())
+              .borderRadius($r('app.float.corner_radius_level10'))
               .enabled(!this.busy && this.composerImage !== null)
               .onClick(() => {
                 this.sendImage();
@@ -3028,28 +4662,28 @@ struct Index {
               .width('100%')
           }
           Divider()
-            .color($r('app.color.surface_muted'))
+            .color($r('app.color.divider'))
             .margin({ top: 6, bottom: 2 })
           this.fileComposer()
         }
         .width('100%')
-        .padding(18)
-        .borderRadius(24)
+        .padding($r('app.float.padding_level8'))
+        .borderRadius($r('app.float.corner_radius_level8'))
         .backgroundColor($r('app.color.surface'))
 
         Column({ space: 10 }) {
           Row() {
             Text($r('app.string.server_history_title'))
-              .fontSize(18)
+              .fontSize($r('app.float.font_title_small'))
               .fontWeight(FontWeight.Bold)
               .fontColor($r('app.color.text_primary'))
             Blank()
             Button($r('app.string.server_history_refresh'), { type: ButtonType.Normal })
               .height(34)
-              .fontSize(13)
-              .fontColor($r('app.color.accent'))
-              .backgroundColor($r('app.color.accent_soft'))
-              .borderRadius(12)
+              .fontSize($r('app.float.font_body_medium'))
+              .fontColor(this.accentColor())
+              .backgroundColor(this.accentSoftColor())
+              .borderRadius($r('app.float.corner_radius_level10'))
               .enabled(!this.historyLoading)
               .onClick(() => {
                 this.loadServerHistory(true);
@@ -3062,7 +4696,7 @@ struct Index {
             .fontSize(14)
             .fontColor($r('app.color.text_primary'))
             .backgroundColor($r('app.color.surface_muted'))
-            .borderRadius(14)
+            .borderRadius($r('app.float.corner_radius_level10'))
             .onChange((value: string) => {
               this.historySearchText = value;
             })
@@ -3070,10 +4704,10 @@ struct Index {
             Button($r('app.string.server_history_search_action'), { type: ButtonType.Normal })
               .layoutWeight(1)
               .height(38)
-              .fontSize(13)
+              .fontSize($r('app.float.font_body_medium'))
               .fontColor($r('app.color.text_primary'))
               .backgroundColor($r('app.color.surface_muted'))
-              .borderRadius(12)
+              .borderRadius($r('app.float.corner_radius_level10'))
               .enabled(!this.historyLoading)
               .onClick(() => {
                 this.loadServerHistory(true);
@@ -3082,11 +4716,11 @@ struct Index {
               $r('app.string.server_history_starred_action'), { type: ButtonType.Normal })
               .layoutWeight(1)
               .height(38)
-              .fontSize(13)
-              .fontColor(this.historyStarredOnly ? $r('app.color.accent') : $r('app.color.text_primary'))
-              .backgroundColor(this.historyStarredOnly ? $r('app.color.accent_soft') :
+              .fontSize($r('app.float.font_body_medium'))
+              .fontColor(this.historyStarredOnly ? this.accentColor() : $r('app.color.text_primary'))
+              .backgroundColor(this.historyStarredOnly ? this.accentSoftColor() :
                 $r('app.color.surface_muted'))
-              .borderRadius(12)
+              .borderRadius($r('app.float.corner_radius_level10'))
               .enabled(!this.historyLoading)
               .onClick(() => {
                 this.historyStarredOnly = !this.historyStarredOnly;
@@ -3105,7 +4739,7 @@ struct Index {
             ForEach(this.serverHistory, (item: ServerHistoryItem) => {
               Column({ space: 5 }) {
                 Text(item.text)
-                  .fontSize(15)
+                  .fontSize($r('app.float.font_body_large'))
                   .fontColor($r('app.color.text_primary'))
                   .maxLines(3)
                   .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -3117,12 +4751,12 @@ struct Index {
                   if (item.pinned) {
                     Text($r('app.string.server_history_pinned'))
                       .fontSize(12)
-                      .fontColor($r('app.color.accent'))
+                      .fontColor(this.accentColor())
                   }
                   if (item.starred) {
                     Text('★')
                       .fontSize(12)
-                      .fontColor($r('app.color.accent'))
+                      .fontColor(this.accentColor())
                   }
                 }
                 Row({ space: 8 }) {
@@ -3131,9 +4765,9 @@ struct Index {
                     .layoutWeight(1)
                     .height(32)
                     .fontSize(12)
-                    .fontColor(item.starred ? $r('app.color.accent') : $r('app.color.text_primary'))
+                    .fontColor(item.starred ? this.accentColor() : $r('app.color.text_primary'))
                     .backgroundColor($r('app.color.surface_muted'))
-                    .borderRadius(10)
+                    .borderRadius($r('app.float.corner_radius_level4'))
                     .enabled(!this.historyMutationBusy)
                     .onClick(() => {
                       this.toggleHistoryStarred(item);
@@ -3143,9 +4777,9 @@ struct Index {
                     .layoutWeight(1)
                     .height(32)
                     .fontSize(12)
-                    .fontColor(item.pinned ? $r('app.color.accent') : $r('app.color.text_primary'))
+                    .fontColor(item.pinned ? this.accentColor() : $r('app.color.text_primary'))
                     .backgroundColor($r('app.color.surface_muted'))
-                    .borderRadius(10)
+                    .borderRadius($r('app.float.corner_radius_level4'))
                     .enabled(!this.historyMutationBusy)
                     .onClick(() => {
                       this.toggleHistoryPinned(item);
@@ -3156,7 +4790,7 @@ struct Index {
                     .fontSize(12)
                     .fontColor($r('app.color.danger'))
                     .backgroundColor($r('app.color.surface_muted'))
-                    .borderRadius(10)
+                    .borderRadius($r('app.float.corner_radius_level4'))
                     .enabled(!this.historyMutationBusy)
                     .onClick(() => {
                       this.confirmDeleteHistory(item);
@@ -3167,15 +4801,16 @@ struct Index {
               .width('100%')
               .padding({ top: 10, bottom: 10 })
               .border({ width: { bottom: 1 }, color: $r('app.color.divider') })
+              .bindContextMenu(this.historyServerContextMenu(item), ResponseType.LongPress)
             }, (item: ServerHistoryItem) => item.id)
             Button(this.historyEnd ? $r('app.string.server_history_end') :
               $r('app.string.server_history_load_more'), { type: ButtonType.Normal })
               .height(42)
               .width('100%')
-              .fontSize(13)
+              .fontSize($r('app.float.font_body_medium'))
               .fontColor($r('app.color.text_primary'))
               .backgroundColor($r('app.color.surface_muted'))
-              .borderRadius(14)
+              .borderRadius($r('app.float.corner_radius_level10'))
               .enabled(!this.historyLoading && !this.historyEnd)
               .onClick(() => {
                 this.loadServerHistory(false);
@@ -3183,13 +4818,13 @@ struct Index {
           }
         }
         .width('100%')
-        .padding(18)
-        .borderRadius(24)
+        .padding($r('app.float.padding_level8'))
+        .borderRadius($r('app.float.corner_radius_level8'))
         .backgroundColor($r('app.color.surface'))
 
         Column({ space: 10 }) {
           Text($r('app.string.history_title'))
-            .fontSize(18)
+            .fontSize($r('app.float.font_title_small'))
             .fontWeight(FontWeight.Bold)
             .fontColor($r('app.color.text_primary'))
             .width('100%')
@@ -3204,41 +4839,53 @@ struct Index {
             ForEach(this.history, (item: ClipboardHistoryItem) => {
               Row({ space: 12 }) {
                 Column() {
-                  Text(item.direction === 'sent' ? '↑' : '↓')
-                    .fontSize(18)
-                    .fontColor(item.direction === 'sent' ? $r('app.color.accent') : $r('app.color.success'))
+                  SymbolGlyph(item.direction === 'sent' ?
+                    $r('sys.symbol.arrowshape_up_to_line_fill') :
+                    $r('sys.symbol.arrowshape_down_to_line_fill'))
+                    .fontSize(22)
+                    .fontWeight(FontWeight.Medium)
+                    .fontColor([item.direction === 'sent' ? this.accentColor() :
+                      $r('app.color.success')])
                 }
                 .width(36)
                 .height(36)
                 .justifyContent(FlexAlign.Center)
-                .borderRadius(12)
+                .borderRadius($r('app.float.corner_radius_level10'))
                 .backgroundColor($r('app.color.surface_muted'))
                 Column({ space: 4 }) {
                   Text(item.text)
-                    .fontSize(15)
+                    .fontSize($r('app.float.font_body_large'))
                     .fontColor($r('app.color.text_primary'))
                     .maxLines(2)
                     .textOverflow({ overflow: TextOverflow.Ellipsis })
                     .width('100%')
-                  Text(item.direction === 'sent' ? $r('app.string.direction_sent') : $r('app.string.direction_received'))
-                    .fontSize(12)
-                    .fontColor($r('app.color.text_secondary'))
+                  Row({ space: 8 }) {
+                    Blank()
+                    Text(item.direction === 'sent' ? $r('app.string.direction_sent') :
+                      $r('app.string.direction_received'))
+                      .fontSize(12)
+                      .fontColor(item.direction === 'sent' ? this.accentColor() :
+                        $r('app.color.success'))
+                    Text(item.time)
+                      .fontSize(12)
+                      .fontColor($r('app.color.text_secondary'))
+                  }
+                  .width('100%')
                 }
                 .layoutWeight(1)
-                Text(item.time)
-                  .fontSize(12)
-                  .fontColor($r('app.color.text_secondary'))
               }
               .width('100%')
               .padding({ top: 10, bottom: 10 })
               .border({ width: { bottom: 1 }, color: $r('app.color.divider') })
+              .bindContextMenu(this.historyLocalContextMenu(item), ResponseType.LongPress)
             }, (item: ClipboardHistoryItem) => item.id)
           }
         }
         .width('100%')
-        .padding(18)
-        .borderRadius(24)
+        .padding($r('app.float.padding_level8'))
+        .borderRadius($r('app.float.corner_radius_level8'))
         .backgroundColor($r('app.color.surface'))
+        .scale({ x: this.historyPulse, y: this.historyPulse })
       }
       .width('100%')
       .padding({
@@ -3257,26 +4904,67 @@ struct Index {
     Column({ space: 8 }) {
       SymbolGlyph(icon)
         .fontSize(24)
-        .fontColor([this.appearanceMode === mode ? $r('app.color.accent') :
+        .fontWeight(FontWeight.Medium)
+        .fontColor([this.appearanceMode === mode ? this.accentColor() :
           $r('app.color.text_secondary')])
       Text(label)
-        .fontSize(13)
+        .fontSize($r('app.float.font_body_medium'))
         .fontWeight(this.appearanceMode === mode ? FontWeight.Medium : FontWeight.Regular)
-        .fontColor(this.appearanceMode === mode ? $r('app.color.accent') :
+        .fontColor(this.appearanceMode === mode ? this.accentColor() :
           $r('app.color.text_primary'))
     }
     .layoutWeight(1)
     .height(82)
     .justifyContent(FlexAlign.Center)
-    .borderRadius(16)
-    .backgroundColor(this.appearanceMode === mode ? $r('app.color.accent_soft') :
+    .borderRadius($r('app.float.corner_radius_level8'))
+    .backgroundColor(this.appearanceMode === mode ? this.accentSoftColor() :
       $r('app.color.surface_muted'))
     .border({
       width: this.appearanceMode === mode ? 2 : 1,
-      color: this.appearanceMode === mode ? $r('app.color.accent') : $r('app.color.divider')
+      color: this.appearanceMode === mode ? this.accentColor() : $r('app.color.divider')
     })
     .onClick((): void => {
       this.selectAppearanceMode(mode);
+    })
+  }
+
+  @Builder
+  private compactAppearanceThemeOption(option: AppearanceThemeOption) {
+    Row({ space: 10 }) {
+      Row({ space: 4 }) {
+        Blank()
+          .width(22)
+          .height(14)
+          .borderRadius(7)
+          .backgroundColor(option.primaryColor)
+        Blank()
+          .width(22)
+          .height(14)
+          .borderRadius(7)
+          .backgroundColor(option.secondaryColor)
+      }
+      Text(this.appearanceThemeLabel(option.id))
+        .fontSize(13)
+        .fontWeight(this.appearanceThemeId === option.id ? FontWeight.Medium : FontWeight.Regular)
+        .fontColor(this.appearanceThemeId === option.id ? this.accentColor() :
+          $r('app.color.text_primary'))
+        .layoutWeight(1)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+    }
+    .layoutWeight(1)
+    .height(56)
+    .padding({ left: 12, right: 12 })
+    .alignItems(VerticalAlign.Center)
+    .borderRadius($r('app.float.corner_radius_level8'))
+    .backgroundColor(this.appearanceThemeId === option.id ? this.accentSoftColor() :
+      $r('app.color.surface_muted'))
+    .border({
+      width: this.appearanceThemeId === option.id ? 2 : 1,
+      color: this.appearanceThemeId === option.id ? this.accentColor() : $r('app.color.divider')
+    })
+    .onClick((): void => {
+      this.selectAppearanceTheme(option.id);
     })
   }
 
@@ -3287,22 +4975,25 @@ struct Index {
         Column() {
           SymbolGlyph($r('sys.symbol.paintpalette'))
             .fontSize(24)
-            .fontColor([$r('app.color.accent')])
+            .fontWeight(FontWeight.Medium)
+            .fontColor([this.accentColor()])
         }
         .width(44)
         .height(44)
         .justifyContent(FlexAlign.Center)
-        .borderRadius(14)
-        .backgroundColor($r('app.color.accent_soft'))
+        .borderRadius($r('app.float.corner_radius_level4'))
+        .backgroundColor(this.accentSoftColor())
         Column({ space: 4 }) {
           Text($r('app.string.appearance_title'))
-            .fontSize(17)
+            .fontSize($r('app.float.font_subtitle_large'))
             .fontWeight(FontWeight.Medium)
             .fontColor($r('app.color.text_primary'))
           Text($r('app.string.appearance_note'))
+            .width('100%')
             .fontSize(12)
             .lineHeight(18)
             .fontColor($r('app.color.text_secondary'))
+            .maxLines(2)
         }
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
@@ -3317,24 +5008,377 @@ struct Index {
           $r('app.string.appearance_dark'))
       }
       .width('100%')
+      Text($r('app.string.appearance_theme_title'))
+        .fontSize($r('app.float.font_body_medium'))
+        .fontWeight(FontWeight.Medium)
+        .fontColor($r('app.color.text_primary'))
+        .width('100%')
+      Column({ space: 10 }) {
+        Row({ space: 10 }) {
+          this.compactAppearanceThemeOption(APPEARANCE_THEME_OPTIONS[0])
+          this.compactAppearanceThemeOption(APPEARANCE_THEME_OPTIONS[1])
+        }
+        .width('100%')
+        Row({ space: 10 }) {
+          this.compactAppearanceThemeOption(APPEARANCE_THEME_OPTIONS[2])
+          this.compactAppearanceThemeOption(APPEARANCE_THEME_OPTIONS[3])
+        }
+        .width('100%')
+        Row({ space: 10 }) {
+          this.compactAppearanceThemeOption(APPEARANCE_THEME_OPTIONS[4])
+          this.compactAppearanceThemeOption(APPEARANCE_THEME_OPTIONS[5])
+        }
+        .width('100%')
+      }
+      .width('100%')
     }
     .width('100%')
-    .padding(18)
-    .borderRadius(24)
+    .padding($r('app.float.padding_level8'))
+    .borderRadius($r('app.float.corner_radius_level8'))
+    .backgroundColor($r('app.color.surface'))
+  }
+
+  @Builder
+  private backgroundSyncSwitchRow() {
+    Row({ space: 16 }) {
+      Column({ space: 4 }) {
+        Text($r('app.string.background_sync_title'))
+          .fontSize($r('app.float.font_body_large'))
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.text_primary'))
+        Text($r('app.string.background_sync_note'))
+          .fontSize($r('app.float.font_body_small'))
+          .lineHeight(18)
+          .fontColor($r('app.color.text_secondary'))
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+      Toggle({ type: ToggleType.Switch, isOn: this.backgroundSyncEnabled })
+        .selectedColor(this.accentColor())
+        .onChange((enabled: boolean): void => {
+          this.setBackgroundSyncEnabled(enabled);
+        })
+    }
+    .width('100%')
+    .height(78)
+  }
+
+  @Builder
+  private mobileSyncManagementCard() {
+    Column({ space: 12 }) {
+      Row() {
+        Column({ space: 4 }) {
+          Text($r('app.string.mobile_sync_server_title'))
+            .fontSize(18)
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('app.color.text_primary'))
+          Text(this.mobileSyncRunning ? $r('app.string.mobile_sync_server_running') :
+            $r('app.string.mobile_sync_server_stopped'))
+            .fontSize(12)
+            .fontColor(this.mobileSyncRunning ? $r('app.color.success') :
+              $r('app.color.text_secondary'))
+        }
+        .layoutWeight(1)
+        Toggle({ type: ToggleType.Switch, isOn: this.mobileSyncEnabled })
+          .selectedColor(this.accentColor())
+          .enabled(!this.mobileSyncBusy)
+          .onChange((enabled: boolean): void => {
+            this.toggleMobileSyncServer(enabled);
+          })
+      }
+      .width('100%')
+      Text($r('app.string.mobile_sync_server_note'))
+        .fontSize(12)
+        .lineHeight(18)
+        .fontColor($r('app.color.text_secondary'))
+        .width('100%')
+      Row({ space: 10 }) {
+        Text($r('app.string.mobile_sync_port'))
+          .fontSize(12)
+          .fontColor($r('app.color.text_secondary'))
+        TextInput({ text: this.mobileSyncPort, placeholder: '42720' })
+          .layoutWeight(1)
+          .height(42)
+          .fontSize(14)
+          .fontColor($r('app.color.text_primary'))
+          .backgroundColor($r('app.color.surface_muted'))
+          .borderRadius($r('app.float.corner_radius_level8'))
+          .onChange((value: string): void => {
+            this.mobileSyncPort = value;
+          })
+        Button($r('app.string.operation_success'), { type: ButtonType.Normal })
+          .height(42)
+          .fontSize(12)
+          .fontColor($r('app.color.text_primary'))
+          .backgroundColor($r('app.color.surface_muted'))
+          .borderRadius($r('app.float.corner_radius_level8'))
+          .enabled(!this.mobileSyncBusy)
+          .onClick((): void => {
+            this.toggleMobileSyncServer(this.mobileSyncEnabled);
+          })
+      }
+      .width('100%')
+      if (this.mobileSyncUrls.length > 0) {
+        Text($r('app.string.mobile_sync_addresses'))
+          .fontSize(12)
+          .fontColor($r('app.color.text_secondary'))
+          .width('100%')
+        ForEach(this.mobileSyncUrls, (url: string) => {
+          Text(url)
+            .fontSize(14)
+            .fontColor($r('app.color.text_primary'))
+            .copyOption(CopyOptions.LocalDevice)
+            .width('100%')
+            .padding(10)
+            .borderRadius($r('app.float.corner_radius_level4'))
+            .backgroundColor($r('app.color.surface_muted'))
+        }, (url: string): string => url)
+      } else {
+        Text($r('app.string.mobile_sync_no_address'))
+          .fontSize(12)
+          .fontColor($r('app.color.text_secondary'))
+          .width('100%')
+      }
+      Row() {
+        Text($r('app.string.mobile_sync_registered_devices'))
+          .fontSize(14)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.text_primary'))
+        Blank()
+        Button($r('app.string.mobile_sync_add_device'), { type: ButtonType.Normal })
+          .height(36)
+          .fontSize(12)
+          .fontColor($r('app.color.on_accent'))
+          .backgroundColor(this.accentColor())
+          .borderRadius($r('app.float.corner_radius_level8'))
+          .enabled(this.mobileSyncRunning && !this.mobileSyncBusy)
+          .onClick((): void => {
+            this.mobileSyncAddOpen = !this.mobileSyncAddOpen;
+            this.mobileSyncCredential = null;
+            this.mobileSyncDeviceName = '';
+            this.mobileSyncCustomUsername = '';
+            this.mobileSyncCustomPassword = '';
+            this.mobileSyncAdvancedOpen = false;
+            this.mobileSyncState = 0;
+          })
+      }
+      .width('100%')
+      if (this.mobileSyncDevices.length === 0) {
+        Text($r('app.string.mobile_sync_no_devices'))
+          .fontSize(12)
+          .fontColor($r('app.color.text_secondary'))
+          .width('100%')
+      } else {
+        ForEach(this.mobileSyncDevices, (device: NativeMobileSyncDevice) => {
+          Row({ space: 10 }) {
+            Stack({ alignContent: Alignment.BottomEnd }) {
+              Column() {
+                SymbolGlyph($r('sys.symbol.phone'))
+                  .fontSize(22)
+                  .fontColor([this.accentColor()])
+              }
+              .width(40)
+              .height(40)
+              .justifyContent(FlexAlign.Center)
+              .borderRadius($r('app.float.corner_radius_level4'))
+              .backgroundColor(this.accentSoftColor())
+              Row()
+                .width(10)
+                .height(10)
+                .borderRadius(5)
+                .backgroundColor(device.online ? $r('app.color.success') :
+                  $r('app.color.text_secondary'))
+                .border({ width: 2, color: $r('app.color.surface_muted') })
+            }
+            .width(40)
+            .height(40)
+            Column({ space: 3 }) {
+              Text(device.label)
+                .fontSize(14)
+                .fontColor($r('app.color.text_primary'))
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+              Text(device.online ? $r('app.string.device_status_online') :
+                (device.lastSeenAtMs > 0 ? $r('app.string.device_status_offline') :
+                  $r('app.string.mobile_sync_never_seen')))
+                .fontSize(11)
+                .fontColor(device.online ? $r('app.color.success') :
+                  $r('app.color.text_secondary'))
+            }
+            .layoutWeight(1)
+            Button($r('app.string.mobile_sync_revoke'), { type: ButtonType.Normal })
+              .height(32)
+              .fontSize(11)
+              .fontColor($r('app.color.danger'))
+              .backgroundColor($r('app.color.surface_muted'))
+              .borderRadius($r('app.float.corner_radius_level4'))
+              .onClick((): void => {
+                this.revokeMobileSyncDevice(device);
+              })
+          }
+          .width('100%')
+          .padding(8)
+          .borderRadius($r('app.float.corner_radius_level4'))
+          .backgroundColor($r('app.color.surface_muted'))
+        }, (device: NativeMobileSyncDevice): string => device.deviceId)
+      }
+      if (this.mobileSyncAddOpen && this.mobileSyncCredential === null) {
+        Column({ space: 9 }) {
+          Text($r('app.string.mobile_sync_add_title'))
+            .fontSize(16)
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('app.color.text_primary'))
+            .width('100%')
+          Text($r('app.string.mobile_sync_add_note'))
+            .fontSize(12)
+            .lineHeight(18)
+            .fontColor($r('app.color.text_secondary'))
+            .width('100%')
+          Text($r('app.string.mobile_sync_device_name'))
+            .fontSize(12)
+            .fontColor($r('app.color.text_secondary'))
+            .width('100%')
+          TextInput({ placeholder: $r('app.string.mobile_sync_device_placeholder'),
+            text: this.mobileSyncDeviceName })
+            .height(44)
+            .fontSize(14)
+            .backgroundColor($r('app.color.surface_muted'))
+            .borderRadius($r('app.float.corner_radius_level8'))
+            .onChange((value: string): void => {
+              this.mobileSyncDeviceName = value;
+            })
+          Text($r('app.string.mobile_sync_advanced'))
+            .fontSize(12)
+            .fontColor(this.accentColor())
+            .width('100%')
+            .onClick((): void => {
+              this.mobileSyncAdvancedOpen = !this.mobileSyncAdvancedOpen;
+            })
+          if (this.mobileSyncAdvancedOpen) {
+            TextInput({ placeholder: $r('app.string.mobile_sync_custom_username'),
+              text: this.mobileSyncCustomUsername })
+              .height(44)
+              .fontSize(14)
+              .backgroundColor($r('app.color.surface_muted'))
+              .borderRadius($r('app.float.corner_radius_level8'))
+              .onChange((value: string): void => {
+                this.mobileSyncCustomUsername = value;
+              })
+            TextInput({ placeholder: $r('app.string.mobile_sync_custom_password'),
+              text: this.mobileSyncCustomPassword })
+              .type(InputType.Password)
+              .height(44)
+              .fontSize(14)
+              .backgroundColor($r('app.color.surface_muted'))
+              .borderRadius($r('app.float.corner_radius_level8'))
+              .onChange((value: string): void => {
+                this.mobileSyncCustomPassword = value;
+              })
+          }
+          Button(this.mobileSyncBusy ? $r('app.string.mobile_sync_creating') :
+            $r('app.string.mobile_sync_create'), { type: ButtonType.Normal })
+            .width('100%')
+            .height(44)
+            .fontColor($r('app.color.on_accent'))
+            .backgroundColor(this.accentColor())
+            .borderRadius($r('app.float.corner_radius_level8'))
+            .enabled(this.mobileSyncDeviceName.trim().length > 0 && !this.mobileSyncBusy)
+            .onClick((): void => {
+              this.createMobileSyncDevice();
+            })
+        }
+        .width('100%')
+        .padding(12)
+        .borderRadius($r('app.float.corner_radius_level8'))
+        .backgroundColor($r('app.color.surface_muted'))
+      }
+      if (this.mobileSyncCredential !== null) {
+        Column({ space: 10 }) {
+          Text($r('app.string.mobile_sync_scan_title'))
+            .fontSize(16)
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('app.color.text_primary'))
+            .width('100%')
+          Row() {
+            QRCode(this.mobileSyncCredential.connectUri)
+              .width(190)
+              .height(190)
+              .color($r('app.color.qr_foreground'))
+              .backgroundColor($r('app.color.qr_background'))
+          }
+          .width('100%')
+          .justifyContent(FlexAlign.Center)
+          Text($r('app.string.mobile_sync_scan_note'))
+            .fontSize(12)
+            .lineHeight(18)
+            .fontColor($r('app.color.text_secondary'))
+            .width('100%')
+          Text($r('app.string.mobile_sync_username'))
+            .fontSize(12)
+            .fontColor($r('app.color.text_secondary'))
+            .width('100%')
+          Text(this.mobileSyncCredential.username)
+            .fontSize(14)
+            .fontColor($r('app.color.text_primary'))
+            .copyOption(CopyOptions.LocalDevice)
+            .width('100%')
+          Text($r('app.string.mobile_sync_password'))
+            .fontSize(12)
+            .fontColor($r('app.color.text_secondary'))
+            .width('100%')
+          Text(this.mobileSyncPasswordVisible ? this.mobileSyncCredential.password : '••••••••••••')
+            .fontSize(14)
+            .fontColor($r('app.color.text_primary'))
+            .copyOption(CopyOptions.LocalDevice)
+            .width('100%')
+            .onClick((): void => {
+              this.mobileSyncPasswordVisible = !this.mobileSyncPasswordVisible;
+            })
+          Text($r('app.string.mobile_sync_one_time_secret'))
+            .fontSize(12)
+            .fontColor($r('app.color.danger'))
+            .width('100%')
+        }
+        .width('100%')
+        .padding(12)
+        .borderRadius($r('app.float.corner_radius_level8'))
+        .border({ width: 1, color: $r('app.color.danger') })
+      }
+      if (this.mobileSyncState === 3) {
+        Text($r('app.string.mobile_sync_server_failed'))
+          .fontSize(12)
+          .lineHeight(18)
+          .fontColor($r('app.color.danger'))
+          .width('100%')
+      }
+    }
+    .width('100%')
+    .padding($r('app.float.padding_level8'))
+    .borderRadius($r('app.float.corner_radius_level8'))
     .backgroundColor($r('app.color.surface'))
   }
 
   @Builder
   private settingsPage() {
     Scroll(this.settingsScroller) {
-      Column({ space: 16 }) {
+      Column({ space: 12 }) {
         this.compactAppearanceCard()
 
         this.spaceJoinCard()
 
+        Column() {
+          this.backgroundSyncSwitchRow()
+        }
+        .width('100%')
+        .padding({ left: 18, right: 18 })
+        .borderRadius($r('app.float.corner_radius_level8'))
+        .backgroundColor($r('app.color.surface'))
+
+        this.mobileSyncManagementCard()
+
         Column({ space: 8 }) {
           Text($r('app.string.connect_uri_label'))
-            .fontSize(13)
+            .fontSize($r('app.float.font_body_medium'))
             .fontColor($r('app.color.text_secondary'))
             .width('100%')
           TextArea({ placeholder: $r('app.string.connect_uri_placeholder'), text: this.connectUri })
@@ -3343,7 +5387,7 @@ struct Index {
             .fontColor($r('app.color.text_primary'))
             .placeholderColor($r('app.color.text_secondary'))
             .backgroundColor($r('app.color.surface_muted'))
-            .borderRadius(14)
+            .borderRadius($r('app.float.corner_radius_level8'))
             .padding(12)
             .onChange((value: string) => {
               this.connectUri = value;
@@ -3371,7 +5415,7 @@ struct Index {
             .fontSize(14)
             .fontColor($r('app.color.text_primary'))
             .backgroundColor($r('app.color.surface_muted'))
-            .borderRadius(14)
+            .borderRadius($r('app.float.corner_radius_level10'))
             .onClick(() => {
               this.scanConnectUri();
             })
@@ -3381,59 +5425,59 @@ struct Index {
             .fontSize(14)
             .fontColor($r('app.color.text_primary'))
             .backgroundColor($r('app.color.surface_muted'))
-            .borderRadius(14)
+            .borderRadius($r('app.float.corner_radius_level10'))
             .enabled(this.connectUri.trim().length > 0)
             .onClick(() => {
               this.importConnectUri();
             })
         }
         .width('100%')
-        .padding(18)
-        .borderRadius(24)
+        .padding($r('app.float.padding_level8'))
+        .borderRadius($r('app.float.corner_radius_level8'))
         .backgroundColor($r('app.color.surface'))
 
         Column({ space: 8 }) {
           Text($r('app.string.server_url_label'))
-            .fontSize(13)
+            .fontSize($r('app.float.font_body_medium'))
             .fontColor($r('app.color.text_secondary'))
             .width('100%')
           TextInput({ placeholder: $r('app.string.server_url_placeholder'), text: this.serverUrl })
             .height(50)
-            .fontSize(15)
+            .fontSize($r('app.float.font_body_large'))
             .fontColor($r('app.color.text_primary'))
             .backgroundColor($r('app.color.surface_muted'))
-            .borderRadius(14)
+            .borderRadius($r('app.float.corner_radius_level10'))
             .onChange((value: string) => {
               this.serverUrl = value;
               this.connectionChanged();
             })
           Text($r('app.string.username_label'))
-            .fontSize(13)
+            .fontSize($r('app.float.font_body_medium'))
             .fontColor($r('app.color.text_secondary'))
             .width('100%')
             .margin({ top: 6 })
           TextInput({ placeholder: $r('app.string.username_placeholder'), text: this.username })
             .height(50)
-            .fontSize(15)
+            .fontSize($r('app.float.font_body_large'))
             .fontColor($r('app.color.text_primary'))
             .backgroundColor($r('app.color.surface_muted'))
-            .borderRadius(14)
+            .borderRadius($r('app.float.corner_radius_level10'))
             .onChange((value: string) => {
               this.username = value;
               this.connectionChanged();
             })
           Text($r('app.string.password_label'))
-            .fontSize(13)
+            .fontSize($r('app.float.font_body_medium'))
             .fontColor($r('app.color.text_secondary'))
             .width('100%')
             .margin({ top: 6 })
           TextInput({ placeholder: $r('app.string.password_placeholder'), text: this.password })
             .type(InputType.Password)
             .height(50)
-            .fontSize(15)
+            .fontSize($r('app.float.font_body_large'))
             .fontColor($r('app.color.text_primary'))
             .backgroundColor($r('app.color.surface_muted'))
-            .borderRadius(14)
+            .borderRadius($r('app.float.corner_radius_level10'))
             .onChange((value: string) => {
               this.password = value;
               this.connectionChanged();
@@ -3441,10 +5485,10 @@ struct Index {
           Button($r('app.string.test_connection_action'), { type: ButtonType.Normal })
             .height(50)
             .width('100%')
-            .fontSize(15)
-            .fontColor(Color.White)
-            .backgroundColor($r('app.color.accent'))
-            .borderRadius(14)
+            .fontSize($r('app.float.font_body_large'))
+            .fontColor($r('app.color.on_accent'))
+            .backgroundColor(this.accentColor())
+            .borderRadius($r('app.float.corner_radius_level10'))
             .margin({ top: 12 })
             .enabled(!this.busy)
             .onClick(() => {
@@ -3454,10 +5498,10 @@ struct Index {
             $r('app.string.realtime_start_action'), { type: ButtonType.Normal })
             .height(50)
             .width('100%')
-            .fontSize(15)
+            .fontSize($r('app.float.font_body_large'))
             .fontColor(this.realtimeActive ? $r('app.color.danger') : $r('app.color.text_primary'))
             .backgroundColor($r('app.color.surface_muted'))
-            .borderRadius(14)
+            .borderRadius($r('app.float.corner_radius_level10'))
             .enabled(this.hasConfig())
             .onClick(() => {
               this.toggleRealtime();
@@ -3470,8 +5514,8 @@ struct Index {
             .width('100%')
         }
         .width('100%')
-        .padding(18)
-        .borderRadius(24)
+        .padding($r('app.float.padding_level8'))
+        .borderRadius($r('app.float.corner_radius_level8'))
         .backgroundColor($r('app.color.surface'))
       }
       .width('100%')
@@ -3491,12 +5535,13 @@ struct Index {
     Column({ space: 4 }) {
       SymbolGlyph(icon)
         .fontSize(22)
-        .fontColor([this.selectedTab === index ? $r('app.color.accent') :
+        .fontWeight(this.selectedTab === index ? FontWeight.Bold : FontWeight.Regular)
+        .fontColor([this.selectedTab === index ? this.accentColor() :
           $r('app.color.text_secondary')])
       Text(label)
         .fontSize(10)
         .fontWeight(this.selectedTab === index ? FontWeight.Medium : FontWeight.Regular)
-        .fontColor(this.selectedTab === index ? $r('app.color.accent') :
+        .fontColor(this.selectedTab === index ? this.accentColor() :
           $r('app.color.text_secondary'))
     }
     .justifyContent(FlexAlign.Center)
@@ -3509,7 +5554,8 @@ struct Index {
     Column({ space: 8 }) {
       SymbolGlyph(icon)
         .fontSize(24)
-        .fontColor([$r('app.color.accent')])
+        .fontWeight(FontWeight.Medium)
+        .fontColor([this.accentColor()])
       Text(label)
         .fontSize(12)
         .fontWeight(FontWeight.Medium)
@@ -3520,8 +5566,141 @@ struct Index {
     .layoutWeight(1)
     .height(72)
     .justifyContent(FlexAlign.Center)
-    .borderRadius(16)
-    .backgroundColor($r('app.color.accent_soft'))
+    .borderRadius($r('app.float.corner_radius_level8'))
+    .backgroundColor(this.accentSoftColor())
+  }
+
+  @Builder
+  private feedbackSheetContent() {
+    Column({ space: 0 }) {
+      Text($r('app.string.feedback_description'))
+        .fontSize($r('app.float.font_body_large'))
+        .lineHeight(24)
+        .fontColor($r('app.color.text_secondary'))
+        .width('100%')
+      Text($r('app.string.feedback_content_label'))
+        .fontSize($r('app.float.font_body_large'))
+        .fontWeight(FontWeight.Medium)
+        .fontColor($r('app.color.text_primary'))
+        .width('100%')
+        .margin({ top: 24, bottom: 10 })
+      TextArea({
+        placeholder: $r('app.string.feedback_content_placeholder'),
+        text: this.feedbackText
+      })
+        .width('100%')
+        .height(160)
+        .fontSize($r('app.float.font_body_large'))
+        .fontColor($r('app.color.text_primary'))
+        .placeholderColor($r('app.color.text_tertiary'))
+        .backgroundColor($r('app.color.surface_muted'))
+        .borderRadius($r('app.float.corner_radius_level8'))
+        .border({ width: 1, color: $r('app.color.divider') })
+        .padding(16)
+        .onChange((value: string): void => {
+          this.feedbackText = value;
+        })
+      Text($r('app.string.feedback_email_label'))
+        .fontSize($r('app.float.font_body_large'))
+        .fontWeight(FontWeight.Medium)
+        .fontColor($r('app.color.text_primary'))
+        .width('100%')
+        .margin({ top: 22, bottom: 10 })
+      Row({ space: 12 }) {
+        SymbolGlyph($r('sys.symbol.envelope'))
+          .fontSize(20)
+          .fontColor([this.accentColor()])
+        Text(FEEDBACK_EMAIL)
+          .fontSize($r('app.float.font_body_large'))
+          .fontColor($r('app.color.text_primary'))
+          .maxLines(1)
+      }
+      .width('100%')
+      .height(54)
+      .padding({ left: 16, right: 16 })
+      .borderRadius($r('app.float.corner_radius_level8'))
+      .backgroundColor(this.accentSoftColor())
+      Button($r('app.string.feedback_write_clipboard_action'), { type: ButtonType.Normal })
+        .width('100%')
+        .height(50)
+        .fontSize($r('app.float.font_body_large'))
+        .fontWeight(FontWeight.Medium)
+        .fontColor($r('app.color.on_accent'))
+        .backgroundColor(this.accentColor())
+        .borderRadius($r('app.float.corner_radius_level10'))
+        .margin({ top: 24 })
+        .enabled(this.feedbackText.trim().length > 0)
+        .onClick((): void => {
+          this.submitFeedback();
+        })
+    }
+    .width('100%')
+    .padding({ left: 24, right: 24, top: 18, bottom: 26 })
+  }
+
+  @Builder
+  private feedbackSheet() {
+    HdsNavigation() {
+      Scroll() {
+        Column() {
+          Blank()
+            .width('100%')
+            .height(55)
+          this.feedbackSheetContent()
+        }
+        .width('100%')
+      }
+      .width('100%')
+      .height('100%')
+      .scrollBar(BarState.Off)
+      .edgeEffect(EdgeEffect.Spring)
+    }
+    .titleBar({
+      content: {
+        title: {
+          mainTitle: $r('app.string.feedback_dialog_title')
+        },
+        menu: {
+          value: [{
+            content: {
+              label: 'modal_cancel',
+              isEnabled: true,
+              type: IconStyleMode.SMALL,
+              action: (): void => {
+                this.showFeedbackSheet = false;
+              }
+            }
+          }]
+        }
+      },
+      style: {
+        scrollEffectOpts: {
+          scrollEffectType: ScrollEffectType.GRADIENT_BLUR
+        },
+        originalStyle: {
+          contentStyle: {
+            menuStyle: {
+              iconColor: this.accentColor()
+            }
+          }
+        },
+        scrollEffectStyle: {
+          contentStyle: {
+            menuStyle: {
+              iconColor: this.accentColor()
+            }
+          }
+        },
+        systemMaterialEffect: {
+          materialType: hdsMaterial.MaterialType.IMMERSIVE,
+          materialLevel: hdsMaterial.MaterialLevel.ADAPTIVE
+        }
+      }
+    })
+    .titleMode(HdsNavigationTitleMode.MODAL)
+    .hideBackButton(true)
+    .mode(NavigationMode.Stack)
+    .backgroundColor($r('app.color.page_background'))
   }
 
   @Builder
@@ -3530,23 +5709,23 @@ struct Index {
       Image($r('app.media.uniclipboard_start_icon'))
         .width(82)
         .height(82)
-        .borderRadius(24)
+        .borderRadius($r('app.float.corner_radius_level4'))
         .objectFit(ImageFit.Cover)
       Text($r('app.string.app_title'))
-        .fontSize(25)
+        .fontSize(24)
         .fontWeight(FontWeight.Bold)
         .fontColor($r('app.color.text_primary'))
         .margin({ top: 16 })
       Text($r('app.string.desktop_version'))
         .fontSize(12)
         .fontWeight(FontWeight.Medium)
-        .fontColor($r('app.color.accent'))
+        .fontColor(this.accentColor())
         .padding({ left: 12, right: 12, top: 5, bottom: 5 })
-        .borderRadius(14)
-        .backgroundColor($r('app.color.accent_soft'))
+        .borderRadius($r('app.float.corner_radius_level10'))
+        .backgroundColor(this.accentSoftColor())
         .margin({ top: 8 })
       Text($r('app.string.about_tagline'))
-        .fontSize(17)
+        .fontSize($r('app.float.font_subtitle_large'))
         .fontWeight(FontWeight.Medium)
         .fontColor($r('app.color.text_primary'))
         .textAlign(TextAlign.Center)
@@ -3568,23 +5747,22 @@ struct Index {
       .width('100%')
       .margin({ top: 22 })
       Text($r('app.string.about_footer'))
-        .fontSize(11)
+        .fontSize($r('app.float.font_body_small'))
         .lineHeight(17)
         .fontColor($r('app.color.text_secondary'))
         .textAlign(TextAlign.Center)
         .margin({ top: 18 })
-      Button($r('app.string.about_open_settings'), { type: ButtonType.Normal })
+      Button($r('app.string.about_feedback_action'), { type: ButtonType.Normal })
         .width('100%')
         .height(48)
-        .fontSize(15)
+        .fontSize($r('app.float.font_body_large'))
         .fontWeight(FontWeight.Medium)
-        .fontColor(Color.White)
-        .backgroundColor($r('app.color.accent'))
-        .borderRadius(16)
+        .fontColor($r('app.color.on_accent'))
+        .backgroundColor(this.accentColor())
+        .borderRadius($r('app.float.corner_radius_level10'))
         .margin({ top: 22 })
         .onClick((): void => {
-          this.showAboutSheet = false;
-          this.selectPage(1);
+          this.openFeedbackFromAbout();
         })
     }
     .width('100%')
@@ -3658,8 +5836,7 @@ struct Index {
         menu: {
           value: [{
             content: {
-              icon: this.isConnectionAvailable() ?
-                $r('sys.symbol.connection') : $r('sys.symbol.unconnection'),
+              icon: this.titleBarConnectionIcon(),
               label: this.isConnectionAvailable() ?
                 $r('app.string.status_online') : $r('app.string.status_offline'),
               action: (): void => {
@@ -3680,6 +5857,20 @@ struct Index {
       style: {
         scrollEffectOpts: {
           scrollEffectType: ScrollEffectType.GRADIENT_BLUR
+        },
+        originalStyle: {
+          contentStyle: {
+            menuStyle: {
+              iconColor: this.accentColor()
+            }
+          }
+        },
+        scrollEffectStyle: {
+          contentStyle: {
+            menuStyle: {
+              iconColor: this.accentColor()
+            }
+          }
         },
         systemMaterialEffect: {
           materialType: hdsMaterial.MaterialType.IMMERSIVE,
@@ -3710,8 +5901,7 @@ struct Index {
         menu: {
           value: [{
             content: {
-              icon: this.isConnectionAvailable() ?
-                $r('sys.symbol.connection') : $r('sys.symbol.unconnection'),
+              icon: this.titleBarConnectionIcon(),
               label: this.isConnectionAvailable() ?
                 $r('app.string.status_online') : $r('app.string.status_offline'),
               action: (): void => {
@@ -3732,6 +5922,20 @@ struct Index {
       style: {
         scrollEffectOpts: {
           scrollEffectType: ScrollEffectType.GRADIENT_BLUR
+        },
+        originalStyle: {
+          contentStyle: {
+            menuStyle: {
+              iconColor: this.accentColor()
+            }
+          }
+        },
+        scrollEffectStyle: {
+          contentStyle: {
+            menuStyle: {
+              iconColor: this.accentColor()
+            }
+          }
         },
         systemMaterialEffect: {
           materialType: hdsMaterial.MaterialType.IMMERSIVE,
@@ -3770,7 +5974,7 @@ struct Index {
     .barFloatingStyle({
       barWidth: { smallWidth: 200, mediumWidth: 300, largeWidth: 400 },
       barBottomMargin: 28,
-      gradientMask: { maskColor: '#66F1F3F5', maskHeight: 92 },
+      gradientMask: { maskColor: $r('app.color.navigation_mask'), maskHeight: 92 },
       systemMaterialEffect: {
         materialType: hdsMaterial.MaterialType.IMMERSIVE,
         materialLevel: hdsMaterial.MaterialLevel.ADAPTIVE
@@ -3799,22 +6003,22 @@ struct Index {
 
   @Builder
   private largeSidebarItem(index: number, icon: Resource, label: Resource) {
-    Row({ space: 12 }) {
+    Row({ space: 8 }) {
       SymbolGlyph(icon)
         .fontSize(22)
-        .fontColor([this.selectedTab === index ? $r('app.color.accent') :
+        .fontColor([this.selectedTab === index ? this.accentColor() :
           $r('app.color.text_secondary')])
       Text(label)
         .fontSize(16)
         .fontWeight(this.selectedTab === index ? FontWeight.Medium : FontWeight.Regular)
-        .fontColor(this.selectedTab === index ? $r('app.color.accent') :
+        .fontColor(this.selectedTab === index ? this.accentColor() :
           $r('app.color.text_primary'))
       }
     .width('100%')
     .height(52)
     .padding({ left: 16, right: 16 })
-    .borderRadius(16)
-    .backgroundColor(this.selectedTab === index ? $r('app.color.accent_soft') : Color.Transparent)
+    .borderRadius($r('app.float.corner_radius_level8'))
+    .backgroundColor(this.selectedTab === index ? this.accentSoftColor() : Color.Transparent)
     .onClick(() => {
       this.selectPage(index);
     })
@@ -3864,22 +6068,46 @@ struct Index {
   private desktopRailButton(index: number, icon: Resource, label: Resource) {
     Column({ space: 4 }) {
       SymbolGlyph(icon)
-        .fontSize(25)
-        .fontColor([this.largeSection === index ? $r('app.color.text_primary') :
+        .fontSize(24)
+        .fontWeight(this.largeSection === index ? FontWeight.Bold : FontWeight.Regular)
+        .fontColor([this.largeSection === index ? this.accentColor() :
           $r('app.color.text_secondary')])
       Text(label)
-        .fontSize(9)
+        .fontSize($r('app.float.font_caption_medium'))
+        .fontWeight(this.largeSection === index ? FontWeight.Medium : FontWeight.Regular)
         .maxLines(1)
-        .fontColor(this.largeSection === index ? $r('app.color.text_primary') :
+        .fontColor(this.largeSection === index ? this.accentColor() :
           $r('app.color.text_secondary'))
     }
-    .width(58)
-    .height(58)
+    .width(64)
+    .height(64)
     .justifyContent(FlexAlign.Center)
-    .borderRadius(16)
-    .backgroundColor(this.largeSection === index ? $r('app.color.accent_soft') : Color.Transparent)
+    .borderRadius($r('app.float.corner_radius_level10'))
+    .backgroundColor(this.largeSection === index ? this.accentSoftColor() : Color.Transparent)
     .onClick((): void => {
       this.selectLargeSection(index);
+    })
+  }
+
+  @Builder
+  private desktopFeedbackRailButton() {
+    Column({ space: 4 }) {
+      SymbolGlyph($r('sys.symbol.message'))
+        .fontSize(24)
+        .fontColor([$r('app.color.text_secondary')])
+      Text($r('app.string.nav_feedback'))
+        .fontSize($r('app.float.font_caption_medium'))
+        .fontWeight(FontWeight.Regular)
+        .maxLines(1)
+        .fontColor($r('app.color.text_secondary'))
+    }
+    .width(64)
+    .height(64)
+    .justifyContent(FlexAlign.Center)
+    .borderRadius($r('app.float.corner_radius_level10'))
+    .backgroundColor(Color.Transparent)
+    .onClick((): void => {
+      this.openFeedback();
     })
   }
 
@@ -3890,19 +6118,20 @@ struct Index {
         Image($r('app.media.uniclipboard_start_icon'))
           .width(50)
           .height(50)
-          .borderRadius(15)
+          .borderRadius($r('app.float.corner_radius_level4'))
           .objectFit(ImageFit.Cover)
       }
-      .width(58)
-      .height(58)
+      .width(64)
+      .height(64)
       .justifyContent(FlexAlign.Center)
       .margin({ bottom: 6 })
       this.desktopRailButton(0, $r('sys.symbol.rectangle_stack'), $r('app.string.desktop_clipboard'))
       this.desktopRailButton(1, $r('sys.symbol.desktop'), $r('app.string.desktop_devices'))
       Blank()
+      this.desktopFeedbackRailButton()
       this.desktopRailButton(2, $r('sys.symbol.gearshape'), $r('app.string.nav_settings'))
     }
-    .width(82)
+    .width(88)
     .height('100%')
     .alignItems(HorizontalAlign.Center)
     .padding({ top: 18, bottom: 18 })
@@ -3910,54 +6139,121 @@ struct Index {
   }
 
   @Builder
-  private desktopFilterItem(index: number, icon: Resource, label: Resource) {
+  private desktopFilterItem(group: number, value: number, icon: Resource, label: Resource) {
     Row({ space: 12 }) {
       SymbolGlyph(icon)
         .fontSize(19)
-        .fontColor([this.desktopFilter === index ? $r('app.color.text_primary') :
+        .fontWeight(this.desktopFilterSelected(group, value) ? FontWeight.Medium : FontWeight.Regular)
+        .fontColor([this.desktopFilterSelected(group, value) ? this.accentColor() :
           $r('app.color.text_secondary')])
       Text(label)
-        .fontSize(15)
-        .fontWeight(this.desktopFilter === index ? FontWeight.Medium : FontWeight.Regular)
-        .fontColor($r('app.color.text_primary'))
+        .fontSize($r('app.float.font_body_large'))
+        .fontWeight(this.desktopFilterSelected(group, value) ? FontWeight.Medium : FontWeight.Regular)
+        .fontColor(this.desktopFilterSelected(group, value) ? $r('app.color.text_primary') :
+          $r('app.color.text_secondary'))
     }
     .width('100%')
-    .height(46)
+    .height(44)
     .padding({ left: 14, right: 14 })
-    .borderRadius(14)
-    .backgroundColor(this.desktopFilter === index ? $r('app.color.surface_muted') : Color.Transparent)
+    .borderRadius($r('app.float.corner_radius_level10'))
+    .backgroundColor(this.desktopFilterSelected(group, value) ? this.accentSoftColor() :
+      Color.Transparent)
     .onClick((): void => {
-      this.applyDesktopFilter(index);
+      this.applyDesktopFilter(group, value);
+    })
+  }
+
+  @Builder
+  private desktopFilterSectionLabel(label: Resource) {
+    Text(label)
+      .fontSize(12)
+      .fontWeight(FontWeight.Medium)
+      .fontColor($r('app.color.text_tertiary'))
+      .width('100%')
+      .padding({ left: 14, top: 14, bottom: 3 })
+  }
+
+  @Builder
+  private desktopExtensionFilterItem(extension: string, label: Resource) {
+    Row({ space: 12 }) {
+      SymbolGlyph($r('sys.symbol.doc_text'))
+        .fontSize(19)
+        .fontWeight(this.desktopExtensionFilter === extension ? FontWeight.Medium : FontWeight.Regular)
+        .fontColor([this.desktopExtensionFilter === extension ? this.accentColor() :
+          $r('app.color.text_secondary')])
+      Text(label)
+        .fontSize($r('app.float.font_body_large'))
+        .fontWeight(this.desktopExtensionFilter === extension ? FontWeight.Medium : FontWeight.Regular)
+        .fontColor(this.desktopExtensionFilter === extension ? $r('app.color.text_primary') :
+          $r('app.color.text_secondary'))
+    }
+    .width('100%')
+    .height(44)
+    .padding({ left: 14, right: 14 })
+    .borderRadius($r('app.float.corner_radius_level10'))
+    .backgroundColor(this.desktopExtensionFilter === extension ? this.accentSoftColor() :
+      Color.Transparent)
+    .onClick((): void => {
+      this.applyDesktopExtensionFilter(extension);
     })
   }
 
   @Builder
   private desktopClipboardFilters() {
-    Column({ space: 8 }) {
-      Text($r('app.string.desktop_library'))
-        .fontSize(22)
-        .fontWeight(FontWeight.Bold)
-        .fontColor($r('app.color.text_primary'))
+    Column() {
+      Row() {
+        Text($r('app.string.desktop_library'))
+          .fontSize(18)
+          .fontWeight(FontWeight.Bold)
+          .fontColor($r('app.color.text_primary'))
+        Blank()
+      }
+      .width('100%')
+      .height(72)
+      .padding({ left: 24, right: 20 })
+      Scroll() {
+        Column({ space: 4 }) {
+          this.desktopFilterItem(0, 0, $r('sys.symbol.square_grid_2x2'), $r('app.string.desktop_all'))
+          this.desktopFilterItem(0, 1, $r('sys.symbol.star'), $r('app.string.history_star_action'))
+          this.desktopFilterSectionLabel($r('app.string.desktop_types'))
+          this.desktopFilterItem(1, 1, $r('sys.symbol.doc_text'), $r('app.string.desktop_text'))
+          this.desktopFilterItem(1, 2, $r('sys.symbol.textformat'), $r('app.string.desktop_rich_text'))
+          this.desktopFilterItem(1, 3, $r('sys.symbol.ohos_photo'), $r('app.string.desktop_images'))
+          this.desktopFilterItem(1, 4, $r('sys.symbol.folder'), $r('app.string.desktop_files'))
+          this.desktopFilterSectionLabel($r('app.string.desktop_tags'))
+          this.desktopFilterItem(2, 1, $r('sys.symbol.link'), $r('app.string.desktop_tag_link'))
+          this.desktopFilterItem(2, 2, $r('sys.symbol.code'), $r('app.string.desktop_tag_code'))
+          this.desktopFilterItem(2, 3, $r('sys.symbol.ohos_photo'), $r('app.string.desktop_tag_image'))
+          this.desktopFilterItem(2, 4, $r('sys.symbol.folder'), $r('app.string.desktop_tag_folder'))
+          this.desktopFilterSectionLabel($r('app.string.desktop_sources'))
+          this.desktopFilterItem(3, 0, $r('sys.symbol.rectangle_stack'), $r('app.string.desktop_all_sources'))
+          this.desktopFilterItem(3, 1, $r('sys.symbol.desktop'), $r('app.string.desktop_server_source'))
+          this.desktopFilterItem(3, 2, $r('sys.symbol.phone'), $r('app.string.desktop_session_source'))
+          this.desktopFilterSectionLabel($r('app.string.desktop_time'))
+          this.desktopFilterItem(4, 0, $r('sys.symbol.clock'), $r('app.string.desktop_unlimited_time'))
+          this.desktopFilterItem(4, 1, $r('sys.symbol.clock'), $r('app.string.desktop_today'))
+          this.desktopFilterItem(4, 2, $r('sys.symbol.clock'), $r('app.string.desktop_yesterday'))
+          this.desktopFilterItem(4, 3, $r('sys.symbol.clock'), $r('app.string.desktop_recent'))
+          this.desktopFilterItem(4, 4, $r('sys.symbol.clock'), $r('app.string.desktop_last_30_days'))
+          this.desktopFilterItem(4, 5, $r('sys.symbol.clock'), $r('app.string.desktop_this_week'))
+          this.desktopFilterItem(4, 6, $r('sys.symbol.clock'), $r('app.string.desktop_this_month'))
+          this.desktopFilterSectionLabel($r('app.string.desktop_extensions'))
+          this.desktopExtensionFilterItem('txt', $r('app.string.desktop_extension_txt'))
+          this.desktopExtensionFilterItem('md', $r('app.string.desktop_extension_md'))
+          this.desktopExtensionFilterItem('jpg', $r('app.string.desktop_extension_jpg'))
+          this.desktopExtensionFilterItem('png', $r('app.string.desktop_extension_png'))
+          this.desktopExtensionFilterItem('pdf', $r('app.string.desktop_extension_pdf'))
+          this.desktopExtensionFilterItem('ts', $r('app.string.desktop_extension_ts'))
+          this.desktopExtensionFilterItem('js', $r('app.string.desktop_extension_js'))
+          this.desktopExtensionFilterItem('json', $r('app.string.desktop_extension_json'))
+          this.desktopExtensionFilterItem('rs', $r('app.string.desktop_extension_rs'))
+          this.desktopExtensionFilterItem('go', $r('app.string.desktop_extension_go'))
+        }
         .width('100%')
-        .padding({ left: 12, top: 4, bottom: 10 })
-      this.desktopFilterItem(0, $r('sys.symbol.square_grid_2x2'), $r('app.string.desktop_all'))
-      this.desktopFilterItem(1, $r('sys.symbol.star'), $r('app.string.server_history_starred_action'))
-      Text($r('app.string.desktop_types'))
-        .fontSize(12)
-        .fontColor($r('app.color.text_secondary'))
-        .width('100%')
-        .padding({ left: 14, top: 16, bottom: 4 })
-      this.desktopFilterItem(2, $r('sys.symbol.doc_text'), $r('app.string.desktop_text'))
-      this.desktopFilterItem(3, $r('sys.symbol.ohos_photo'), $r('app.string.desktop_images'))
-      this.desktopFilterItem(4, $r('sys.symbol.folder'), $r('app.string.desktop_files'))
-      Text($r('app.string.desktop_time'))
-        .fontSize(12)
-        .fontColor($r('app.color.text_secondary'))
-        .width('100%')
-        .padding({ left: 14, top: 16, bottom: 4 })
-      this.desktopFilterItem(5, $r('sys.symbol.clock'), $r('app.string.desktop_today'))
-      this.desktopFilterItem(6, $r('sys.symbol.worldclock'), $r('app.string.desktop_recent'))
-      Blank()
+        .padding({ left: 10, right: 10, top: 16, bottom: 16 })
+      }
+      .layoutWeight(1)
+      .scrollBar(BarState.Auto)
       Row({ space: 8 }) {
         Row()
           .width(8)
@@ -3968,17 +6264,17 @@ struct Index {
         Text(this.spaceJoined ?
           (this.spacePeerConnected ? $r('app.string.space_peer_online') :
             $r('app.string.space_peer_waiting')) : $r('app.string.status_offline'))
-          .fontSize(11)
+          .fontSize($r('app.float.font_body_small'))
           .maxLines(2)
           .fontColor($r('app.color.text_secondary'))
       }
       .width('100%')
-      .padding({ left: 14, right: 10, bottom: 8 })
+      .padding({ left: 24, right: 20, top: 10, bottom: 12 })
+      .border({ width: { top: 1 }, color: $r('app.color.divider') })
     }
     .width(248)
     .height('100%')
-    .padding({ left: 10, right: 10, top: 20, bottom: 12 })
-    .backgroundColor($r('app.color.surface'))
+    .backgroundColor($r('app.color.page_background'))
     .border({ width: { right: 1 }, color: $r('app.color.divider') })
   }
 
@@ -3988,7 +6284,7 @@ struct Index {
       Row() {
         Row({ space: 7 }) {
           SymbolGlyph(item.kind === 'Image' ? $r('sys.symbol.ohos_photo') : $r('sys.symbol.doc_text'))
-            .fontSize(15)
+            .fontSize($r('app.float.font_body_large'))
             .fontColor([item.kind === 'Image' ? $r('app.color.success') : $r('app.color.text_secondary')])
           Text(item.kind)
             .fontSize(12)
@@ -3996,17 +6292,17 @@ struct Index {
           if (item.starred) {
             Text('★')
               .fontSize(12)
-              .fontColor($r('app.color.accent'))
+              .fontColor(this.accentColor())
           }
         }
         Blank()
         Text(item.time)
-          .fontSize(11)
+          .fontSize($r('app.float.font_body_small'))
           .fontColor($r('app.color.text_secondary'))
       }
       .width('100%')
       Text(item.text)
-        .fontSize(15)
+        .fontSize($r('app.float.font_body_large'))
         .lineHeight(21)
         .maxLines(2)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -4017,9 +6313,10 @@ struct Index {
     .height(94)
     .justifyContent(FlexAlign.Center)
     .padding({ left: 18, right: 18 })
-    .backgroundColor(this.desktopSelectedId === item.id ? $r('app.color.surface_muted') :
+    .backgroundColor(this.desktopSelectedId === item.id ? this.accentSoftColor() :
       $r('app.color.surface'))
     .border({ width: { bottom: 1 }, color: $r('app.color.divider') })
+    .bindContextMenu(this.historyServerContextMenu(item), ResponseType.LongPress)
     .onClick((): void => {
       this.selectDesktopServerItem(item);
     })
@@ -4034,7 +6331,7 @@ struct Index {
           .width(64)
           .height(64)
           .objectFit(ImageFit.Cover)
-          .borderRadius(10)
+          .borderRadius($r('app.float.corner_radius_level4'))
           .backgroundColor($r('app.color.surface_muted'))
       }
       Column({ space: 7 }) {
@@ -4042,20 +6339,20 @@ struct Index {
           Text(item.direction === 'sent' ? $r('app.string.direction_sent') :
             $r('app.string.direction_received'))
             .fontSize(12)
-            .fontColor(item.direction === 'sent' ? $r('app.color.accent') : $r('app.color.success'))
+            .fontColor(item.direction === 'sent' ? this.accentColor() : $r('app.color.success'))
           if (item.starred) {
             Text('★')
               .fontSize(12)
-              .fontColor($r('app.color.accent'))
+              .fontColor(this.accentColor())
           }
           Blank()
           Text(item.time)
-            .fontSize(11)
+            .fontSize($r('app.float.font_body_small'))
             .fontColor($r('app.color.text_secondary'))
         }
         .width('100%')
         Text(item.text)
-          .fontSize(15)
+          .fontSize($r('app.float.font_body_large'))
           .lineHeight(21)
           .maxLines(2)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -4069,9 +6366,10 @@ struct Index {
     .height(94)
     .justifyContent(FlexAlign.Center)
     .padding({ left: 18, right: 18 })
-    .backgroundColor(this.desktopSelectedId === item.id ? $r('app.color.surface_muted') :
+    .backgroundColor(this.desktopSelectedId === item.id ? this.accentSoftColor() :
       $r('app.color.surface'))
     .border({ width: { bottom: 1 }, color: $r('app.color.divider') })
+    .bindContextMenu(this.historyLocalContextMenu(item), ResponseType.LongPress)
     .onClick((): void => {
       this.selectDesktopSessionItem(item);
     })
@@ -4083,6 +6381,7 @@ struct Index {
       Row({ space: 10 }) {
         SymbolGlyph($r('sys.symbol.magnifyingglass'))
           .fontSize(18)
+          .fontWeight(FontWeight.Medium)
           .fontColor([$r('app.color.text_secondary')])
         TextInput({ placeholder: $r('app.string.server_history_search_placeholder'),
           text: this.historySearchText })
@@ -4091,10 +6390,10 @@ struct Index {
           .fontSize(14)
           .backgroundColor(Color.Transparent)
           .onChange((value: string): void => {
-            this.historySearchText = value;
+            this.scheduleDesktopHistorySearch(value);
           })
           .onSubmit((): void => {
-            this.loadServerHistory(true);
+            this.submitDesktopHistorySearch();
           })
         Row({ space: 4 }) {
           Text((this.desktopFilteredServerHistory().length +
@@ -4106,9 +6405,11 @@ struct Index {
             .fontColor($r('app.color.text_secondary'))
         }
       }
-      .height(64)
+      .height(44)
       .width('100%')
-      .padding({ left: 18, right: 18 })
+      .padding({ left: 16, right: 16 })
+      .margin({ left: 16, right: 16, top: 14, bottom: 14 })
+      .borderRadius($r('app.float.corner_radius_level10'))
       .backgroundColor($r('app.color.surface_muted'))
       Scroll() {
         Column() {
@@ -4118,16 +6419,18 @@ struct Index {
               SymbolGlyph($r('sys.symbol.clipboard_sharing'))
                 .fontSize(38)
                 .fontColor([$r('app.color.text_secondary')])
-              Text($r('app.string.server_history_empty'))
+              Text(this.desktopAllFiltersClear() && this.historySearchText.trim().length === 0 ?
+                $r('app.string.server_history_empty') : $r('app.string.desktop_filtered_empty'))
                 .fontSize(14)
                 .textAlign(TextAlign.Center)
                 .fontColor($r('app.color.text_secondary'))
               Button($r('app.string.server_history_refresh'), { type: ButtonType.Normal })
                 .fontColor($r('app.color.text_primary'))
                 .backgroundColor($r('app.color.surface_muted'))
-                .borderRadius(12)
+                .borderRadius($r('app.float.corner_radius_level10'))
+                .enabled(!this.desktopRefreshBusy)
                 .onClick((): void => {
-                  this.loadServerHistory(true);
+                  this.refreshDesktopMessages();
                 })
             }
             .width('100%')
@@ -4161,7 +6464,7 @@ struct Index {
           .width(46)
           .height(46)
           .objectFit(ImageFit.Cover)
-          .borderRadius(10)
+          .borderRadius($r('app.float.corner_radius_level4'))
       } else {
         SymbolGlyph($r('sys.symbol.ohos_photo'))
           .fontSize(26)
@@ -4170,28 +6473,28 @@ struct Index {
       }
       Column({ space: 3 }) {
         Text($r('app.string.image_composer_title'))
-          .fontSize(13)
+          .fontSize($r('app.float.font_body_medium'))
           .fontWeight(FontWeight.Medium)
           .fontColor($r('app.color.text_primary'))
         if (this.imageSendState === 1) {
           Text($r('app.string.image_sending'))
-            .fontSize(11)
+            .fontSize($r('app.float.font_body_small'))
             .fontColor($r('app.color.text_secondary'))
         } else if (this.imageSendState === 2) {
           Text($r('app.string.image_send_success'))
-            .fontSize(11)
+            .fontSize($r('app.float.font_body_small'))
             .fontColor($r('app.color.success'))
         } else if (this.imageSendState === 3) {
           Text($r('app.string.image_send_failed'))
-            .fontSize(11)
+            .fontSize($r('app.float.font_body_small'))
             .fontColor($r('app.color.danger'))
         } else if (this.imageReadState === 2) {
           Text($r('app.string.image_read_success'))
-            .fontSize(11)
+            .fontSize($r('app.float.font_body_small'))
             .fontColor($r('app.color.success'))
         } else {
           Text($r('app.string.image_empty'))
-            .fontSize(11)
+            .fontSize($r('app.float.font_body_small'))
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .fontColor($r('app.color.text_secondary'))
@@ -4199,24 +6502,33 @@ struct Index {
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
-      Button(this.imageReadState === 1 ? $r('app.string.image_reading') :
-        $r('app.string.read_image_action'), { type: ButtonType.Normal })
+      PasteButton({
+        icon: PasteIconStyle.LINES,
+        text: PasteDescription.PASTE,
+        buttonType: ButtonType.Normal
+      })
         .height(40)
-        .fontSize(13)
+        .fontSize($r('app.float.font_body_medium'))
         .fontColor($r('app.color.text_primary'))
-        .backgroundColor($r('app.color.surface_muted'))
-        .borderRadius(12)
+        .iconColor($r('app.color.text_primary'))
+        .backgroundColor($r('app.color.paste_button_background'))
+        .borderRadius($r('app.float.corner_radius_level10'))
         .enabled(!this.busy && this.imageReadState !== 1)
-        .onClick((): void => {
-          this.readLocalImage();
+        .onClick((_event: ClickEvent, result: PasteButtonOnClickResult): void => {
+          if (result === PasteButtonOnClickResult.SUCCESS) {
+            this.readLocalImage();
+          } else {
+            this.imageReadState = 4;
+            this.statusCode = 3;
+          }
         })
       Button(this.imageSendState === 1 ? $r('app.string.image_sending') :
         $r('app.string.send_image_action'), { type: ButtonType.Normal })
         .height(40)
-        .fontSize(13)
-        .fontColor(Color.White)
-        .backgroundColor($r('app.color.accent'))
-        .borderRadius(12)
+        .fontSize($r('app.float.font_body_medium'))
+        .fontColor($r('app.color.on_accent'))
+        .backgroundColor(this.accentColor())
+        .borderRadius($r('app.float.corner_radius_level10'))
         .enabled(!this.busy && this.composerImage !== null)
         .onClick((): void => {
           this.sendImage();
@@ -4235,25 +6547,25 @@ struct Index {
         .width(46)
       Column({ space: 3 }) {
         Text($r('app.string.file_composer_title'))
-          .fontSize(13)
+          .fontSize($r('app.float.font_body_medium'))
           .fontWeight(FontWeight.Medium)
           .fontColor($r('app.color.text_primary'))
         if (this.fileTransferState === 1) {
-          Text($r('app.string.file_selecting')).fontSize(11).fontColor($r('app.color.text_secondary'))
+          Text($r('app.string.file_selecting')).fontSize($r('app.float.font_body_small')).fontColor($r('app.color.text_secondary'))
         } else if (this.fileTransferState === 2) {
-          Text(this.composerFileName).fontSize(11).fontColor($r('app.color.success')).maxLines(1)
+          Text(this.composerFileName).fontSize($r('app.float.font_body_small')).fontColor($r('app.color.success')).maxLines(1)
         } else if (this.fileTransferState === 3) {
-          Text($r('app.string.file_sending')).fontSize(11).fontColor($r('app.color.text_secondary'))
+          Text($r('app.string.file_sending')).fontSize($r('app.float.font_body_small')).fontColor($r('app.color.text_secondary'))
         } else if (this.fileTransferState === 4) {
-          Text($r('app.string.file_send_failed')).fontSize(11).fontColor($r('app.color.danger')).maxLines(1)
+          Text($r('app.string.file_send_failed')).fontSize($r('app.float.font_body_small')).fontColor($r('app.color.danger')).maxLines(1)
         } else if (this.fileTransferState === 5) {
-          Text($r('app.string.file_too_large')).fontSize(11).fontColor($r('app.color.danger'))
+          Text($r('app.string.file_too_large')).fontSize($r('app.float.font_body_small')).fontColor($r('app.color.danger'))
         } else if (this.fileTransferState === 6) {
-          Text($r('app.string.file_send_success')).fontSize(11).fontColor($r('app.color.success'))
+          Text($r('app.string.file_send_success')).fontSize($r('app.float.font_body_small')).fontColor($r('app.color.success'))
         } else if (this.fileTransferState === 7) {
-          Text($r('app.string.file_send_pending')).fontSize(11).fontColor($r('app.color.text_secondary'))
+          Text($r('app.string.file_send_pending')).fontSize($r('app.float.font_body_small')).fontColor($r('app.color.text_secondary'))
         } else {
-          Text($r('app.string.file_empty')).fontSize(11).fontColor($r('app.color.text_secondary')).maxLines(1)
+          Text($r('app.string.file_empty')).fontSize($r('app.float.font_body_small')).fontColor($r('app.color.text_secondary')).maxLines(1)
         }
       }
       .layoutWeight(1)
@@ -4261,10 +6573,10 @@ struct Index {
       Button(this.fileTransferState === 1 ? $r('app.string.file_selecting') :
         $r('app.string.select_file_action'), { type: ButtonType.Normal })
         .height(40)
-        .fontSize(13)
+        .fontSize($r('app.float.font_body_medium'))
         .fontColor($r('app.color.text_primary'))
         .backgroundColor($r('app.color.surface_muted'))
-        .borderRadius(12)
+        .borderRadius($r('app.float.corner_radius_level10'))
         .enabled(!this.busy && this.fileTransferState !== 1)
         .onClick((): void => {
           this.selectFile();
@@ -4272,10 +6584,10 @@ struct Index {
       Button(this.fileTransferState === 3 ? $r('app.string.file_sending') :
         $r('app.string.send_file_action'), { type: ButtonType.Normal })
         .height(40)
-        .fontSize(13)
-        .fontColor(Color.White)
-        .backgroundColor($r('app.color.accent'))
-        .borderRadius(12)
+        .fontSize($r('app.float.font_body_medium'))
+        .fontColor($r('app.color.on_accent'))
+        .backgroundColor(this.accentColor())
+        .borderRadius($r('app.float.corner_radius_level10'))
         .enabled(!this.busy && this.composerFileUri.length > 0 && this.spaceJoined)
         .onClick((): void => {
           this.sendFile();
@@ -4294,11 +6606,11 @@ struct Index {
           .width(200)
           .aspectRatio(1)
           .objectFit(ImageFit.Cover)
-          .borderRadius(18)
+          .borderRadius($r('app.float.corner_radius_level8'))
       } else {
         SymbolGlyph($r('sys.symbol.music'))
           .fontSize(58)
-          .fontColor([$r('app.color.accent')])
+          .fontColor([this.accentColor()])
       }
       Text(this.desktopAudioDisplayTitle())
         .fontSize(18)
@@ -4307,7 +6619,7 @@ struct Index {
         .textAlign(TextAlign.Center)
       if (this.desktopAudioDisplayArtist().length > 0) {
         Text(this.desktopAudioDisplayArtist())
-          .fontSize(13)
+          .fontSize($r('app.float.font_body_medium'))
           .fontColor($r('app.color.text_secondary'))
           .textAlign(TextAlign.Center)
       }
@@ -4319,7 +6631,7 @@ struct Index {
         style: SliderStyle.OutSet
       })
         .width('100%')
-        .selectedColor($r('app.color.accent'))
+        .selectedColor(this.accentColor())
         .enabled(this.desktopAudioDuration > 0 && this.desktopAudioState !== 5)
         .onChange((value: number, mode: SliderChangeMode): void => {
           this.desktopAudioPosition = value;
@@ -4343,9 +6655,9 @@ struct Index {
       Button(this.desktopAudioState === 3 ? $r('app.string.audio_pause_action') :
         $r('app.string.audio_play_action'), { type: ButtonType.Normal })
         .height(42)
-        .fontColor(Color.White)
-        .backgroundColor($r('app.color.accent'))
-        .borderRadius(14)
+        .fontColor($r('app.color.on_accent'))
+        .backgroundColor(this.accentColor())
+        .borderRadius($r('app.float.corner_radius_level10'))
         .enabled(this.desktopAudioState !== 1 && this.desktopAudioState !== 5 &&
           this.desktopFileSourcePath().length > 0)
         .onClick((): void => {
@@ -4370,16 +6682,16 @@ struct Index {
       if (this.desktopAudioLyrics.length > 0) {
         Column({ space: 10 }) {
           Text(this.desktopLyricTextAtOffset(-1))
-            .fontSize(13)
+            .fontSize($r('app.float.font_body_medium'))
             .fontColor($r('app.color.text_secondary'))
             .textAlign(TextAlign.Center)
           Text(this.desktopLyricTextAtOffset(0))
             .fontSize(16)
             .fontWeight(FontWeight.Medium)
-            .fontColor($r('app.color.accent'))
+            .fontColor(this.accentColor())
             .textAlign(TextAlign.Center)
           Text(this.desktopLyricTextAtOffset(1))
-            .fontSize(13)
+            .fontSize($r('app.float.font_body_medium'))
             .fontColor($r('app.color.text_secondary'))
             .textAlign(TextAlign.Center)
         }
@@ -4390,7 +6702,7 @@ struct Index {
         Scroll() {
           Text(this.desktopAudioPlainLyrics)
             .width('100%')
-            .fontSize(13)
+            .fontSize($r('app.float.font_body_medium'))
             .lineHeight(22)
             .fontColor($r('app.color.text_secondary'))
         }
@@ -4399,18 +6711,18 @@ struct Index {
         .scrollBar(BarState.Auto)
       } else if (this.desktopAudioMetadataState === 1) {
         Text($r('app.string.audio_metadata_loading'))
-          .fontSize(13)
+          .fontSize($r('app.float.font_body_medium'))
           .fontColor($r('app.color.text_secondary'))
       } else {
         Text($r('app.string.audio_lyrics_unavailable'))
-          .fontSize(13)
+          .fontSize($r('app.float.font_body_medium'))
           .fontColor($r('app.color.text_secondary'))
       }
     }
     .id('desktop-audio-player-' + this.desktopFilePreviewKey())
     .width('100%')
     .padding(24)
-    .borderRadius(16)
+    .borderRadius($r('app.float.corner_radius_level8'))
     .backgroundColor($r('app.color.surface_muted'))
     .onAppear((): void => {
       this.prepareDesktopAudio();
@@ -4469,57 +6781,57 @@ struct Index {
 
   @Builder
   private desktopGestureShareHint() {
-    Row({ space: 12 }) {
+    Row({ space: 8 }) {
       if (this.desktopGestureShareContentKind() === 2 || this.desktopGestureShareContentKind() === 4) {
         SymbolGlyph($r('sys.symbol.ohos_photo'))
           .fontSize(26)
           .fontColor([this.desktopGestureShareState === 4 || this.desktopGestureShareState === 5 ?
-            $r('app.color.text_secondary') : $r('app.color.accent')])
+            $r('app.color.text_secondary') : this.accentColor()])
       } else if (this.desktopGestureShareContentKind() === 5) {
         SymbolGlyph($r('sys.symbol.video'))
           .fontSize(26)
           .fontColor([this.desktopGestureShareState === 4 || this.desktopGestureShareState === 5 ?
-            $r('app.color.text_secondary') : $r('app.color.accent')])
+            $r('app.color.text_secondary') : this.accentColor()])
       } else if (this.desktopGestureShareContentKind() === 6) {
         SymbolGlyph($r('sys.symbol.music'))
           .fontSize(26)
           .fontColor([this.desktopGestureShareState === 4 || this.desktopGestureShareState === 5 ?
-            $r('app.color.text_secondary') : $r('app.color.accent')])
+            $r('app.color.text_secondary') : this.accentColor()])
       } else if (this.desktopGestureShareContentKind() === 8) {
         SymbolGlyph($r('sys.symbol.doc_zipper'))
           .fontSize(26)
           .fontColor([this.desktopGestureShareState === 4 || this.desktopGestureShareState === 5 ?
-            $r('app.color.text_secondary') : $r('app.color.accent')])
+            $r('app.color.text_secondary') : this.accentColor()])
       } else if (this.desktopGestureShareContentKind() === 7) {
         SymbolGlyph($r('sys.symbol.pdf_doc'))
           .fontSize(26)
           .fontColor([this.desktopGestureShareState === 4 || this.desktopGestureShareState === 5 ?
-            $r('app.color.text_secondary') : $r('app.color.accent')])
+            $r('app.color.text_secondary') : this.accentColor()])
       } else if (this.desktopGestureShareContentKind() === 9) {
         SymbolGlyph($r('sys.symbol.word_book'))
           .fontSize(26)
           .fontColor([this.desktopGestureShareState === 4 || this.desktopGestureShareState === 5 ?
-            $r('app.color.text_secondary') : $r('app.color.accent')])
+            $r('app.color.text_secondary') : this.accentColor()])
       } else if (this.desktopGestureShareContentKind() === 10) {
         SymbolGlyph($r('sys.symbol.grid'))
           .fontSize(26)
           .fontColor([this.desktopGestureShareState === 4 || this.desktopGestureShareState === 5 ?
-            $r('app.color.text_secondary') : $r('app.color.accent')])
+            $r('app.color.text_secondary') : this.accentColor()])
       } else if (this.desktopGestureShareContentKind() === 11) {
         SymbolGlyph($r('sys.symbol.play_round_rectangle'))
           .fontSize(26)
           .fontColor([this.desktopGestureShareState === 4 || this.desktopGestureShareState === 5 ?
-            $r('app.color.text_secondary') : $r('app.color.accent')])
+            $r('app.color.text_secondary') : this.accentColor()])
       } else if (this.desktopGestureShareContentKind() === 1 || this.desktopGestureShareContentKind() === 12) {
         SymbolGlyph($r('sys.symbol.doc_text'))
           .fontSize(26)
           .fontColor([this.desktopGestureShareState === 4 || this.desktopGestureShareState === 5 ?
-            $r('app.color.text_secondary') : $r('app.color.accent')])
+            $r('app.color.text_secondary') : this.accentColor()])
       } else {
         SymbolGlyph($r('sys.symbol.text_alignleft'))
           .fontSize(26)
           .fontColor([this.desktopGestureShareState === 4 || this.desktopGestureShareState === 5 ?
-            $r('app.color.text_secondary') : $r('app.color.accent')])
+            $r('app.color.text_secondary') : this.accentColor()])
       }
       Column({ space: 3 }) {
         Text($r('app.string.gesture_share_title'))
@@ -4534,11 +6846,23 @@ struct Index {
           .maxLines(2)
       }
       .layoutWeight(1)
+      SymbolGlyph($r('sys.symbol.xmark'))
+        .fontSize(18)
+        .fontWeight(FontWeight.Medium)
+        .fontColor([$r('app.color.text_secondary')])
+        .width(32)
+        .height(32)
+        .padding(7)
+        .borderRadius($r('app.float.corner_radius_level10'))
+        .backgroundColor($r('app.color.surface_muted'))
+        .onClick((): void => {
+          this.desktopGestureShareHintDismissed = true;
+        })
     }
     .width('100%')
-    .padding(14)
-    .borderRadius(14)
-    .backgroundColor($r('app.color.accent_soft'))
+    .padding({ left: 12, right: 8, top: 8, bottom: 8 })
+    .borderRadius($r('app.float.corner_radius_level8'))
+    .backgroundColor(this.accentSoftColor())
   }
 
   @Builder
@@ -4546,29 +6870,48 @@ struct Index {
     Column() {
       Row() {
         Column({ space: 3 }) {
-          Text(this.desktopSelectedMeta.length > 0 ? this.desktopSelectedMeta :
-            $r('app.string.latest_title'))
-            .fontSize(13)
-            .fontColor($r('app.color.text_secondary'))
+          Row({ space: 8 }) {
+            if (this.desktopSelectedDirection.length > 0) {
+              SymbolGlyph(this.desktopSelectedDirection === 'sent' ?
+                $r('sys.symbol.arrowshape_up_to_line_fill') :
+                $r('sys.symbol.arrowshape_down_to_line_fill'))
+                .fontSize(18)
+                .fontWeight(FontWeight.Medium)
+                .fontColor([this.desktopSelectedDirection === 'sent' ?
+                  this.accentColor() : $r('app.color.success')])
+            }
+            Text(this.desktopSelectedMeta.length > 0 ? this.desktopSelectedMeta :
+              $r('app.string.latest_title'))
+              .fontSize($r('app.float.font_body_medium'))
+              .fontColor($r('app.color.text_secondary'))
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+          }
+          .width('100%')
           Text(this.desktopShowsLatestImage() ? $r('app.string.desktop_images') :
             (this.desktopShowsFile() ? $r('app.string.desktop_files') :
               (this.desktopDetailText().length > 0 ? $r('app.string.desktop_text') :
                 $r('app.string.latest_empty'))))
             .fontSize(18)
-            .fontWeight(FontWeight.Medium)
+            .fontWeight(FontWeight.Bold)
             .fontColor($r('app.color.text_primary'))
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
         }
-        Blank()
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
         this.statusPill()
       }
-      .height(76)
+      .height(84)
       .width('100%')
-      .padding({ left: 28, right: 28 })
+      .padding({ left: 32, right: 32 })
       .border({ width: { bottom: 1 }, color: $r('app.color.divider') })
       Scroll() {
         if (this.desktopShowsLatestImage()) {
           Column({ space: 12 }) {
-            this.desktopGestureShareHint()
+            if (!this.desktopGestureShareHintDismissed) {
+              this.desktopGestureShareHint()
+            }
             if (this.desktopSelectedId.length > 0 && this.desktopSelectedImage !== null) {
               if (this.desktopSelectedImageRevision % 2 === 0) {
                 Image(this.desktopSelectedImage)
@@ -4577,7 +6920,7 @@ struct Index {
                   .aspectRatio(this.desktopImageAspectRatio())
                   .constraintSize({ maxHeight: 520 })
                   .objectFit(ImageFit.Contain)
-                  .borderRadius(16)
+                  .borderRadius($r('app.float.corner_radius_level4'))
                   .backgroundColor($r('app.color.surface_muted'))
               } else {
                 Image(this.desktopSelectedImage)
@@ -4586,7 +6929,7 @@ struct Index {
                   .aspectRatio(this.desktopImageAspectRatio())
                   .constraintSize({ maxHeight: 520 })
                   .objectFit(ImageFit.Contain)
-                  .borderRadius(16)
+                  .borderRadius($r('app.float.corner_radius_level4'))
                   .backgroundColor($r('app.color.surface_muted'))
               }
             } else if (this.latestImage !== null) {
@@ -4597,7 +6940,7 @@ struct Index {
                   .aspectRatio(this.desktopImageAspectRatio())
                   .constraintSize({ maxHeight: 520 })
                   .objectFit(ImageFit.Contain)
-                  .borderRadius(16)
+                  .borderRadius($r('app.float.corner_radius_level4'))
                   .backgroundColor($r('app.color.surface_muted'))
               } else {
                 Image(this.latestImage)
@@ -4606,20 +6949,22 @@ struct Index {
                   .aspectRatio(this.desktopImageAspectRatio())
                   .constraintSize({ maxHeight: 520 })
                   .objectFit(ImageFit.Contain)
-                  .borderRadius(16)
+                  .borderRadius($r('app.float.corner_radius_level4'))
                   .backgroundColor($r('app.color.surface_muted'))
               }
             }
             Text(this.desktopDetailText())
-              .fontSize(13)
+              .fontSize($r('app.float.font_body_medium'))
               .fontColor($r('app.color.text_secondary'))
               .width('100%')
           }
           .width('100%')
-          .padding(30)
+          .padding(this.isLargeScreen ? 40 : 24)
         } else if (this.desktopShowsFile()) {
           Column({ space: 16 }) {
-            this.desktopGestureShareHint()
+            if (!this.desktopGestureShareHintDismissed) {
+              this.desktopGestureShareHint()
+            }
             if (this.desktopFileIsVideo() && this.desktopFilePreviewUri().length > 0) {
               Video({ src: this.desktopFilePreviewUri() })
                 .id('desktop-file-video-' + this.desktopFilePreviewKey())
@@ -4629,7 +6974,7 @@ struct Index {
                 .controls(true)
                 .autoPlay(true)
                 .objectFit(ImageFit.Contain)
-                .borderRadius(16)
+                .borderRadius($r('app.float.corner_radius_level4'))
                 .backgroundColor(Color.Black)
                 .onPrepared((_preparedInfo: PreparedInfo): void => {
                   this.loadDesktopVideoAspectRatio();
@@ -4643,7 +6988,7 @@ struct Index {
               Column({ space: 14 }) {
                 SymbolGlyph($r('sys.symbol.doc_text'))
                   .fontSize(54)
-                  .fontColor([$r('app.color.accent')])
+                  .fontColor([this.accentColor()])
                 Text(this.desktopFileIsAudio() ? $r('app.string.file_preview_audio') :
                   (this.desktopFileIsDocument() ? $r('app.string.file_preview_document') :
                     $r('app.string.file_preview_generic')))
@@ -4651,7 +6996,7 @@ struct Index {
                   .fontWeight(FontWeight.Medium)
                   .fontColor($r('app.color.text_primary'))
                 Text($r('app.string.file_preview_system_note'))
-                  .fontSize(13)
+                  .fontSize($r('app.float.font_body_medium'))
                   .lineHeight(20)
                   .textAlign(TextAlign.Center)
                   .fontColor($r('app.color.text_secondary'))
@@ -4661,7 +7006,7 @@ struct Index {
               .height(220)
               .justifyContent(FlexAlign.Center)
               .padding({ left: 24, right: 24 })
-              .borderRadius(16)
+              .borderRadius($r('app.float.corner_radius_level8'))
               .backgroundColor($r('app.color.surface_muted'))
             }
             Text(this.desktopFileName())
@@ -4673,7 +7018,7 @@ struct Index {
               .width('100%')
             if (this.desktopFileIsVideo()) {
               Text($r('app.string.file_preview_video'))
-                .fontSize(13)
+                .fontSize($r('app.float.font_body_medium'))
                 .fontColor($r('app.color.text_secondary'))
                 .width('100%')
             }
@@ -4681,9 +7026,9 @@ struct Index {
               Button(this.desktopFilePreviewState === 1 ? $r('app.string.file_preview_opening') :
                 $r('app.string.file_preview_action'), { type: ButtonType.Normal })
                 .height(40)
-                .fontColor(Color.White)
-                .backgroundColor($r('app.color.accent'))
-                .borderRadius(12)
+                .fontColor($r('app.color.on_accent'))
+                .backgroundColor(this.accentColor())
+                .borderRadius($r('app.float.corner_radius_level10'))
                 .enabled(this.desktopFilePreviewUri().length > 0 && this.desktopFilePreviewState !== 1)
                 .onClick((): void => {
                   this.openDesktopFilePreview();
@@ -4698,10 +7043,12 @@ struct Index {
             .width('100%')
           }
           .width('100%')
-          .padding(30)
+          .padding(this.isLargeScreen ? 40 : 24)
         } else if (this.desktopDetailText().length > 0) {
           Column({ space: 16 }) {
-            this.desktopGestureShareHint()
+            if (!this.desktopGestureShareHintDismissed) {
+              this.desktopGestureShareHint()
+            }
             Text(this.desktopDetailText())
               .fontSize(18)
               .lineHeight(28)
@@ -4709,14 +7056,14 @@ struct Index {
               .width('100%')
           }
             .width('100%')
-            .padding(30)
+            .padding(this.isLargeScreen ? 40 : 24)
         } else {
           Text($r('app.string.latest_empty'))
             .fontSize(18)
             .lineHeight(28)
             .fontColor($r('app.color.text_secondary'))
             .width('100%')
-            .padding(30)
+            .padding(this.isLargeScreen ? 40 : 24)
         }
       }
       .layoutWeight(1)
@@ -4728,66 +7075,104 @@ struct Index {
           .height(84)
           .fontSize(14)
           .backgroundColor($r('app.color.surface_muted'))
-          .borderRadius(14)
+          .borderRadius($r('app.float.corner_radius_level8'))
           .onChange((value: string): void => {
             this.composerText = value;
           })
-        Row({ space: 8 }) {
-          Button(!this.hasConfig() && this.spaceJoined ? $r('app.string.space_refresh_sync_action') :
-            $r('app.string.pull_action'), { type: ButtonType.Normal })
-            .height(40)
-            .fontColor(Color.White)
-            .backgroundColor($r('app.color.accent'))
-            .borderRadius(14)
-            .enabled(!this.busy)
-            .onClick((): void => {
-              this.pullLatest();
-            })
-          Button(this.desktopShowsFile() ? $r('app.string.save_file_action') :
-            $r('app.string.copy_action'), { type: ButtonType.Normal })
-            .height(40)
-            .fontColor($r('app.color.text_primary'))
-            .backgroundColor($r('app.color.surface_muted'))
-            .borderRadius(14)
-            .enabled(this.desktopShowsLatestImage() || this.desktopShowsFile() ||
-              this.desktopDetailText().length > 0)
-            .onClick((): void => {
-              if (this.desktopShowsFile()) {
-                this.saveSelectedFile();
-              } else {
-                this.copyDesktopSelection();
-              }
-            })
-          Button(this.desktopSelectionStarred() ? $r('app.string.history_unstar_action') :
-            $r('app.string.history_star_action'), { type: ButtonType.Normal })
-            .height(40)
-            .fontColor(this.desktopSelectionStarred() ? $r('app.color.accent') :
-              $r('app.color.text_primary'))
-            .backgroundColor($r('app.color.surface_muted'))
-            .borderRadius(14)
-            .enabled(this.desktopSelectedId.length > 0)
-            .onClick((): void => {
-              this.toggleDesktopSelectedStar();
-            })
-          Button($r('app.string.history_delete_action'), { type: ButtonType.Normal })
-            .height(40)
-            .fontColor($r('app.color.danger'))
-            .backgroundColor($r('app.color.surface_muted'))
-            .borderRadius(14)
-            .enabled(this.desktopSelectedId.length > 0)
-            .onClick((): void => {
-              this.deleteDesktopSelection();
-            })
-          Blank()
-          Button($r('app.string.send_action'), { type: ButtonType.Normal })
-            .height(40)
-            .fontColor(Color.White)
-            .backgroundColor($r('app.color.accent'))
-            .borderRadius(14)
-            .enabled(!this.busy && this.composerText.trim().length > 0)
-            .onClick((): void => {
-              this.sendText();
-            })
+        Column({ space: 8 }) {
+          Row({ space: 8 }) {
+            Row() {
+              PasteButton({
+                icon: PasteIconStyle.LINES,
+                text: PasteDescription.PASTE,
+                buttonType: ButtonType.Normal
+              })
+                .width('100%')
+                .height(40)
+                .fontSize(14)
+                .fontColor($r('app.color.text_primary'))
+                .iconColor($r('app.color.text_primary'))
+                .backgroundColor($r('app.color.paste_button_background'))
+                .borderRadius($r('app.float.corner_radius_level10'))
+                .enabled(!this.busy)
+                .onClick((_event: ClickEvent, result: PasteButtonOnClickResult): void => {
+                  if (result === PasteButtonOnClickResult.SUCCESS) {
+                    this.readLocalClipboard();
+                  } else {
+                    this.statusCode = 3;
+                  }
+                })
+            }
+            .layoutWeight(1)
+            Button(!this.hasConfig() && this.spaceJoined ? $r('app.string.space_refresh_sync_action') :
+              $r('app.string.pull_action'), { type: ButtonType.Normal })
+              .height(40)
+              .fontSize(14)
+              .fontColor($r('app.color.on_accent'))
+              .backgroundColor(this.accentColor())
+              .borderRadius($r('app.float.corner_radius_level10'))
+              .layoutWeight(1)
+              .enabled(!this.busy)
+              .onClick((): void => {
+                this.pullLatest();
+              })
+            Button(this.desktopShowsFile() ? $r('app.string.save_file_action') :
+              $r('app.string.copy_action'), { type: ButtonType.Normal })
+              .height(40)
+              .fontSize(14)
+              .fontColor($r('app.color.text_primary'))
+              .backgroundColor($r('app.color.surface_muted'))
+              .borderRadius($r('app.float.corner_radius_level10'))
+              .layoutWeight(1)
+              .enabled(this.desktopShowsLatestImage() || this.desktopShowsFile() ||
+                this.desktopDetailText().length > 0)
+              .onClick((): void => {
+                if (this.desktopShowsFile()) {
+                  this.saveSelectedFile();
+                } else {
+                  this.copyDesktopSelection();
+                }
+              })
+          }
+          .width('100%')
+          Row({ space: 8 }) {
+            Button(this.desktopSelectionStarred() ? $r('app.string.history_unstar_action') :
+              $r('app.string.history_star_action'), { type: ButtonType.Normal })
+              .height(40)
+              .fontSize(14)
+              .fontColor(this.desktopSelectionStarred() ? this.accentColor() :
+                $r('app.color.text_primary'))
+              .backgroundColor($r('app.color.surface_muted'))
+              .borderRadius($r('app.float.corner_radius_level10'))
+              .layoutWeight(1)
+              .enabled(this.desktopSelectedId.length > 0)
+              .onClick((): void => {
+                this.toggleDesktopSelectedStar();
+              })
+            Button($r('app.string.history_delete_action'), { type: ButtonType.Normal })
+              .height(40)
+              .fontSize(14)
+              .fontColor($r('app.color.danger'))
+              .backgroundColor($r('app.color.surface_muted'))
+              .borderRadius($r('app.float.corner_radius_level10'))
+              .layoutWeight(1)
+              .enabled(this.desktopSelectedId.length > 0)
+              .onClick((): void => {
+                this.deleteDesktopSelection();
+              })
+            Button($r('app.string.send_action'), { type: ButtonType.Normal })
+              .height(40)
+              .fontSize(14)
+              .fontColor($r('app.color.on_accent'))
+              .backgroundColor(this.accentColor())
+              .borderRadius($r('app.float.corner_radius_level10'))
+              .layoutWeight(1)
+              .enabled(!this.busy && this.composerText.trim().length > 0)
+              .onClick((): void => {
+                this.sendText();
+              })
+          }
+          .width('100%')
         }
         .width('100%')
       }
@@ -4819,7 +7204,7 @@ struct Index {
   @Builder
   private tabletClipboardWorkspace() {
     Row() {
-      this.desktopClipboardList(340)
+      this.desktopClipboardList(300)
       this.desktopClipboardDetail()
     }
     .width('100%')
@@ -4827,15 +7212,15 @@ struct Index {
   }
 
   @Builder
-  private desktopSpaceModeButton(mode: number, label: Resource) {
+  private spaceModeButton(mode: number, label: Resource) {
     Button(label, { type: ButtonType.Normal })
       .layoutWeight(1)
       .height(38)
-      .fontSize(13)
+      .fontSize($r('app.float.font_body_medium'))
       .fontColor(this.spaceActionMode === mode ? $r('app.color.text_primary') :
         $r('app.color.text_secondary'))
-      .backgroundColor(this.spaceActionMode === mode ? $r('app.color.accent_soft') : Color.Transparent)
-      .borderRadius(12)
+      .backgroundColor(this.spaceActionMode === mode ? this.accentSoftColor() : Color.Transparent)
+      .borderRadius($r('app.float.corner_radius_level10'))
       .onClick((): void => {
         this.spaceActionMode = mode;
         this.spaceCreateState = 0;
@@ -4846,23 +7231,31 @@ struct Index {
   @Builder
   private desktopCreateSpaceForm() {
     Column({ space: 10 }) {
-      Text($r('app.string.space_create_title'))
-        .fontSize(15)
+      Text(this.spaceJoined ? $r('app.string.space_create_new_title') :
+        $r('app.string.space_create_title'))
+        .fontSize($r('app.float.font_body_large'))
         .fontWeight(FontWeight.Medium)
         .fontColor($r('app.color.text_primary'))
         .width('100%')
-      Text($r('app.string.space_create_note'))
-        .fontSize(11)
+      Text(this.spaceJoined ? $r('app.string.space_create_new_note') :
+        $r('app.string.space_create_note'))
+        .fontSize($r('app.float.font_body_small'))
         .lineHeight(17)
         .fontColor($r('app.color.text_secondary'))
         .width('100%')
       TextInput({ placeholder: $r('app.string.space_create_device_placeholder'),
         text: this.spaceCreateDeviceName })
         .height(44)
+        .fontColor(this.spaceCreateDeviceNameRecommended ? $r('app.color.text_secondary') :
+          $r('app.color.text_primary'))
         .backgroundColor($r('app.color.surface_muted'))
-        .borderRadius(12)
+        .borderRadius($r('app.float.corner_radius_level10'))
+        .onFocus((): void => {
+          this.spaceCreateDeviceNameRecommended = false;
+        })
         .onChange((value: string): void => {
           this.spaceCreateDeviceName = value;
+          this.spaceCreateDeviceNameRecommended = false;
           this.spaceCreateState = 0;
         })
       TextInput({ placeholder: $r('app.string.space_passphrase_placeholder'),
@@ -4870,7 +7263,7 @@ struct Index {
         .type(InputType.Password)
         .height(44)
         .backgroundColor($r('app.color.surface_muted'))
-        .borderRadius(12)
+        .borderRadius($r('app.float.corner_radius_level10'))
         .onChange((value: string): void => {
           this.spaceCreatePassphrase = value;
           this.spaceCreateState = 0;
@@ -4880,7 +7273,7 @@ struct Index {
         .type(InputType.Password)
         .height(44)
         .backgroundColor($r('app.color.surface_muted'))
-        .borderRadius(12)
+        .borderRadius($r('app.float.corner_radius_level10'))
         .onChange((value: string): void => {
           this.spaceCreatePassphraseConfirm = value;
           this.spaceCreateState = 0;
@@ -4892,17 +7285,18 @@ struct Index {
         .width('100%')
       if (this.spaceCreateState === 2) {
         Text($r('app.string.space_create_failed'))
-          .fontSize(11)
+          .fontSize($r('app.float.font_body_small'))
           .fontColor($r('app.color.danger'))
           .width('100%')
       }
       Button(this.spaceCreateBusy ? $r('app.string.space_creating_action') :
-        $r('app.string.space_create_action'), { type: ButtonType.Normal })
+        (this.spaceJoined ? $r('app.string.space_create_new_action') :
+          $r('app.string.space_create_action')), { type: ButtonType.Normal })
         .width('100%')
         .height(44)
-        .fontColor(Color.White)
-        .backgroundColor($r('app.color.accent'))
-        .borderRadius(14)
+        .fontColor($r('app.color.on_accent'))
+        .backgroundColor(this.accentColor())
+        .borderRadius($r('app.float.corner_radius_level10'))
         .enabled(this.canCreateSpace())
         .onClick((): void => {
           this.createCurrentSpace();
@@ -4915,45 +7309,36 @@ struct Index {
   @Builder
   private desktopJoinSpaceForm() {
     Column({ space: 10 }) {
-      Button($r('app.string.space_scan_invitation'), { type: ButtonType.Normal })
-        .width('100%')
-        .height(44)
-        .fontColor($r('app.color.text_primary'))
-        .backgroundColor($r('app.color.surface_muted'))
-        .borderRadius(14)
-        .onClick((): void => {
-          this.scanSpaceInvitation();
-        })
-      if (this.spaceInvitationScanState === 1) {
-        Text($r('app.string.space_scan_success'))
-          .fontSize(11)
-          .fontColor($r('app.color.success'))
-          .width('100%')
-      } else if (this.spaceInvitationScanState === 2) {
-        Text($r('app.string.space_scan_invalid'))
-          .fontSize(11)
-          .fontColor($r('app.color.danger'))
-          .width('100%')
-      }
-      Text($r('app.string.space_manual_link_note'))
-        .fontSize(11)
+      Text(this.spaceJoined ? $r('app.string.space_switch_note') : $r('app.string.space_join_note'))
+        .fontSize($r('app.float.font_body_small'))
         .lineHeight(17)
         .fontColor($r('app.color.text_secondary'))
         .width('100%')
-      TextInput({ placeholder: $r('app.string.space_create_device_placeholder'),
-        text: this.spaceJoinDeviceName })
-        .height(46)
+      Button($r('app.string.space_scan_invitation'), { type: ButtonType.Normal })
+        .height(42)
+        .width('100%')
+        .fontColor($r('app.color.text_primary'))
         .backgroundColor($r('app.color.surface_muted'))
-        .borderRadius(12)
-        .onChange((value: string): void => {
-          this.spaceJoinDeviceName = value;
-          this.spaceJoinState = 0;
+        .borderRadius($r('app.float.corner_radius_level10'))
+        .onClick((): void => {
+          this.scanSpaceInvitation();
         })
+      if (!this.spaceJoined) {
+        TextInput({ placeholder: $r('app.string.space_create_device_placeholder'),
+          text: this.spaceJoinDeviceName })
+          .height(46)
+          .backgroundColor($r('app.color.surface_muted'))
+          .borderRadius($r('app.float.corner_radius_level10'))
+          .onChange((value: string): void => {
+            this.spaceJoinDeviceName = value;
+            this.spaceJoinState = 0;
+          })
+      }
       TextInput({ placeholder: $r('app.string.space_code_placeholder'),
         text: this.spaceInvitationCode })
         .height(46)
         .backgroundColor($r('app.color.surface_muted'))
-        .borderRadius(12)
+        .borderRadius($r('app.float.corner_radius_level10'))
         .onChange((value: string): void => {
           this.spaceInvitationCode = value.toUpperCase();
           this.spaceJoinState = 0;
@@ -4963,24 +7348,28 @@ struct Index {
         .type(InputType.Password)
         .height(46)
         .backgroundColor($r('app.color.surface_muted'))
-        .borderRadius(12)
+        .borderRadius($r('app.float.corner_radius_level10'))
         .onChange((value: string): void => {
           this.spacePassphrase = value;
           this.spaceJoinState = 0;
         })
       if (this.spaceJoinState === 2) {
-        Text($r('app.string.space_join_failed'))
-          .fontSize(11)
+        Text(this.spaceJoined ? $r('app.string.space_switch_failed') :
+          $r('app.string.space_join_failed'))
+          .fontSize($r('app.float.font_body_small'))
           .fontColor($r('app.color.danger'))
           .width('100%')
       }
-      Button(this.spaceJoinBusy ? $r('app.string.space_joining_action') :
-        $r('app.string.space_join_action'), { type: ButtonType.Normal })
+      Button(this.spaceJoinBusy ?
+        (this.spaceJoined ? $r('app.string.space_switching_action') :
+          $r('app.string.space_joining_action')) :
+        (this.spaceJoined ? $r('app.string.space_switch_action') :
+          $r('app.string.space_join_action')), { type: ButtonType.Normal })
         .width('100%')
         .height(44)
-        .fontColor(Color.White)
-        .backgroundColor($r('app.color.accent'))
-        .borderRadius(14)
+        .fontColor($r('app.color.on_accent'))
+        .backgroundColor(this.accentColor())
+        .borderRadius($r('app.float.corner_radius_level10'))
         .enabled(this.canJoinSpace())
         .onClick((): void => {
           this.joinCurrentSpace();
@@ -4993,7 +7382,7 @@ struct Index {
   private desktopInvitationCard() {
     Column({ space: 9 }) {
       Text($r('app.string.space_invitation_title'))
-        .fontSize(13)
+        .fontSize($r('app.float.font_body_medium'))
         .fontWeight(FontWeight.Medium)
         .fontColor($r('app.color.text_primary'))
         .width('100%')
@@ -5008,7 +7397,7 @@ struct Index {
         .height(40)
         .fontSize(12)
         .backgroundColor($r('app.color.surface'))
-        .borderRadius(10)
+        .borderRadius($r('app.float.corner_radius_level4'))
         .onChange((value: string): void => {
           this.spaceCreatePassphrase = value;
           this.spaceCreateState = 0;
@@ -5027,14 +7416,14 @@ struct Index {
         .justifyContent(FlexAlign.Center)
         .padding({ top: 5, bottom: 5 })
         Text($r('app.string.space_manual_link_title'))
-          .fontSize(11)
+          .fontSize($r('app.float.font_body_small'))
           .fontWeight(FontWeight.Medium)
           .fontColor($r('app.color.text_primary'))
           .width('100%')
         Text(this.spaceIssuedInvitationCode)
           .fontSize(22)
           .fontWeight(FontWeight.Bold)
-          .fontColor($r('app.color.accent'))
+          .fontColor(this.accentColor())
           .letterSpacing(2)
           .copyOption(CopyOptions.LocalDevice)
           .width('100%')
@@ -5043,7 +7432,7 @@ struct Index {
           .fontColor($r('app.color.text_secondary'))
           .width('100%')
         Text(this.spaceCreatePassphrase)
-          .fontSize(13)
+          .fontSize($r('app.float.font_body_medium'))
           .fontColor($r('app.color.text_primary'))
           .copyOption(CopyOptions.LocalDevice)
           .maxLines(2)
@@ -5075,7 +7464,7 @@ struct Index {
         .fontSize(12)
         .fontColor($r('app.color.text_primary'))
         .backgroundColor($r('app.color.surface'))
-        .borderRadius(12)
+        .borderRadius($r('app.float.corner_radius_level10'))
         .enabled(this.canIssueSpaceInvitation())
         .onClick((): void => {
           this.issueCurrentSpaceInvitation();
@@ -5083,7 +7472,7 @@ struct Index {
     }
     .width('100%')
     .padding(14)
-    .borderRadius(14)
+    .borderRadius($r('app.float.corner_radius_level10'))
     .backgroundColor($r('app.color.surface_muted'))
   }
 
@@ -5091,27 +7480,27 @@ struct Index {
   private desktopDeviceTypeGlyph(deviceType: string) {
     if (deviceType === 'phone') {
       SymbolGlyph($r('sys.symbol.phone'))
-        .fontSize(25)
+        .fontSize(24)
         .fontColor([$r('app.color.text_primary')])
     } else if (deviceType === 'tablet') {
       SymbolGlyph($r('sys.symbol.pad'))
-        .fontSize(25)
+        .fontSize(24)
         .fontColor([$r('app.color.text_primary')])
     } else if (deviceType === 'tv') {
       SymbolGlyph($r('sys.symbol.TV_tv'))
-        .fontSize(25)
+        .fontSize(24)
         .fontColor([$r('app.color.text_primary')])
     } else if (deviceType === 'wearable') {
       SymbolGlyph($r('sys.symbol.watch'))
-        .fontSize(25)
+        .fontSize(24)
         .fontColor([$r('app.color.text_primary')])
     } else if (deviceType === 'car') {
       SymbolGlyph($r('sys.symbol.car'))
-        .fontSize(25)
+        .fontSize(24)
         .fontColor([$r('app.color.text_primary')])
     } else {
       SymbolGlyph($r('sys.symbol.desktop'))
-        .fontSize(25)
+        .fontSize(24)
         .fontColor([$r('app.color.text_primary')])
     }
   }
@@ -5120,31 +7509,31 @@ struct Index {
   private desktopDeviceTypeLabel(deviceType: string) {
     if (deviceType === 'phone') {
       Text($r('app.string.device_type_phone'))
-        .fontSize(11)
+        .fontSize($r('app.float.font_body_small'))
         .fontColor($r('app.color.text_secondary'))
     } else if (deviceType === 'tablet') {
       Text($r('app.string.device_type_tablet'))
-        .fontSize(11)
+        .fontSize($r('app.float.font_body_small'))
         .fontColor($r('app.color.text_secondary'))
     } else if (deviceType === '2in1') {
       Text($r('app.string.device_type_2in1'))
-        .fontSize(11)
+        .fontSize($r('app.float.font_body_small'))
         .fontColor($r('app.color.text_secondary'))
     } else if (deviceType === 'tv') {
       Text($r('app.string.device_type_tv'))
-        .fontSize(11)
+        .fontSize($r('app.float.font_body_small'))
         .fontColor($r('app.color.text_secondary'))
     } else if (deviceType === 'wearable') {
       Text($r('app.string.device_type_wearable'))
-        .fontSize(11)
+        .fontSize($r('app.float.font_body_small'))
         .fontColor($r('app.color.text_secondary'))
     } else if (deviceType === 'car') {
       Text($r('app.string.device_type_car'))
-        .fontSize(11)
+        .fontSize($r('app.float.font_body_small'))
         .fontColor($r('app.color.text_secondary'))
     } else {
       Text($r('app.string.device_type_unknown'))
-        .fontSize(11)
+        .fontSize($r('app.float.font_body_small'))
         .fontColor($r('app.color.text_secondary'))
     }
   }
@@ -5160,7 +7549,7 @@ struct Index {
         .height(44)
         .justifyContent(FlexAlign.Center)
         .borderRadius(13)
-        .backgroundColor($r('app.color.accent_soft'))
+        .backgroundColor(this.accentSoftColor())
         Row()
           .width(10)
           .height(10)
@@ -5184,7 +7573,7 @@ struct Index {
             (device.online ? $r('app.string.device_status_online') :
               (device.state === 'unknown' ? $r('app.string.device_status_unknown') :
                 $r('app.string.device_status_offline'))))
-            .fontSize(11)
+            .fontSize($r('app.float.font_body_small'))
             .fontColor(device.online ? $r('app.color.success') : $r('app.color.text_secondary'))
         }
       }
@@ -5195,10 +7584,10 @@ struct Index {
           (device.online ? $r('app.string.desktop_device_connected') :
             $r('app.string.desktop_connect_device')), { type: ButtonType.Normal })
           .height(32)
-          .fontSize(11)
+          .fontSize($r('app.float.font_body_small'))
           .fontColor(device.online ? $r('app.color.success') : $r('app.color.text_primary'))
           .backgroundColor($r('app.color.surface'))
-          .borderRadius(10)
+          .borderRadius($r('app.float.corner_radius_level4'))
           .enabled(!device.online && !this.spaceConnectBusy)
           .onClick((): void => {
             this.connectSpaceDevice(device);
@@ -5208,14 +7597,68 @@ struct Index {
     .width('100%')
     .height(64)
     .padding({ left: 10, right: 12 })
-    .borderRadius(14)
+    .borderRadius($r('app.float.corner_radius_level10'))
+    .backgroundColor($r('app.color.surface_muted'))
+  }
+
+  @Builder
+  private desktopMobileDeviceRow(device: NativeMobileSyncDevice) {
+    Row({ space: 11 }) {
+      Stack({ alignContent: Alignment.BottomEnd }) {
+        Column() {
+          SymbolGlyph($r('sys.symbol.phone'))
+            .fontSize(24)
+            .fontColor([this.accentColor()])
+        }
+        .width(44)
+        .height(44)
+        .justifyContent(FlexAlign.Center)
+        .borderRadius(13)
+        .backgroundColor(this.accentSoftColor())
+        Row()
+          .width(10)
+          .height(10)
+          .borderRadius(5)
+          .backgroundColor(device.online ? $r('app.color.success') : $r('app.color.text_secondary'))
+          .border({ width: 2, color: $r('app.color.surface_muted') })
+      }
+      .width(44)
+      .height(44)
+      Column({ space: 4 }) {
+        Text(device.label)
+          .fontSize(14)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.text_primary'))
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .width('100%')
+        Row({ space: 8 }) {
+          Text(device.username)
+            .fontSize($r('app.float.font_body_small'))
+            .fontColor($r('app.color.text_secondary'))
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          Text(device.online ? $r('app.string.device_status_online') :
+            (device.lastSeenAtMs > 0 ? $r('app.string.device_status_offline') :
+              $r('app.string.device_status_unknown')))
+            .fontSize($r('app.float.font_body_small'))
+            .fontColor(device.online ? $r('app.color.success') : $r('app.color.text_secondary'))
+        }
+      }
+      .layoutWeight(1)
+    }
+    .width('100%')
+    .height(64)
+    .padding({ left: 10, right: 12 })
+    .borderRadius($r('app.float.corner_radius_level10'))
     .backgroundColor($r('app.color.surface_muted'))
   }
 
   @Builder
   private desktopDeviceWorkspace() {
     Row() {
-      Column({ space: 12 }) {
+      Scroll() {
+        Column({ space: 12 }) {
         Text($r('app.string.desktop_devices'))
           .fontSize(22)
           .fontWeight(FontWeight.Bold)
@@ -5223,12 +7666,12 @@ struct Index {
           .width('100%')
         Text(this.spaceJoined ? $r('app.string.desktop_roster_note') :
           $r('app.string.desktop_no_device'))
-          .fontSize(13)
+          .fontSize($r('app.float.font_body_medium'))
           .fontColor($r('app.color.text_secondary'))
           .width('100%')
         if (this.spaceNodeState === 3) {
           Text($r('app.string.space_node_failed'))
-            .fontSize(13)
+            .fontSize($r('app.float.font_body_medium'))
             .fontColor($r('app.color.danger'))
             .width('100%')
         }
@@ -5240,7 +7683,7 @@ struct Index {
               .fontSize(12)
               .fontColor($r('app.color.text_primary'))
               .backgroundColor($r('app.color.surface_muted'))
-              .borderRadius(12)
+              .borderRadius($r('app.float.corner_radius_level10'))
               .enabled(!this.spaceDeviceRefreshBusy && !this.spaceConnectBusy)
               .onClick((): void => {
                 this.refreshSpaceDevices();
@@ -5250,9 +7693,9 @@ struct Index {
               .layoutWeight(1)
               .height(40)
               .fontSize(12)
-              .fontColor(Color.White)
-              .backgroundColor($r('app.color.accent'))
-              .borderRadius(12)
+              .fontColor($r('app.color.on_accent'))
+              .backgroundColor(this.accentColor())
+              .borderRadius($r('app.float.corner_radius_level10'))
               .enabled(!this.spaceConnectBusy)
               .onClick((): void => {
                 this.connectAllSpaceDevices();
@@ -5261,26 +7704,69 @@ struct Index {
           .width('100%')
           if (this.spaceConnectState === 2) {
             Text($r('app.string.desktop_connect_devices_success'))
-              .fontSize(11)
+              .fontSize($r('app.float.font_body_small'))
               .fontColor($r('app.color.success'))
               .width('100%')
           } else if (this.spaceConnectState === 3) {
             Text($r('app.string.desktop_connect_devices_failed'))
-              .fontSize(11)
+              .fontSize($r('app.float.font_body_small'))
               .fontColor($r('app.color.danger'))
               .width('100%')
           }
+          Button(this.spaceSwitchOpen ? $r('app.string.space_switch_cancel') :
+            $r('app.string.space_switch_open'), { type: ButtonType.Normal })
+            .width('100%')
+            .height(40)
+            .fontSize(12)
+            .fontColor($r('app.color.text_primary'))
+            .backgroundColor($r('app.color.surface_muted'))
+            .borderRadius($r('app.float.corner_radius_level10'))
+            .enabled(!this.spaceJoinBusy)
+            .onClick((): void => {
+              this.getUIContext().animateTo({
+                duration: 380,
+                curve: Curve.EaseOut
+              }, (): void => {
+                this.spaceSwitchOpen = !this.spaceSwitchOpen;
+                this.spaceInvitationCode = '';
+                this.spacePassphrase = '';
+                this.spaceJoinState = 0;
+                this.spaceInvitationScanState = 0;
+              });
+            })
+          if (this.spaceSwitchOpen) {
+            Column({ space: 10 }) {
+              Row({ space: 4 }) {
+                this.spaceModeButton(0, $r('app.string.space_create_new_mode'))
+                this.spaceModeButton(1, $r('app.string.space_join_other_mode'))
+              }
+              .width('100%')
+              .padding(3)
+              .borderRadius($r('app.float.corner_radius_level10'))
+              .backgroundColor($r('app.color.surface_muted'))
+              if (this.spaceActionMode === 0) {
+                this.desktopCreateSpaceForm()
+              } else {
+                this.desktopJoinSpaceForm()
+              }
+            }
+            .transition({ type: TransitionType.Insert, opacity: 0, translate: { y: 24 } })
+            .transition({ type: TransitionType.Delete, opacity: 0, translate: { y: -16 } })
+          } else if (this.spaceJoinState === 1) {
+            Text($r('app.string.space_switch_success'))
+              .fontSize($r('app.float.font_body_small'))
+              .fontColor($r('app.color.success'))
+              .width('100%')
+          }
         }
-        if (this.spaceJoined) {
-          this.desktopInvitationCard()
-        } else {
+        if (!this.spaceJoined) {
           Row({ space: 4 }) {
-            this.desktopSpaceModeButton(0, $r('app.string.space_create_mode'))
-            this.desktopSpaceModeButton(1, $r('app.string.space_join_mode'))
+            this.spaceModeButton(0, $r('app.string.space_create_mode'))
+            this.spaceModeButton(1, $r('app.string.space_join_mode'))
           }
           .width('100%')
           .padding(3)
-          .borderRadius(12)
+          .borderRadius($r('app.float.corner_radius_level10'))
           .backgroundColor($r('app.color.surface_muted'))
           if (this.spaceActionMode === 0) {
             this.desktopCreateSpaceForm()
@@ -5295,10 +7781,10 @@ struct Index {
           Blank()
           if (this.spaceJoined) {
             Text(this.spaceDevices.length.toString())
-              .fontSize(11)
+              .fontSize($r('app.float.font_body_small'))
               .fontColor($r('app.color.text_secondary'))
               .padding({ left: 8, right: 8, top: 2, bottom: 2 })
-              .borderRadius(10)
+              .borderRadius($r('app.float.corner_radius_level4'))
               .backgroundColor($r('app.color.surface_muted'))
           }
         }
@@ -5309,40 +7795,67 @@ struct Index {
             this.desktopPairedDeviceRow(device)
           }, (device: NativeSpaceDevice): string => device.deviceId)
         }
+        Row() {
+          Text($r('app.string.desktop_mobile_devices'))
+            .fontSize(12)
+            .fontColor($r('app.color.text_secondary'))
+          Blank()
+          Text(this.mobileSyncDevices.length.toString())
+            .fontSize($r('app.float.font_body_small'))
+            .fontColor($r('app.color.text_secondary'))
+            .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+            .borderRadius($r('app.float.corner_radius_level4'))
+            .backgroundColor($r('app.color.surface_muted'))
+        }
+        .width('100%')
+        .margin({ top: 14 })
+        if (this.mobileSyncDevices.length === 0) {
+          Text($r('app.string.mobile_sync_no_devices'))
+            .fontSize($r('app.float.font_body_small'))
+            .fontColor($r('app.color.text_secondary'))
+            .width('100%')
+            .padding({ left: 10, right: 10, top: 8, bottom: 8 })
+        } else {
+          ForEach(this.mobileSyncDevices, (device: NativeMobileSyncDevice) => {
+            this.desktopMobileDeviceRow(device)
+          }, (device: NativeMobileSyncDevice): string => device.deviceId)
+        }
         Blank()
-        Button(this.spaceJoined ?
-          (this.spaceConnectBusy ? $r('app.string.desktop_connecting_all_devices') :
-            $r('app.string.desktop_connect_all_devices')) :
-          (this.spaceActionMode === 0 ? $r('app.string.space_join_mode') :
-            $r('app.string.space_create_mode')), { type: ButtonType.Normal })
-          .width('100%')
-          .height(44)
-          .fontColor($r('app.color.text_primary'))
-          .backgroundColor($r('app.color.surface_muted'))
-          .borderRadius(14)
-          .enabled(!this.spaceJoined || !this.spaceConnectBusy)
-          .onClick((): void => {
-            if (this.spaceJoined) {
+        if (this.spaceJoined) {
+          Button(this.spaceConnectBusy ? $r('app.string.desktop_connecting_all_devices') :
+            $r('app.string.desktop_connect_all_devices'), { type: ButtonType.Normal })
+            .width('100%')
+            .height(44)
+            .fontColor($r('app.color.text_primary'))
+            .backgroundColor($r('app.color.surface_muted'))
+            .borderRadius($r('app.float.corner_radius_level10'))
+            .enabled(!this.spaceConnectBusy)
+            .onClick((): void => {
               this.connectAllSpaceDevices();
-            } else {
-              this.spaceActionMode = this.spaceActionMode === 0 ? 1 : 0;
-            }
-          })
+            })
+        }
+        }
+        .width('100%')
+        .constraintSize({ minHeight: '100%' })
+        .justifyContent(FlexAlign.Start)
+        .padding({ left: 22, right: 22, top: 28, bottom: 18 })
+        .align(Alignment.TopStart)
       }
       .width(this.isLargeScreen ? 350 : 300)
       .height('100%')
-      .padding({ left: 22, right: 22, top: 28, bottom: 18 })
       .border({ width: { right: 1 }, color: $r('app.color.divider') })
-      Column({ space: 0 }) {
-        Row({ space: 18 }) {
+      .scrollBar(BarState.Auto)
+      Scroll() {
+        Column({ space: 0 }) {
+          Row({ space: 18 }) {
           Column() {
             this.desktopDeviceTypeGlyph(deviceInfo.deviceType)
           }
           .width(72)
           .height(72)
           .justifyContent(FlexAlign.Center)
-          .borderRadius(18)
-          .backgroundColor($r('app.color.accent_soft'))
+          .borderRadius($r('app.float.corner_radius_level8'))
+          .backgroundColor(this.accentSoftColor())
           Column({ space: 7 }) {
             Text(this.spaceDeviceName.length > 0 ? this.spaceDeviceName :
               $r('app.string.space_joined_device'))
@@ -5359,26 +7872,11 @@ struct Index {
                 $r('app.color.text_secondary'))
           }
           Blank()
-          Button(this.spaceJoined ? $r('app.string.space_issue_invitation') :
-            (this.spaceActionMode === 0 ? $r('app.string.space_join_mode') :
-              $r('app.string.space_create_mode')), { type: ButtonType.Normal })
-            .height(44)
-            .fontColor($r('app.color.text_primary'))
-            .backgroundColor($r('app.color.surface_muted'))
-            .borderRadius(14)
-            .enabled(!this.spaceJoined || this.canIssueSpaceInvitation())
-            .onClick((): void => {
-              if (this.spaceJoined) {
-                this.issueCurrentSpaceInvitation();
-              } else {
-                this.spaceActionMode = this.spaceActionMode === 0 ? 1 : 0;
-              }
-            })
-        }
-        .width('100%')
-        .padding({ bottom: 36 })
-        Text($r('app.string.desktop_identity'))
-          .fontSize(13)
+          }
+          .width('100%')
+          .padding({ bottom: 36 })
+          Text($r('app.string.desktop_identity'))
+          .fontSize($r('app.float.font_body_medium'))
           .fontWeight(FontWeight.Medium)
           .fontColor($r('app.color.text_secondary'))
           .width('100%')
@@ -5391,25 +7889,44 @@ struct Index {
         if (this.spaceCreatedId.length > 0) {
           this.desktopInfoRow($r('app.string.desktop_space_id'), this.spaceCreatedId)
         }
+        if (this.spaceJoined) {
+          Text($r('app.string.space_tablet_invite_title'))
+            .fontSize($r('app.float.font_body_medium'))
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('app.color.text_secondary'))
+            .width('100%')
+            .padding({ top: 28, bottom: 10 })
+          Text($r('app.string.space_tablet_invite_note'))
+            .fontSize(12)
+            .lineHeight(18)
+            .fontColor($r('app.color.text_secondary'))
+            .width('100%')
+            .padding({ bottom: 10 })
+          this.desktopInvitationCard()
+        }
+        this.mobileSyncManagementCard()
         Text($r('app.string.desktop_sync_policy'))
-          .fontSize(13)
+          .fontSize($r('app.float.font_body_medium'))
           .fontWeight(FontWeight.Medium)
           .fontColor($r('app.color.text_secondary'))
           .width('100%')
           .padding({ top: 34, bottom: 8 })
         this.desktopSwitchRow($r('app.string.desktop_auto_clipboard'),
           $r('app.string.desktop_auto_clipboard_note'), this.spaceJoined)
-        this.desktopSwitchRow($r('app.string.desktop_file_sync'),
-          $r('app.string.desktop_file_sync_note'), this.spaceJoined)
+          this.desktopSwitchRow($r('app.string.desktop_file_sync'),
+            $r('app.string.desktop_file_sync_note'), this.spaceJoined)
+        }
+        .width('100%')
+        .padding({
+          left: this.isLargeScreen ? 72 : 32,
+          right: this.isLargeScreen ? 72 : 32,
+          top: this.isLargeScreen ? 48 : 32,
+          bottom: 32
+        })
       }
       .layoutWeight(1)
       .height('100%')
-      .padding({
-        left: this.isLargeScreen ? 72 : 32,
-        right: this.isLargeScreen ? 72 : 32,
-        top: this.isLargeScreen ? 48 : 32,
-        bottom: 32
-      })
+      .scrollBar(BarState.Auto)
     }
     .width('100%')
     .height('100%')
@@ -5421,10 +7938,10 @@ struct Index {
     Row() {
       Text(label)
         .width(190)
-        .fontSize(13)
+        .fontSize($r('app.float.font_body_medium'))
         .fontColor($r('app.color.text_secondary'))
       Text(value)
-        .fontSize(15)
+        .fontSize($r('app.float.font_body_large'))
         .fontColor($r('app.color.text_primary'))
     }
     .width('100%')
@@ -5445,7 +7962,7 @@ struct Index {
       }
       Blank()
       Toggle({ type: ToggleType.Switch, isOn: checked })
-        .selectedColor($r('app.color.accent'))
+        .selectedColor(this.accentColor())
         .enabled(false)
     }
     .width('100%')
@@ -5458,17 +7975,20 @@ struct Index {
     Row({ space: 12 }) {
       SymbolGlyph(icon)
         .fontSize(20)
-        .fontColor([this.largeSettingsSection === index ? $r('app.color.text_primary') :
+        .fontWeight(this.largeSettingsSection === index ? FontWeight.Medium : FontWeight.Regular)
+        .fontColor([this.largeSettingsSection === index ? this.accentColor() :
           $r('app.color.text_secondary')])
       Text(label)
-        .fontSize(15)
-        .fontColor($r('app.color.text_primary'))
+        .fontSize($r('app.float.font_body_large'))
+        .fontWeight(this.largeSettingsSection === index ? FontWeight.Medium : FontWeight.Regular)
+        .fontColor(this.largeSettingsSection === index ? this.accentColor() :
+          $r('app.color.text_primary'))
     }
     .width('100%')
     .height(50)
     .padding({ left: 14, right: 14 })
-    .borderRadius(14)
-    .backgroundColor(this.largeSettingsSection === index ? $r('app.color.surface_muted') :
+    .borderRadius($r('app.float.corner_radius_level10'))
+    .backgroundColor(this.largeSettingsSection === index ? this.accentSoftColor() :
       Color.Transparent)
     .onClick((): void => {
       this.largeSettingsSection = index;
@@ -5480,7 +8000,7 @@ struct Index {
     Row() {
       Column({ space: 6 }) {
         Text($r('app.string.nav_settings'))
-          .fontSize(22)
+          .fontSize(24)
           .fontWeight(FontWeight.Bold)
           .fontColor($r('app.color.text_primary'))
           .width('100%')
@@ -5516,8 +8036,8 @@ struct Index {
         }
         .width('100%')
         .padding({
-          left: this.isLargeScreen ? 36 : 24,
-          right: this.isLargeScreen ? 36 : 24,
+          left: this.isLargeScreen ? 40 : 24,
+          right: this.isLargeScreen ? 40 : 24,
           top: 34,
           bottom: 34
         })
@@ -5534,24 +8054,25 @@ struct Index {
   @Builder
   private desktopGeneralSettings() {
     Text($r('app.string.desktop_general_settings'))
-      .fontSize(26)
+      .fontSize(28)
       .fontWeight(FontWeight.Bold)
       .fontColor($r('app.color.text_primary'))
       .width('100%')
     Column() {
       this.desktopInfoRow($r('app.string.desktop_device_name'),
         this.spaceDeviceName.length > 0 ? this.spaceDeviceName : $r('app.string.space_joined_device'))
+      this.backgroundSyncSwitchRow()
     }
     .width('100%')
     .padding({ left: 24, right: 24 })
-    .borderRadius(18)
+    .borderRadius($r('app.float.corner_radius_level8'))
     .border({ width: 1, color: $r('app.color.divider') })
   }
 
   @Builder
   private desktopConnectionSettings() {
     Text($r('app.string.desktop_connection_settings'))
-      .fontSize(26)
+      .fontSize(28)
       .fontWeight(FontWeight.Bold)
       .fontColor($r('app.color.text_primary'))
       .width('100%')
@@ -5574,7 +8095,7 @@ struct Index {
       TextArea({ placeholder: $r('app.string.connect_uri_placeholder'), text: this.connectUri })
         .height(80)
         .backgroundColor($r('app.color.surface_muted'))
-        .borderRadius(12)
+        .borderRadius($r('app.float.corner_radius_level10'))
         .onChange((value: string): void => {
           this.connectUri = value;
           this.connectUriState = 0;
@@ -5600,15 +8121,15 @@ struct Index {
           .height(42)
           .fontColor($r('app.color.text_primary'))
           .backgroundColor($r('app.color.surface_muted'))
-          .borderRadius(12)
+          .borderRadius($r('app.float.corner_radius_level10'))
           .onClick((): void => {
             this.scanConnectUri();
           })
         Button($r('app.string.connect_uri_action'), { type: ButtonType.Normal })
           .height(42)
-          .fontColor(Color.White)
-          .backgroundColor($r('app.color.accent'))
-          .borderRadius(12)
+          .fontColor($r('app.color.on_accent'))
+          .backgroundColor(this.accentColor())
+          .borderRadius($r('app.float.corner_radius_level10'))
           .onClick((): void => {
             this.importConnectUri();
           })
@@ -5616,7 +8137,7 @@ struct Index {
     }
     .width('100%')
     .padding(22)
-    .borderRadius(18)
+    .borderRadius($r('app.float.corner_radius_level8'))
     .border({ width: 1, color: $r('app.color.divider') })
     Column({ space: 12 }) {
       Row() {
@@ -5635,7 +8156,7 @@ struct Index {
       TextInput({ placeholder: $r('app.string.server_url_placeholder'), text: this.serverUrl })
         .height(46)
         .backgroundColor($r('app.color.surface_muted'))
-        .borderRadius(12)
+        .borderRadius($r('app.float.corner_radius_level10'))
         .onChange((value: string): void => {
           this.serverUrl = value;
           this.connectionChanged();
@@ -5649,7 +8170,7 @@ struct Index {
           TextInput({ placeholder: $r('app.string.username_placeholder'), text: this.username })
             .height(46)
             .backgroundColor($r('app.color.surface_muted'))
-            .borderRadius(12)
+            .borderRadius($r('app.float.corner_radius_level10'))
             .onChange((value: string): void => {
               this.username = value;
               this.connectionChanged();
@@ -5665,7 +8186,7 @@ struct Index {
             .type(InputType.Password)
             .height(46)
             .backgroundColor($r('app.color.surface_muted'))
-            .borderRadius(12)
+            .borderRadius($r('app.float.corner_radius_level10'))
             .onChange((value: string): void => {
               this.password = value;
               this.connectionChanged();
@@ -5678,9 +8199,9 @@ struct Index {
         Button($r('app.string.test_connection_action'), { type: ButtonType.Normal })
           .layoutWeight(1)
           .height(44)
-          .fontColor(Color.White)
-          .backgroundColor($r('app.color.accent'))
-          .borderRadius(14)
+          .fontColor($r('app.color.on_accent'))
+          .backgroundColor(this.accentColor())
+          .borderRadius($r('app.float.corner_radius_level10'))
           .enabled(this.hasConfig() && !this.busy)
           .onClick((): void => {
             this.testConnection();
@@ -5691,7 +8212,7 @@ struct Index {
           .height(44)
           .fontColor(this.realtimeActive ? $r('app.color.danger') : $r('app.color.text_primary'))
           .backgroundColor($r('app.color.surface_muted'))
-          .borderRadius(14)
+          .borderRadius($r('app.float.corner_radius_level10'))
           .enabled(this.hasConfig())
           .onClick((): void => {
             this.toggleRealtime();
@@ -5707,14 +8228,14 @@ struct Index {
     }
     .width('100%')
     .padding(22)
-    .borderRadius(18)
+    .borderRadius($r('app.float.corner_radius_level8'))
     .border({ width: 1, color: $r('app.color.divider') })
   }
 
   @Builder
   private desktopAppearanceSettings() {
     Text($r('app.string.desktop_appearance_settings'))
-      .fontSize(26)
+      .fontSize(28)
       .fontWeight(FontWeight.Bold)
       .fontColor($r('app.color.text_primary'))
       .width('100%')
@@ -5738,11 +8259,11 @@ struct Index {
       .layoutWeight(1)
       .height(190)
       .padding(22)
-      .borderRadius(20)
+      .borderRadius($r('app.float.corner_radius_level8'))
       .backgroundColor('#FFF0F3F5')
       .border({
         width: this.appearanceMode === APPEARANCE_MODE_LIGHT ? 3 : 1,
-        color: this.appearanceMode === APPEARANCE_MODE_LIGHT ? $r('app.color.accent') :
+        color: this.appearanceMode === APPEARANCE_MODE_LIGHT ? this.accentColor() :
           $r('app.color.divider')
       })
       .onClick((): void => {
@@ -5767,11 +8288,11 @@ struct Index {
       .layoutWeight(1)
       .height(190)
       .padding(22)
-      .borderRadius(20)
+      .borderRadius($r('app.float.corner_radius_level8'))
       .backgroundColor('#18181B')
       .border({
         width: this.appearanceMode === APPEARANCE_MODE_DARK ? 3 : 1,
-        color: this.appearanceMode === APPEARANCE_MODE_DARK ? $r('app.color.accent') :
+        color: this.appearanceMode === APPEARANCE_MODE_DARK ? this.accentColor() :
           $r('app.color.divider')
       })
       .onClick((): void => {
@@ -5780,7 +8301,8 @@ struct Index {
       Column({ space: 12 }) {
         SymbolGlyph($r('sys.symbol.paintpalette'))
           .fontSize(42)
-          .fontColor([$r('app.color.accent')])
+          .fontWeight(FontWeight.Medium)
+          .fontColor([this.accentColor()])
         Blank()
         Text($r('app.string.desktop_follow_system'))
           .fontSize(14)
@@ -5789,11 +8311,11 @@ struct Index {
       .layoutWeight(1)
       .height(190)
       .padding(22)
-      .borderRadius(20)
-      .backgroundColor($r('app.color.accent_soft'))
+      .borderRadius($r('app.float.corner_radius_level8'))
+      .backgroundColor(this.accentSoftColor())
       .border({
         width: this.appearanceMode === APPEARANCE_MODE_SYSTEM ? 3 : 1,
-        color: this.appearanceMode === APPEARANCE_MODE_SYSTEM ? $r('app.color.accent') :
+        color: this.appearanceMode === APPEARANCE_MODE_SYSTEM ? this.accentColor() :
           $r('app.color.divider')
       })
       .onClick((): void => {
@@ -5801,6 +8323,27 @@ struct Index {
       })
     }
     .width('100%')
+    Text($r('app.string.appearance_theme_title'))
+      .fontSize(16)
+      .fontWeight(FontWeight.Medium)
+      .fontColor($r('app.color.text_primary'))
+      .width('100%')
+    Column({ space: 10 }) {
+      Row({ space: 10 }) {
+        this.compactAppearanceThemeOption(APPEARANCE_THEME_OPTIONS[0])
+        this.compactAppearanceThemeOption(APPEARANCE_THEME_OPTIONS[1])
+        this.compactAppearanceThemeOption(APPEARANCE_THEME_OPTIONS[2])
+      }
+      .width('100%')
+      Row({ space: 10 }) {
+        this.compactAppearanceThemeOption(APPEARANCE_THEME_OPTIONS[3])
+        this.compactAppearanceThemeOption(APPEARANCE_THEME_OPTIONS[4])
+        this.compactAppearanceThemeOption(APPEARANCE_THEME_OPTIONS[5])
+      }
+      .width('100%')
+    }
+    .width('100%')
+    .height(122)
   }
 
   @Builder
@@ -5809,13 +8352,14 @@ struct Index {
       Column() {
         SymbolGlyph(icon)
           .fontSize(24)
-          .fontColor([$r('app.color.accent')])
+          .fontWeight(FontWeight.Medium)
+          .fontColor([this.accentColor()])
       }
       .width(46)
       .height(46)
       .justifyContent(FlexAlign.Center)
-      .borderRadius(15)
-      .backgroundColor($r('app.color.accent_soft'))
+      .borderRadius($r('app.float.corner_radius_level4'))
+      .backgroundColor(this.accentSoftColor())
       Column({ space: 5 }) {
         Text(title)
           .fontSize(16)
@@ -5833,7 +8377,7 @@ struct Index {
     .layoutWeight(1)
     .height(104)
     .padding({ left: 18, right: 18 })
-    .borderRadius(18)
+    .borderRadius($r('app.float.corner_radius_level8'))
     .border({ width: 1, color: $r('app.color.divider') })
     .backgroundColor($r('app.color.surface'))
   }
@@ -5858,7 +8402,7 @@ struct Index {
   @Builder
   private desktopAboutSettings() {
     Text($r('app.string.about_title'))
-      .fontSize(26)
+      .fontSize(28)
       .fontWeight(FontWeight.Bold)
       .fontColor($r('app.color.text_primary'))
       .width('100%')
@@ -5877,10 +8421,10 @@ struct Index {
           Text($r('app.string.desktop_version'))
             .fontSize(12)
             .fontWeight(FontWeight.Medium)
-            .fontColor($r('app.color.accent'))
+            .fontColor(this.accentColor())
             .padding({ left: 11, right: 11, top: 5, bottom: 5 })
             .borderRadius(13)
-            .backgroundColor($r('app.color.accent_soft'))
+            .backgroundColor(this.accentSoftColor())
         }
         Text($r('app.string.about_tagline'))
           .fontSize(18)
@@ -5899,7 +8443,7 @@ struct Index {
     }
     .width('100%')
     .padding(28)
-    .borderRadius(24)
+    .borderRadius($r('app.float.corner_radius_level8'))
     .backgroundColor($r('app.color.surface_muted'))
     Row({ space: 14 }) {
       this.desktopAboutCapability($r('sys.symbol.rectangle_stack'),
@@ -5912,7 +8456,7 @@ struct Index {
     .width('100%')
     Column({ space: 0 }) {
       Text($r('app.string.about_product_info'))
-        .fontSize(17)
+        .fontSize($r('app.float.font_subtitle_large'))
         .fontWeight(FontWeight.Medium)
         .fontColor($r('app.color.text_primary'))
         .width('100%')
@@ -5926,7 +8470,7 @@ struct Index {
     }
     .width('100%')
     .padding({ left: 20, right: 20, top: 20, bottom: 4 })
-    .borderRadius(20)
+    .borderRadius($r('app.float.corner_radius_level8'))
     .border({ width: 1, color: $r('app.color.divider') })
     Text($r('app.string.about_footer'))
       .fontSize(12)
@@ -5952,13 +8496,13 @@ struct Index {
       }
       .layoutWeight(1)
       .height('100%')
-      .borderRadius(28)
+      .borderRadius($r('app.float.corner_radius_level16'))
       .clip(true)
       .backgroundColor($r('app.color.surface'))
     }
     .width('100%')
     .height('100%')
-    .padding({ left: 18, right: 18, top: 18, bottom: 18 })
+    .padding({ left: 40, right: 40, top: 40, bottom: 40 })
     .backgroundColor($r('app.color.page_background'))
     .ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM],
       [LayoutSafeAreaEdge.TOP, LayoutSafeAreaEdge.BOTTOM])
@@ -5987,13 +8531,13 @@ struct Index {
       }
       .layoutWeight(1)
       .height('100%')
-      .borderRadius(24)
+      .borderRadius($r('app.float.corner_radius_level16'))
       .clip(true)
       .backgroundColor($r('app.color.surface'))
     }
     .width('100%')
     .height('100%')
-    .padding({ left: 12, right: 12, top: 12, bottom: 12 })
+    .padding({ left: 24, right: 24, top: 24, bottom: 24 })
     .backgroundColor($r('app.color.page_background'))
     .ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM],
       [LayoutSafeAreaEdge.TOP, LayoutSafeAreaEdge.BOTTOM])
@@ -6020,5 +8564,16 @@ struct Index {
     .width('100%')
     .height('100%')
     .backgroundColor($r('app.color.page_background'))
+    .bindSheet($$this.showFeedbackSheet, this.feedbackSheet(), {
+      detents: [SheetSize.MEDIUM],
+      preferType: SheetType.CENTER,
+      dragBar: false,
+      showClose: false,
+      backgroundColor: $r('app.color.page_background'),
+      blurStyle: BlurStyle.Regular,
+      onDisappear: (): void => {
+        this.showFeedbackSheet = false;
+      }
+    })
   }
 }
