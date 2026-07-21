@@ -1,0 +1,1504 @@
+{
+  "string": [
+    {
+      "name": "pasteboard_permission_reason",
+      "value": "用于读取你主动选择发送的剪贴板文本或图片"
+    },
+    {
+      "name": "app_title",
+      "value": "UniClipboard"
+    },
+    {
+      "name": "app_subtitle",
+      "value": "你的内容，只在受信设备间流动"
+    },
+    {
+      "name": "status_offline",
+      "value": "尚未连接"
+    },
+    {
+      "name": "status_online",
+      "value": "连接安全可用"
+    },
+    {
+      "name": "status_working",
+      "value": "正在同步…"
+    },
+    {
+      "name": "status_failed",
+      "value": "连接失败，请检查地址和凭据"
+    },
+    {
+      "name": "latest_title",
+      "value": "最新剪贴板"
+    },
+    {
+      "name": "latest_empty",
+      "value": "连接桌面设备后，最新文本或图片会显示在这里。"
+    },
+    {
+      "name": "link_preview_loading",
+      "value": "正在获取链接快照…"
+    },
+    {
+      "name": "pull_action",
+      "value": "从桌面拉取"
+    },
+    {
+      "name": "space_refresh_sync_action",
+      "value": "刷新空间同步"
+    },
+    {
+      "name": "copy_action",
+      "value": "写入本机剪贴板"
+    },
+    {
+      "name": "composer_title",
+      "value": "发送文本"
+    },
+    {
+      "name": "composer_placeholder",
+      "value": "输入文本，或从本机剪贴板读取"
+    },
+    {
+      "name": "read_clipboard_action",
+      "value": "读取剪贴板"
+    },
+    {
+      "name": "send_action",
+      "value": "发送到桌面"
+    },
+    {
+      "name": "image_composer_title",
+      "value": "发送图片"
+    },
+    {
+      "name": "image_empty",
+      "value": "从本机剪贴板读取图片后，可将图片发送到桌面设备。"
+    },
+    {
+      "name": "read_image_action",
+      "value": "读取剪贴板图片"
+    },
+    {
+      "name": "image_reading",
+      "value": "正在读取…"
+    },
+    {
+      "name": "image_read_success",
+      "value": "图片已读取，现在可以发送图片。"
+    },
+    {
+      "name": "image_read_empty",
+      "value": "剪贴板中没有可读取的图片，请先复制图片或截图。"
+    },
+    {
+      "name": "clipboard_permission_denied",
+      "value": "需要允许读取剪贴板，才能读取其中的图片。"
+    },
+    {
+      "name": "image_read_failed",
+      "value": "读取剪贴板图片失败，请重新复制图片后再试。"
+    },
+    {
+      "name": "send_image_action",
+      "value": "发送图片"
+    },
+    {
+      "name": "image_sending",
+      "value": "正在发送…"
+    },
+    {
+      "name": "image_send_success",
+      "value": "图片发送成功。"
+    },
+    {
+      "name": "image_send_failed",
+      "value": "图片发送失败，请检查设备连接后重试。"
+    },
+    {
+      "name": "file_composer_title",
+      "value": "发送文件"
+    },
+    {
+      "name": "select_file_action",
+      "value": "选择文件"
+    },
+    {
+      "name": "send_file_action",
+      "value": "发送文件"
+    },
+    {
+      "name": "file_selecting",
+      "value": "正在选择…"
+    },
+    {
+      "name": "file_ready",
+      "value": "文件已选择，可以发送。"
+    },
+    {
+      "name": "file_sending",
+      "value": "正在发送文件…"
+    },
+    {
+      "name": "file_send_success",
+      "value": "对端已接收文件。"
+    },
+    {
+      "name": "file_send_pending",
+      "value": "文件已发布，正在等待对端接收…"
+    },
+    {
+      "name": "file_send_failed",
+      "value": "文件发送失败，请检查空间设备连接。"
+    },
+    {
+      "name": "file_too_large",
+      "value": "无法读取该文件，请重新选择。"
+    },
+    {
+      "name": "file_empty",
+      "value": "选择文件并通过 iroh-blobs 流式发送到空间设备。"
+    },
+    {
+      "name": "save_file_action",
+      "value": "保存文件"
+    },
+    {
+      "name": "history_title",
+      "value": "本次会话"
+    },
+    {
+      "name": "history_empty",
+      "value": "同步记录仅保留在内存中，退出后自动清除。"
+    },
+    {
+      "name": "direction_received",
+      "value": "已接收"
+    },
+    {
+      "name": "direction_sent",
+      "value": "已发送"
+    },
+    {
+      "name": "server_history_title",
+      "value": "桌面历史"
+    },
+    {
+      "name": "server_history_empty",
+      "value": "点击刷新，从桌面端加载文本历史记录。"
+    },
+    {
+      "name": "server_history_refresh",
+      "value": "刷新"
+    },
+    {
+      "name": "server_history_load_more",
+      "value": "加载更多"
+    },
+    {
+      "name": "server_history_end",
+      "value": "已加载全部"
+    },
+    {
+      "name": "server_history_pinned",
+      "value": "已置顶"
+    },
+    {
+      "name": "server_history_search_placeholder",
+      "value": "搜索桌面历史文本"
+    },
+    {
+      "name": "server_history_search_action",
+      "value": "搜索"
+    },
+    {
+      "name": "server_history_starred_action",
+      "value": "只看收藏"
+    },
+    {
+      "name": "server_history_all_action",
+      "value": "查看全部"
+    },
+    {
+      "name": "history_star_action",
+      "value": "收藏"
+    },
+    {
+      "name": "history_unstar_action",
+      "value": "取消收藏"
+    },
+    {
+      "name": "history_pin_action",
+      "value": "置顶"
+    },
+    {
+      "name": "history_unpin_action",
+      "value": "取消置顶"
+    },
+    {
+      "name": "history_send_to_action",
+      "value": "发送到"
+    },
+    {
+      "name": "history_send_to_all_action",
+      "value": "所有设备"
+    },
+    {
+      "name": "history_send_to_device_action",
+      "value": "发送到此设备"
+    },
+    {
+      "name": "history_delete_action",
+      "value": "删除"
+    },
+    {
+      "name": "history_delete_title",
+      "value": "删除历史记录"
+    },
+    {
+      "name": "history_delete_message",
+      "value": "此操作会同步删除桌面端的这条历史记录，是否继续？"
+    },
+    {
+      "name": "cancel_action",
+      "value": "取消"
+    },
+    {
+      "name": "settings_title",
+      "value": "连接设置"
+    },
+    {
+      "name": "space_join_title",
+      "value": "加入空间"
+    },
+    {
+      "name": "space_join_note",
+      "value": "输入桌面端生成的邀请代码和空间口令，将本机作为真正的 P2P 空间成员。"
+    },
+    {
+      "name": "space_joined_note",
+      "value": "本机已加入空间；对端连通状态单独显示。"
+    },
+    {
+      "name": "space_peer_online",
+      "value": "已连接到在线空间设备。"
+    },
+    {
+      "name": "space_peer_waiting",
+      "value": "已加入空间，当前尚未连接在线设备。"
+    },
+    {
+      "name": "space_node_starting",
+      "value": "正在启动安全空间节点…"
+    },
+    {
+      "name": "space_node_failed",
+      "value": "空间节点启动失败，请重试。"
+    },
+    {
+      "name": "space_node_retry",
+      "value": "重新启动节点"
+    },
+    {
+      "name": "space_code_placeholder",
+      "value": "邀请代码，例如 XXXX-XXXX"
+    },
+    {
+      "name": "space_passphrase_placeholder",
+      "value": "空间口令"
+    },
+    {
+      "name": "space_passphrase_label",
+      "value": "空间口令（可复制）"
+    },
+    {
+      "name": "space_scan_invitation",
+      "value": "扫描空间邀请二维码"
+    },
+    {
+      "name": "space_scan_success",
+      "value": "邀请信息已填充，请确认设备名称后加入"
+    },
+    {
+      "name": "space_scan_invalid",
+      "value": "未识别到有效的 UniClipboard 空间邀请"
+    },
+    {
+      "name": "space_manual_link_title",
+      "value": "手动连接"
+    },
+    {
+      "name": "space_manual_link_note",
+      "value": "也可以手动输入设备名称、邀请码和空间口令。"
+    },
+    {
+      "name": "space_join_action",
+      "value": "加入空间"
+    },
+    {
+      "name": "space_joining_action",
+      "value": "正在加入…"
+    },
+    {
+      "name": "space_join_success",
+      "value": "已成功加入空间"
+    },
+    {
+      "name": "space_join_failed",
+      "value": "加入失败，请检查邀请代码、空间口令和桌面设备网络状态。"
+    },
+    {
+      "name": "space_joined_device",
+      "value": "当前 HarmonyOS 设备"
+    },
+    {
+      "name": "space_switch_open",
+      "value": "管理或选择空间"
+    },
+    {
+      "name": "space_switch_cancel",
+      "value": "取消选择"
+    },
+    {
+      "name": "space_switch_note",
+      "value": "扫描或输入目标平板、桌面生成的邀请。切换后本机会激活新空间，并安全迁移本机剪贴板历史。"
+    },
+    {
+      "name": "space_switch_action",
+      "value": "切换到此空间"
+    },
+    {
+      "name": "space_switching_action",
+      "value": "正在切换…"
+    },
+    {
+      "name": "space_switch_success",
+      "value": "已切换到新空间"
+    },
+    {
+      "name": "space_switch_failed",
+      "value": "切换失败，请检查目标设备的邀请码、空间口令和网络状态。"
+    },
+    {
+      "name": "space_tablet_invite_title",
+      "value": "邀请手机加入此空间"
+    },
+    {
+      "name": "space_tablet_invite_note",
+      "value": "平板大屏可直接生成邀请二维码和代码；手机在“加入空间”中扫描或输入即可加入。"
+    },
+    {
+      "name": "space_create_new_mode",
+      "value": "创建新空间"
+    },
+    {
+      "name": "space_join_other_mode",
+      "value": "加入其他空间"
+    },
+    {
+      "name": "space_create_new_title",
+      "value": "创建并切换到新空间"
+    },
+    {
+      "name": "space_create_new_note",
+      "value": "新空间会替换当前活动空间；旧空间成员和信任关系将从本机移除。"
+    },
+    {
+      "name": "space_create_new_action",
+      "value": "创建并切换"
+    },
+    {
+      "name": "space_replace_confirm_title",
+      "value": "创建新的活动空间？"
+    },
+    {
+      "name": "space_replace_confirm_message",
+      "value": "本机将退出当前空间并清除旧空间密钥和成员关系。原生加密历史无法在新空间继续解密；应用内普通历史与其他设置会保留。"
+    },
+    {
+      "name": "space_replace_confirm_action",
+      "value": "退出并创建"
+    },
+    {
+      "name": "settings_note",
+      "value": "可扫描或粘贴桌面端连接二维码自动填充，也可以手动填写服务地址和凭据。"
+    },
+    {
+      "name": "mobile_space_connection_title",
+      "value": "加密同步空间"
+    },
+    {
+      "name": "mobile_space_connection_recommended",
+      "value": "推荐"
+    },
+    {
+      "name": "mobile_space_connection_note",
+      "value": "用于 UniClipboard 设备间加密同步。加入时请扫描空间邀请，或填写邀请码和空间口令；无需服务地址。"
+    },
+    {
+      "name": "mobile_connection_difference_note",
+      "value": "空间邀请用于加入空间；服务地址仅用于旧版桌面服务，两者不能互换。"
+    },
+    {
+      "name": "legacy_connection_title",
+      "value": "旧版桌面服务（兼容）"
+    },
+    {
+      "name": "legacy_connection_note",
+      "value": "只在桌面端明确提供 uniclipboard://connect 连接码或 http(s):// 地址时使用，不能用来加入加密空间。"
+    },
+    {
+      "name": "legacy_connection_expand",
+      "value": "显示旧版连接设置"
+    },
+    {
+      "name": "legacy_connection_collapse",
+      "value": "收起旧版连接设置"
+    },
+    {
+      "name": "legacy_connect_code_title",
+      "value": "方式一：导入桌面端连接码"
+    },
+    {
+      "name": "legacy_service_form_title",
+      "value": "方式二：手动填写服务信息"
+    },
+    {
+      "name": "legacy_server_url_label",
+      "value": "旧版服务地址（以 http:// 或 https:// 开头）"
+    },
+    {
+      "name": "space_invitation_code_label",
+      "value": "空间邀请码（可复制）"
+    },
+    {
+      "name": "connect_uri_label",
+      "value": "导入桌面端连接码"
+    },
+    {
+      "name": "connect_uri_placeholder",
+      "value": "粘贴 uniclipboard://connect?..."
+    },
+    {
+      "name": "connect_uri_action",
+      "value": "解析并填充"
+    },
+    {
+      "name": "connect_uri_scan_action",
+      "value": "扫描连接二维码"
+    },
+    {
+      "name": "connect_uri_scan_failed",
+      "value": "扫码未完成，请重试"
+    },
+    {
+      "name": "connect_uri_success",
+      "value": "连接信息已由 Rust 协议核心解析并填充"
+    },
+    {
+      "name": "connect_uri_failed",
+      "value": "连接码无效或版本不受支持"
+    },
+    {
+      "name": "server_url_label",
+      "value": "服务地址"
+    },
+    {
+      "name": "server_url_placeholder",
+      "value": "http://192.168.1.10:42720"
+    },
+    {
+      "name": "username_label",
+      "value": "用户名"
+    },
+    {
+      "name": "username_placeholder",
+      "value": "mobile_xxxxxxxx"
+    },
+    {
+      "name": "password_label",
+      "value": "密码"
+    },
+    {
+      "name": "password_placeholder",
+      "value": "一次性配对密码"
+    },
+    {
+      "name": "test_connection_action",
+      "value": "测试连接"
+    },
+    {
+      "name": "realtime_start_action",
+      "value": "开启服务器 SSE 同步"
+    },
+    {
+      "name": "realtime_stop_action",
+      "value": "停止服务器 SSE 同步"
+    },
+    {
+      "name": "realtime_active_note",
+      "value": "已连接服务器 SSE；收到更新后会自动拉取最新文本或图片。"
+    },
+    {
+      "name": "realtime_inactive_note",
+      "value": "仅用于服务器 SSE，需先完成连接配置；加密空间同步不受此项影响。"
+    },
+    {
+      "name": "background_sync_title",
+      "value": "保持后台同步"
+    },
+    {
+      "name": "background_sync_note",
+      "value": "开启后，加入同步空间的应用退至后台时会保持设备连接；系统将显示持续通知。"
+    },
+    {
+      "name": "nav_sync",
+      "value": "同步"
+    },
+    {
+      "name": "nav_settings",
+      "value": "设置"
+    },
+    {
+      "name": "nav_feedback",
+      "value": "反馈"
+    },
+    {
+      "name": "validation_missing_config",
+      "value": "请先完整填写连接设置"
+    },
+    {
+      "name": "validation_empty_text",
+      "value": "没有可发送的文本"
+    },
+    {
+      "name": "operation_success",
+      "value": "操作完成"
+    },
+    {
+      "name": "about_title",
+      "value": "关于"
+    },
+    {
+      "name": "about_description",
+      "value": "UniClipboard 通过可信空间，让文本、图片与文件在你的 HarmonyOS 设备之间安全流转。"
+    },
+    {
+      "name": "about_open_settings",
+      "value": "打开连接设置"
+    },
+    {
+      "name": "about_feedback_action",
+      "value": "我要反馈"
+    },
+    {
+      "name": "feedback_dialog_title",
+      "value": "发送反馈"
+    },
+    {
+      "name": "feedback_description",
+      "value": "你的反馈将帮助我们改进 UniClipboard。请在下方描述遇到的问题或建议。"
+    },
+    {
+      "name": "feedback_content_label",
+      "value": "反馈内容"
+    },
+    {
+      "name": "feedback_content_placeholder",
+      "value": "请输入你的反馈内容…"
+    },
+    {
+      "name": "feedback_email_label",
+      "value": "我的邮箱："
+    },
+    {
+      "name": "feedback_write_clipboard_action",
+      "value": "写入剪切板"
+    },
+    {
+      "name": "feedback_empty_hint",
+      "value": "请先填写反馈内容"
+    },
+    {
+      "name": "feedback_copied",
+      "value": "反馈内容已写入剪切板"
+    },
+    {
+      "name": "feedback_copy_failed",
+      "value": "反馈内容写入剪切板失败"
+    },
+    {
+      "name": "feedback_email_open_failed",
+      "value": "无法拉起邮箱程序，请使用页面中的邮箱联系"
+    },
+    {
+      "name": "feedback_email_subject",
+      "value": "UniClipboard 用户反馈"
+    },
+    {
+      "name": "about_tagline",
+      "value": "让内容在设备间自然流动"
+    },
+    {
+      "name": "about_feature_sync",
+      "value": "跨设备同步"
+    },
+    {
+      "name": "about_feature_sync_note",
+      "value": "文本、图片与文件随手传递"
+    },
+    {
+      "name": "about_feature_space",
+      "value": "可信空间"
+    },
+    {
+      "name": "about_feature_space_note",
+      "value": "只与已加入空间的设备共享"
+    },
+    {
+      "name": "about_feature_native",
+      "value": "多端适配"
+    },
+    {
+      "name": "about_feature_native_note",
+      "value": "适配手机、平板与二合一设备"
+    },
+    {
+      "name": "about_product_info",
+      "value": "产品信息"
+    },
+    {
+      "name": "about_version_label",
+      "value": "当前版本"
+    },
+    {
+      "name": "about_platform_label",
+      "value": "运行平台"
+    },
+    {
+      "name": "about_platform_value",
+      "value": "HarmonyOS"
+    },
+    {
+      "name": "about_devices_label",
+      "value": "设备形态"
+    },
+    {
+      "name": "about_devices_value",
+      "value": "手机 · 平板 · 二合一"
+    },
+    {
+      "name": "about_footer",
+      "value": "本社区移植版包含 UniClipboard 上游贡献者及 HarmonyOS 移植贡献者的代码，按 AGPL-3.0-only 发布且不提供任何担保。源码与完整许可证：https://github.com/haohaoai0/UniClipboardHarmonyOS"
+    },
+    {
+      "name": "desktop_clipboard",
+      "value": "剪贴板"
+    },
+    {
+      "name": "desktop_devices",
+      "value": "设备"
+    },
+    {
+      "name": "desktop_library",
+      "value": "剪贴板库"
+    },
+    {
+      "name": "desktop_all",
+      "value": "全部"
+    },
+    {
+      "name": "desktop_types",
+      "value": "类型"
+    },
+    {
+      "name": "desktop_text",
+      "value": "文本"
+    },
+    {
+      "name": "desktop_rich_text",
+      "value": "富文本"
+    },
+    {
+      "name": "desktop_images",
+      "value": "图片"
+    },
+    {
+      "name": "desktop_files",
+      "value": "文件"
+    },
+    {
+      "name": "desktop_time",
+      "value": "时间"
+    },
+    {
+      "name": "desktop_today",
+      "value": "今天"
+    },
+    {
+      "name": "desktop_recent",
+      "value": "最近 7 天"
+    },
+    {
+      "name": "desktop_tags",
+      "value": "标签"
+    },
+    {
+      "name": "desktop_tag_link",
+      "value": "链接"
+    },
+    {
+      "name": "desktop_tag_code",
+      "value": "代码"
+    },
+    {
+      "name": "desktop_tag_image",
+      "value": "图片"
+    },
+    {
+      "name": "desktop_tag_folder",
+      "value": "文件夹"
+    },
+    {
+      "name": "desktop_sources",
+      "value": "来源"
+    },
+    {
+      "name": "desktop_all_sources",
+      "value": "全部来源"
+    },
+    {
+      "name": "desktop_server_source",
+      "value": "桌面历史"
+    },
+    {
+      "name": "desktop_session_source",
+      "value": "本次会话"
+    },
+    {
+      "name": "desktop_unlimited_time",
+      "value": "不限时间"
+    },
+    {
+      "name": "desktop_yesterday",
+      "value": "昨天"
+    },
+    {
+      "name": "desktop_last_30_days",
+      "value": "最近 30 天"
+    },
+    {
+      "name": "desktop_this_week",
+      "value": "本周"
+    },
+    {
+      "name": "desktop_this_month",
+      "value": "本月"
+    },
+    {
+      "name": "desktop_extensions",
+      "value": "扩展名"
+    },
+    {
+      "name": "desktop_extension_txt",
+      "value": ".txt"
+    },
+    {
+      "name": "desktop_extension_md",
+      "value": ".md"
+    },
+    {
+      "name": "desktop_extension_jpg",
+      "value": ".jpg"
+    },
+    {
+      "name": "desktop_extension_png",
+      "value": ".png"
+    },
+    {
+      "name": "desktop_extension_pdf",
+      "value": ".pdf"
+    },
+    {
+      "name": "desktop_extension_ts",
+      "value": ".ts"
+    },
+    {
+      "name": "desktop_extension_js",
+      "value": ".js"
+    },
+    {
+      "name": "desktop_extension_json",
+      "value": ".json"
+    },
+    {
+      "name": "desktop_extension_rs",
+      "value": ".rs"
+    },
+    {
+      "name": "desktop_extension_go",
+      "value": ".go"
+    },
+    {
+      "name": "desktop_items",
+      "value": "项"
+    },
+    {
+      "name": "desktop_filtered_empty",
+      "value": "当前筛选条件下暂无内容。"
+    },
+    {
+      "name": "desktop_one_device",
+      "value": "1 台本机设备"
+    },
+    {
+      "name": "desktop_roster_note",
+      "value": "空间中的真实设备与连接状态"
+    },
+    {
+      "name": "desktop_no_device",
+      "value": "尚未加入空间"
+    },
+    {
+      "name": "desktop_this_device",
+      "value": "本机"
+    },
+    {
+      "name": "desktop_paired_devices",
+      "value": "已配对设备"
+    },
+    {
+      "name": "desktop_refresh_devices",
+      "value": "刷新设备状态"
+    },
+    {
+      "name": "desktop_connect_device",
+      "value": "连接"
+    },
+    {
+      "name": "desktop_connecting_device",
+      "value": "连接中…"
+    },
+    {
+      "name": "desktop_device_connected",
+      "value": "已连接"
+    },
+    {
+      "name": "desktop_connect_all_devices",
+      "value": "连接全部设备"
+    },
+    {
+      "name": "desktop_connecting_all_devices",
+      "value": "正在连接…"
+    },
+    {
+      "name": "desktop_connect_devices_success",
+      "value": "已主动连接在线设备，并触发空间内容重新同步。"
+    },
+    {
+      "name": "desktop_connect_devices_failed",
+      "value": "暂未连接到其他设备，请确认对端应用已打开且网络可达。"
+    },
+    {
+      "name": "desktop_mobile_sync",
+      "value": "移动设备同步"
+    },
+    {
+      "name": "mobile_sync_server_title",
+      "value": "移动设备同步服务"
+    },
+    {
+      "name": "mobile_sync_server_note",
+      "value": "让其他手机通过局域网连接这台设备，兼容 iOS 快捷指令和 SyncClipboard 客户端。"
+    },
+    {
+      "name": "mobile_sync_server_switch",
+      "value": "允许移动设备连接"
+    },
+    {
+      "name": "mobile_sync_server_running",
+      "value": "正在监听局域网连接"
+    },
+    {
+      "name": "mobile_sync_server_stopped",
+      "value": "服务未启动"
+    },
+    {
+      "name": "mobile_sync_port",
+      "value": "监听端口"
+    },
+    {
+      "name": "mobile_sync_addresses",
+      "value": "当前连接地址"
+    },
+    {
+      "name": "mobile_sync_no_address",
+      "value": "尚未检测到可供其他设备访问的局域网地址"
+    },
+    {
+      "name": "mobile_sync_registered_devices",
+      "value": "已授权移动设备"
+    },
+    {
+      "name": "mobile_sync_no_devices",
+      "value": "尚未添加移动设备"
+    },
+    {
+      "name": "mobile_sync_add_device",
+      "value": "添加移动设备"
+    },
+    {
+      "name": "mobile_sync_add_title",
+      "value": "添加移动设备"
+    },
+    {
+      "name": "mobile_sync_add_note",
+      "value": "为该设备生成长期有效的凭据。同一组凭据可用于 iOS 快捷指令及兼容 SyncClipboard 协议的客户端。"
+    },
+    {
+      "name": "mobile_sync_device_name",
+      "value": "设备名称"
+    },
+    {
+      "name": "mobile_sync_device_placeholder",
+      "value": "我的手机"
+    },
+    {
+      "name": "mobile_sync_advanced",
+      "value": "高级选项"
+    },
+    {
+      "name": "mobile_sync_custom_username",
+      "value": "自定义用户名（留空自动生成）"
+    },
+    {
+      "name": "mobile_sync_custom_password",
+      "value": "自定义密码（留空自动生成）"
+    },
+    {
+      "name": "mobile_sync_create",
+      "value": "生成连接凭据"
+    },
+    {
+      "name": "mobile_sync_creating",
+      "value": "正在生成…"
+    },
+    {
+      "name": "mobile_sync_create_failed",
+      "value": "生成失败，请检查端口和局域网后重试"
+    },
+    {
+      "name": "mobile_sync_scan_title",
+      "value": "用另一台手机扫描二维码连接"
+    },
+    {
+      "name": "mobile_sync_scan_note",
+      "value": "打开手机上的 UniClipboard 或兼容客户端扫描；也可手动填写下方地址、用户名和密码。"
+    },
+    {
+      "name": "mobile_sync_one_time_secret",
+      "value": "密码只显示这一次，请先保存。"
+    },
+    {
+      "name": "mobile_sync_username",
+      "value": "用户名"
+    },
+    {
+      "name": "mobile_sync_password",
+      "value": "密码"
+    },
+    {
+      "name": "mobile_sync_revoke",
+      "value": "撤销"
+    },
+    {
+      "name": "mobile_sync_revoke_title",
+      "value": "撤销移动设备？"
+    },
+    {
+      "name": "mobile_sync_revoke_message",
+      "value": "撤销后，该设备保存的用户名和密码将立即失效。"
+    },
+    {
+      "name": "mobile_sync_revoke_confirm",
+      "value": "撤销连接"
+    },
+    {
+      "name": "space_revoke_device_title",
+      "value": "移除此设备？"
+    },
+    {
+      "name": "space_revoke_device_message",
+      "value": "设备将从当前空间移除，需重新配对才能再次加入。"
+    },
+    {
+      "name": "space_revoke_device_confirm",
+      "value": "移除此设备"
+    },
+    {
+      "name": "device_management_hint",
+      "value": "长按其他设备可取消配对或撤销连接。"
+    },
+    {
+      "name": "mobile_sync_last_seen",
+      "value": "最近连接"
+    },
+    {
+      "name": "mobile_sync_never_seen",
+      "value": "等待首次连接"
+    },
+    {
+      "name": "mobile_sync_server_failed",
+      "value": "移动同步服务启动失败，端口可能已被占用"
+    },
+    {
+      "name": "device_type_phone",
+      "value": "手机"
+    },
+    {
+      "name": "device_type_tablet",
+      "value": "平板"
+    },
+    {
+      "name": "device_type_2in1",
+      "value": "二合一设备"
+    },
+    {
+      "name": "device_type_tv",
+      "value": "智慧屏"
+    },
+    {
+      "name": "device_type_wearable",
+      "value": "穿戴设备"
+    },
+    {
+      "name": "device_type_car",
+      "value": "车机"
+    },
+    {
+      "name": "device_type_unknown",
+      "value": "设备"
+    },
+    {
+      "name": "device_status_online",
+      "value": "在线"
+    },
+    {
+      "name": "device_status_offline",
+      "value": "离线"
+    },
+    {
+      "name": "device_status_unknown",
+      "value": "等待连接"
+    },
+    {
+      "name": "desktop_mobile_devices",
+      "value": "移动设备"
+    },
+    {
+      "name": "desktop_identity",
+      "value": "身份档案"
+    },
+    {
+      "name": "desktop_platform",
+      "value": "平台"
+    },
+    {
+      "name": "desktop_node_status",
+      "value": "空间节点"
+    },
+    {
+      "name": "desktop_space_status",
+      "value": "所在空间"
+    },
+    {
+      "name": "desktop_sync_policy",
+      "value": "全局同步策略"
+    },
+    {
+      "name": "desktop_auto_clipboard",
+      "value": "自动同步剪贴板"
+    },
+    {
+      "name": "desktop_auto_clipboard_note",
+      "value": "空间中的文本会自动写入本机剪贴板"
+    },
+    {
+      "name": "desktop_file_sync",
+      "value": "文件同步"
+    },
+    {
+      "name": "desktop_file_sync_note",
+      "value": "文件会通过加密空间传输"
+    },
+    {
+      "name": "desktop_general_settings",
+      "value": "通用设置"
+    },
+    {
+      "name": "desktop_connection_settings",
+      "value": "同步与连接"
+    },
+    {
+      "name": "desktop_legacy_connection_title",
+      "value": "连接已有桌面服务"
+    },
+    {
+      "name": "desktop_legacy_connection_note",
+      "value": "兼容旧版移动同步：可导入桌面端连接二维码，也可在下方手动填写服务地址和凭据。"
+    },
+    {
+      "name": "desktop_appearance_settings",
+      "value": "外观设置"
+    },
+    {
+      "name": "appearance_title",
+      "value": "外观"
+    },
+    {
+      "name": "appearance_note",
+      "value": "选择界面显示模式。\n跟随系统会自动适配深浅色。"
+    },
+    {
+      "name": "appearance_follow_system",
+      "value": "跟随系统"
+    },
+    {
+      "name": "appearance_light",
+      "value": "浅色"
+    },
+    {
+      "name": "appearance_dark",
+      "value": "深色"
+    },
+    {
+      "name": "appearance_theme_title",
+      "value": "主题色"
+    },
+    {
+      "name": "appearance_theme_default",
+      "value": "系统默认"
+    },
+    {
+      "name": "appearance_theme_sky_cyan",
+      "value": "海风蓝青"
+    },
+    {
+      "name": "appearance_theme_aurora_green",
+      "value": "极光青紫"
+    },
+    {
+      "name": "appearance_theme_nebula_purple",
+      "value": "星云紫粉"
+    },
+    {
+      "name": "appearance_theme_sunset_orange",
+      "value": "暖阳橙黄"
+    },
+    {
+      "name": "appearance_theme_blossom_pink",
+      "value": "樱霞粉紫"
+    },
+    {
+      "name": "desktop_device_name",
+      "value": "设备名称"
+    },
+    {
+      "name": "desktop_light_theme",
+      "value": "浅色主题"
+    },
+    {
+      "name": "desktop_dark_theme",
+      "value": "深色主题"
+    },
+    {
+      "name": "desktop_follow_system",
+      "value": "跟随系统"
+    },
+    {
+      "name": "desktop_version",
+      "value": "版本 1.0.0"
+    },
+    {
+      "name": "space_create_mode",
+      "value": "创建空间"
+    },
+    {
+      "name": "space_join_mode",
+      "value": "加入空间"
+    },
+    {
+      "name": "space_create_title",
+      "value": "创建新的同步空间"
+    },
+    {
+      "name": "space_create_note",
+      "value": "本设备将成为空间所有者，并可生成邀请码供其他设备加入。"
+    },
+    {
+      "name": "space_create_device_placeholder",
+      "value": "输入本设备名称"
+    },
+    {
+      "name": "space_device_recommended_phone",
+      "value": "我的手机"
+    },
+    {
+      "name": "space_device_recommended_tablet",
+      "value": "我的平板"
+    },
+    {
+      "name": "space_device_recommended_computer",
+      "value": "我的电脑"
+    },
+    {
+      "name": "space_device_recommended_default",
+      "value": "我的设备"
+    },
+    {
+      "name": "space_create_confirm_placeholder",
+      "value": "再次输入空间口令"
+    },
+    {
+      "name": "space_create_requirement",
+      "value": "空间口令至少 8 位，且两次输入必须一致。"
+    },
+    {
+      "name": "space_create_action",
+      "value": "创建空间"
+    },
+    {
+      "name": "space_creating_action",
+      "value": "正在创建…"
+    },
+    {
+      "name": "space_create_success",
+      "value": "空间已创建，可以邀请其他设备加入。"
+    },
+    {
+      "name": "space_create_failed",
+      "value": "创建空间失败，请检查节点状态后重试。"
+    },
+    {
+      "name": "space_invitation_title",
+      "value": "空间邀请码"
+    },
+    {
+      "name": "space_mobile_invite_open",
+      "value": "邀请其他设备"
+    },
+    {
+      "name": "space_mobile_invite_collapse",
+      "value": "收起设备邀请"
+    },
+    {
+      "name": "space_mobile_invite_note",
+      "value": "手机也可以生成临时邀请。让另一台设备扫码，或直接把邀请码和空间口令分享给对方。"
+    },
+    {
+      "name": "space_share_invitation_action",
+      "value": "分享邀请码"
+    },
+    {
+      "name": "space_share_invitation_note",
+      "value": "分享内容包含邀请码和空间口令，请只发送给你信任的人。"
+    },
+    {
+      "name": "space_share_invitation_failed",
+      "value": "暂时无法打开分享面板，请复制邀请码和空间口令后发送。"
+    },
+    {
+      "name": "space_share_code_label",
+      "value": "邀请码"
+    },
+    {
+      "name": "space_share_passphrase_label",
+      "value": "空间口令"
+    },
+    {
+      "name": "space_share_link_label",
+      "value": "连接链接"
+    },
+    {
+      "name": "space_qr_note",
+      "value": "输入空间口令并生成邀请。其他设备扫码后会自动填充邀请码和口令。"
+    },
+    {
+      "name": "space_invitation_passphrase_placeholder",
+      "value": "输入空间口令以生成完整二维码"
+    },
+    {
+      "name": "space_invitation_expires",
+      "value": "有效期至"
+    },
+    {
+      "name": "space_invitation_note",
+      "value": "二维码和邀请码均短时有效；手动连接时还需要空间口令。"
+    },
+    {
+      "name": "space_issue_invitation",
+      "value": "生成连接二维码"
+    },
+    {
+      "name": "space_issuing_invitation",
+      "value": "正在生成…"
+    },
+    {
+      "name": "space_invitation_failed",
+      "value": "空间已创建，但邀请码生成失败，可点击重试。"
+    },
+    {
+      "name": "desktop_space_id",
+      "value": "空间 ID"
+    },
+    {
+      "name": "file_preview_action",
+      "value": "预览文件"
+    },
+    {
+      "name": "file_preview_opening",
+      "value": "正在打开…"
+    },
+    {
+      "name": "file_preview_failed",
+      "value": "暂时无法预览此文件"
+    },
+    {
+      "name": "file_preview_video",
+      "value": "视频文件"
+    },
+    {
+      "name": "file_preview_audio",
+      "value": "音频文件"
+    },
+    {
+      "name": "file_preview_document",
+      "value": "文档文件"
+    },
+    {
+      "name": "file_preview_generic",
+      "value": "文件内容预览"
+    },
+    {
+      "name": "file_preview_system_note",
+      "value": "点击下方按钮，使用 HarmonyOS 系统预览查看完整内容。"
+    },
+    {
+      "name": "audio_play_action",
+      "value": "播放"
+    },
+    {
+      "name": "audio_pause_action",
+      "value": "暂停"
+    },
+    {
+      "name": "audio_preparing",
+      "value": "正在准备音频…"
+    },
+    {
+      "name": "audio_play_failed",
+      "value": "无法播放此音频文件"
+    },
+    {
+      "name": "audio_lyrics_title",
+      "value": "歌词"
+    },
+    {
+      "name": "audio_metadata_loading",
+      "value": "正在读取歌曲信息和歌词…"
+    },
+    {
+      "name": "audio_lyrics_unavailable",
+      "value": "没有读取到内嵌歌词或同名 LRC 文件"
+    },
+    {
+      "name": "gesture_share_title",
+      "value": "隔空抓取分享"
+    },
+    {
+      "name": "gesture_share_preparing",
+      "value": "正在准备手势识别…"
+    },
+    {
+      "name": "gesture_share_ready",
+      "value": "对当前文件做出一抓一放手势，即可隔空分享"
+    },
+    {
+      "name": "gesture_share_ready_image",
+      "value": "对当前图片做出一抓一放手势，即可隔空分享图片"
+    },
+    {
+      "name": "gesture_share_ready_video",
+      "value": "对当前视频做出一抓一放手势，即可隔空分享视频"
+    },
+    {
+      "name": "gesture_share_ready_audio",
+      "value": "对当前音频做出一抓一放手势，即可隔空分享音频"
+    },
+    {
+      "name": "gesture_share_ready_document",
+      "value": "对当前文档做出一抓一放手势，即可隔空分享文档"
+    },
+    {
+      "name": "gesture_share_ready_pdf",
+      "value": "对当前 PDF 做出一抓一放手势，即可隔空分享 PDF 文档"
+    },
+    {
+      "name": "gesture_share_ready_word",
+      "value": "对当前 Word 做出一抓一放手势，即可隔空分享 Word 文档"
+    },
+    {
+      "name": "gesture_share_ready_excel",
+      "value": "对当前 Excel 做出一抓一放手势，即可隔空分享 Excel 表格"
+    },
+    {
+      "name": "gesture_share_ready_ppt",
+      "value": "对当前 PPT 做出一抓一放手势，即可隔空分享演示文稿"
+    },
+    {
+      "name": "gesture_share_ready_archive",
+      "value": "对当前压缩包做出一抓一放手势，即可隔空分享压缩包"
+    },
+    {
+      "name": "gesture_share_ready_text",
+      "value": "对当前文字做出一抓一放手势，即可隔空分享文字"
+    },
+    {
+      "name": "gesture_share_sending",
+      "value": "已识别抓取手势，正在分享当前内容…"
+    },
+    {
+      "name": "gesture_share_success",
+      "value": "当前内容已交给隔空传送"
+    },
+    {
+      "name": "gesture_share_failed",
+      "value": "本次隔空分享失败，请重新抓取"
+    },
+    {
+      "name": "gesture_share_unsupported",
+      "value": "当前设备或系统未提供隔空抓取分享"
+    },
+    {
+      "name": "notification_received_title",
+      "value": "UniClipboard 收到新内容"
+    },
+    {
+      "name": "notification_received_text",
+      "value": "文本已接收"
+    },
+    {
+      "name": "notification_received_image",
+      "value": "图片已接收"
+    },
+    {
+      "name": "notification_received_file",
+      "value": "文件已接收"
+    },
+    {
+      "name": "notification_received_open",
+      "value": "打开 UniClipboard 查看并使用"
+    }
+  ]
+}

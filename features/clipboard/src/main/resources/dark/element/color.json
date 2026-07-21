@@ -1,0 +1,76 @@
+{
+  "color": [
+    {
+      "name": "page_background",
+      "value": "#FF000000"
+    },
+    {
+      "name": "surface",
+      "value": "#FF202224"
+    },
+    {
+      "name": "surface_muted",
+      "value": "#0CFFFFFF"
+    },
+    {
+      "name": "text_primary",
+      "value": "#E5FFFFFF"
+    },
+    {
+      "name": "text_secondary",
+      "value": "#99FFFFFF"
+    },
+    {
+      "name": "text_tertiary",
+      "value": "#66FFFFFF"
+    },
+    {
+      "name": "accent",
+      "value": "#FF317AF7"
+    },
+    {
+      "name": "accent_secondary",
+      "value": "#FF6A9BFF"
+    },
+    {
+      "name": "accent_soft",
+      "value": "#19317AF7"
+    },
+    {
+      "name": "accent_medium",
+      "value": "#33317AF7"
+    },
+    {
+      "name": "on_accent",
+      "value": "#FFFFFFFF"
+    },
+    {
+      "name": "success",
+      "value": "#FF5BA854"
+    },
+    {
+      "name": "danger",
+      "value": "#FFD94838"
+    },
+    {
+      "name": "divider",
+      "value": "#33FFFFFF"
+    },
+    {
+      "name": "navigation_mask",
+      "value": "#66000000"
+    },
+    {
+      "name": "paste_button_background",
+      "value": "#FF2E3033"
+    },
+    {
+      "name": "qr_foreground",
+      "value": "#FF000000"
+    },
+    {
+      "name": "qr_background",
+      "value": "#FFFFFFFF"
+    }
+  ]
+}

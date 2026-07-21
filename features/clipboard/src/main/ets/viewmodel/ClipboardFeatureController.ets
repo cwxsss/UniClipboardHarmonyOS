@@ -1,0 +1,3955 @@
+import { LengthMetrics, UIContext, mediaquery, SymbolGlyphModifier, window } from '@kit.ArkUI';
+import {
+  common,
+  ConfigurationConstant
+} from '@kit.AbilityKit';
+import { BusinessError, deviceInfo } from '@kit.BasicServicesKit';
+import { scanBarcode, scanCore } from '@kit.ScanKit';
+import { image } from '@kit.ImageKit';
+import { fileIo, fileUri, picker } from '@kit.CoreFileKit';
+import { media } from '@kit.MediaKit';
+import { filePreview } from '@kit.PreviewKit';
+import { harmonyShare, systemShare } from '@kit.ShareKit';
+import { uniformTypeDescriptor } from '@kit.ArkData';
+import {
+  hdsMaterial,
+  HdsNavDestination,
+  HdsNavDestinationTitleMode,
+  HdsNavigation,
+  HdsNavigationTitleMode,
+  HdsTabs,
+  IconType,
+  IconStyleMode,
+  ScrollEffectType
+} from '@kit.UIDesignKit';
+import {
+  ClipboardHistoryItem,
+  ServerConfig,
+  ServerHistoryItem,
+  SyncContent,
+  SyncEvent,
+  ClipboardFileSelection,
+  ClipboardService,
+  APPEARANCE_MODE_DARK,
+  APPEARANCE_MODE_LIGHT,
+  APPEARANCE_MODE_SYSTEM,
+  APPEARANCE_THEME_DEFAULT,
+  AppearanceStorageService,
+  ConfigStorageService,
+  BackgroundSyncPreferenceService,
+  HistoryStorageService,
+  MobileSyncClient,
+  MobileSyncServerService,
+  NativeProtocolService,
+  ReceivedNotificationService,
+  SpaceNodeService,
+  NativeCreateSpaceResult,
+  NativeJoinSpaceResult,
+  NativeSpaceDevice,
+  NativeSpaceFileEvent,
+  NativeSpaceFileSendResult,
+  NativeSpaceFileStatusEvent,
+  NativeSpaceImageEvent,
+  NativeSpaceInvitation,
+  NativeSpaceStatus,
+  NativeSpaceTextEvent,
+  NativeMobileSyncCredential,
+  NativeMobileSyncDevice,
+  NativeMobileSyncInboundEvent,
+  NativeMobileSyncStatus
+} from 'common';
+
+export class AudioLyricLine {
+  timeMs: number = 0;
+  text: string = '';
+
+  constructor(timeMs: number, text: string) {
+    this.timeMs = timeMs;
+    this.text = text;
+  }
+}
+
+export class AppearanceThemeOption {
+  id: string = '';
+  primaryColor: string = '';
+  secondaryColor: string = '';
+
+  constructor(id: string, primaryColor: string, secondaryColor: string) {
+    this.id = id;
+    this.primaryColor = primaryColor;
+    this.secondaryColor = secondaryColor;
+  }
+}
+
+export const APPEARANCE_THEME_OPTIONS: AppearanceThemeOption[] = [
+  new AppearanceThemeOption(APPEARANCE_THEME_DEFAULT, '#0A59F7', '#317AF7'),
+  new AppearanceThemeOption('sky_cyan', '#3EB4F8', '#5DEAB5'),
+  new AppearanceThemeOption('aurora_green', '#5DEAB5', '#AF64EE'),
+  new AppearanceThemeOption('nebula_purple', '#AF64EE', '#FB638D'),
+  new AppearanceThemeOption('sunset_orange', '#F99844', '#FFE345'),
+  new AppearanceThemeOption('blossom_pink', '#FB638D', '#AF64EE')
+];
+
+export const FEEDBACK_EMAIL: string = '3514795319@qq.com';
+
+
+@Observed
+export class ClipboardFeatureController {
+  private static instance: ClipboardFeatureController | null = null;
+  public avoidAreaRectHeight: number = 0;
+  public navigationRectHeight: number = 0;
+  public selectedTab: number = 0;
+  public isWideScreen: boolean = false;
+  public isLargeScreen: boolean = false;
+  public statusCode: number = 0;
+  public busy: boolean = false;
+  public serverUrl: string = '';
+  public username: string = '';
+  public password: string = '';
+  public connectUri: string = '';
+  public connectUriState: number = 0;
+  public legacyConnectionExpanded: boolean = false;
+  public composerText: string = '';
+  public latestText: string = '';
+  public latestKind: string = 'Text';
+  public latestImage: image.PixelMap | null = null;
+  public latestImageRevision: number = 0;
+  public composerImage: image.PixelMap | null = null;
+  public composerImageRevision: number = 0;
+  public imageReadState: number = 0;
+  public imageSendState: number = 0;
+  public composerFileName: string = '';
+  public latestFileName: string = '';
+  public latestFileRevision: number = 0;
+  public fileTransferState: number = 0;
+  public latestContentId: string = '';
+  public history: ClipboardHistoryItem[] = [];
+  public serverHistory: ServerHistoryItem[] = [];
+  public historyPage: number = 1;
+  public historyEnd: boolean = false;
+  public historyLoading: boolean = false;
+  public historySearchText: string = '';
+  public historyStarredOnly: boolean = false;
+  public historyMutationBusy: boolean = false;
+  public desktopRefreshBusy: boolean = false;
+  public realtimeActive: boolean = false;
+  public showAboutSheet: boolean = false;
+  public showFeedbackSheet: boolean = false;
+  public feedbackText: string = '';
+  public aboutMaterialLevel: hdsMaterial.MaterialLevel = hdsMaterial.MaterialLevel.SMOOTH;
+  public spaceNodeState: number = 0;
+  public spaceJoined: boolean = false;
+  public spacePeerConnected: boolean = false;
+  public spaceDevices: NativeSpaceDevice[] = [];
+  public spaceDeviceName: string = '';
+  public spaceInvitationCode: string = '';
+  public spacePassphrase: string = '';
+  public spaceJoinDeviceName: string = '';
+  public spaceJoinBusy: boolean = false;
+  public spaceJoinState: number = 0;
+  public spaceSwitchOpen: boolean = false;
+  public spaceActionMode: number = 0;
+  public spaceCreateDeviceName: string = '';
+  public spaceCreateDeviceNameRecommended: boolean = false;
+  public spaceCreatePassphrase: string = '';
+  public spaceCreatePassphraseConfirm: string = '';
+  public spaceCreateBusy: boolean = false;
+  public spaceCreateState: number = 0;
+  public spaceCreatedId: string = '';
+  public spaceIssuedInvitationCode: string = '';
+  public spaceInvitationExpiresAtMs: number = 0;
+  public spaceInvitationScanState: number = 0;
+  public spaceInvitationBusy: boolean = false;
+  public mobileInvitationOpen: boolean = false;
+  public spaceConnectBusy: boolean = false;
+  public spaceConnectingDeviceId: string = '';
+  public spaceConnectState: number = 0;
+  public largeSection: number = 0;
+  public largeSettingsSection: number = 0;
+  public desktopSelectedId: string = '';
+  public desktopSelectedText: string = '';
+  public desktopSelectedMeta: string = '';
+  public desktopSelectedDirection: string = '';
+  public desktopSelectedImage: image.PixelMap | null = null;
+  public desktopSelectedImageRevision: number = 0;
+  public desktopFilePreviewState: number = 0;
+  public desktopVideoAspectRatio: number = 16 / 9;
+  public desktopAudioState: number = 0;
+  public desktopAudioPosition: number = 0;
+  public desktopAudioDuration: number = 0;
+  public desktopAudioSeeking: boolean = false;
+  public desktopAudioCover: image.PixelMap | null = null;
+  public desktopAudioCoverRevision: number = 0;
+  public desktopAudioTitle: string = '';
+  public desktopAudioArtist: string = '';
+  public desktopAudioAlbum: string = '';
+  public desktopAudioLyrics: AudioLyricLine[] = [];
+  public desktopAudioPlainLyrics: string = '';
+  public desktopAudioMetadataState: number = 0;
+  public desktopGestureShareState: number = 0;
+  public desktopGestureShareHintDismissed: boolean = false;
+  public desktopStarredOnly: boolean = false;
+  public desktopTypeFilter: number = 0;
+  public desktopTagFilter: number = 0;
+  public desktopSourceFilter: number = 0;
+  public desktopTimeFilter: number = 0;
+  public desktopExtensionFilter: string = '';
+  public appearanceMode: string = APPEARANCE_MODE_SYSTEM;
+  public appearanceThemeId: string = APPEARANCE_THEME_DEFAULT;
+  public latestContentPulse: number = 1;
+  public historyPulse: number = 1;
+  public backgroundSyncEnabled: boolean = false;
+  public mobileSyncEnabled: boolean = false;
+  public mobileSyncRunning: boolean = false;
+  public mobileSyncPort: string = '42720';
+  public mobileSyncUrls: string[] = [];
+  public mobileSyncDevices: NativeMobileSyncDevice[] = [];
+  public mobileSyncBusy: boolean = false;
+  public mobileSyncState: number = 0;
+  public desktopDeviceMutationBusy: boolean = false;
+  public mobileSyncAddOpen: boolean = false;
+  public mobileSyncAdvancedOpen: boolean = false;
+  public mobileSyncDeviceName: string = '';
+  public mobileSyncCustomUsername: string = '';
+  public mobileSyncCustomPassword: string = '';
+  public mobileSyncCredential: NativeMobileSyncCredential | null = null;
+  public mobileSyncPasswordVisible: boolean = false;
+
+  public clipboardService: ClipboardService = new ClipboardService();
+  public appearanceStorageService: AppearanceStorageService = new AppearanceStorageService();
+  public configStorageService: ConfigStorageService = new ConfigStorageService();
+  public backgroundSyncPreferenceService: BackgroundSyncPreferenceService =
+    new BackgroundSyncPreferenceService();
+  public historyStorageService: HistoryStorageService = new HistoryStorageService();
+  public mobileSyncServerService: MobileSyncServerService = new MobileSyncServerService();
+  public receivedNotificationService: ReceivedNotificationService =
+    ReceivedNotificationService.getInstance();
+  public nativeProtocolService: NativeProtocolService = new NativeProtocolService();
+  public spaceNodeService: SpaceNodeService = new SpaceNodeService();
+  public largeNavStack: NavPathStack = new NavPathStack();
+  public sseTimerId: number = -1;
+  public historySearchTimerId: number = -1;
+  public sseEventBusy: boolean = false;
+  public spaceDeviceRefreshBusy: boolean = false;
+  public historyResetPending: boolean = false;
+  public historyRestoreStarted: boolean = false;
+  public historyRestored: boolean = false;
+  public historySaveBusy: boolean = false;
+  public historySavePending: boolean = false;
+  public realtimeTick: number = 0;
+  public realtimeAutoConnect: boolean = false;
+  public mobileSyncDeviceRefreshBusy: boolean = false;
+  public syncScroller: Scroller = new Scroller();
+  public devicesScroller: Scroller = new Scroller();
+  public settingsScroller: Scroller = new Scroller();
+  public aboutScroller: Scroller = new Scroller();
+  public configRestored: boolean = false;
+  public composerFileData: Uint8Array | null = null;
+  public composerFileUri: string = '';
+  public composerFileSize: number = 0;
+  public composerFileHistoryId: string = '';
+  public latestFileData: Uint8Array | null = null;
+  public latestFilePath: string = '';
+  public latestCachedFilePath: string = '';
+  public desktopSelectedFileData: Uint8Array | null = null;
+  public desktopSelectedFilePath: string = '';
+  public desktopVideoRatioKey: string = '';
+  public desktopAudioPlayer: media.AVPlayer | null = null;
+  public desktopAudioSourceFile: fileIo.File | null = null;
+  public desktopAudioKey: string = '';
+  public desktopAudioPlayWhenReady: boolean = false;
+  public desktopGestureShareWindowId: number = -1;
+  public desktopGestureShareResetTimerId: number = -1;
+  public desktopGestureShareRegistering: boolean = false;
+  public desktopGestureSharePageVisible: boolean = false;
+  public pendingFileTransferId: string = '';
+
+  private uiContextRef: UIContext | null = null;
+
+  public static getInstance(): ClipboardFeatureController {
+    if (ClipboardFeatureController.instance === null) {
+      ClipboardFeatureController.instance = new ClipboardFeatureController();
+    }
+    return ClipboardFeatureController.instance as ClipboardFeatureController;
+  }
+
+  public getUIContext(): UIContext {
+    if (this.uiContextRef === null) {
+      throw new Error('ClipboardFeatureController is not attached to a UIContext.');
+    }
+    return this.uiContextRef;
+  }
+
+  public setScreenMode(isWideScreen: boolean, isLargeScreen: boolean): void {
+    this.isWideScreen = isWideScreen;
+    this.isLargeScreen = isLargeScreen;
+    if (!isWideScreen && this.desktopSelectedId.length > 0) {
+      this.showLatestClipboardContent();
+    }
+  }
+
+  public setSpaceJoined(joined: boolean): void {
+    this.spaceJoined = joined;
+    AppStorage.setOrCreate('spaceJoined', joined);
+  }
+
+  public start(uiContext: UIContext): void {
+    this.uiContextRef = uiContext;
+    let materialTypes: Array<hdsMaterial.MaterialType> = hdsMaterial.getSystemMaterialTypes();
+    if (materialTypes.indexOf(hdsMaterial.MaterialType.IMMERSIVE) >= 0) {
+      this.aboutMaterialLevel = hdsMaterial.MaterialLevel.EXQUISITE;
+    }
+    this.initializeRecommendedSpaceDeviceName();
+    this.selectPage(this.selectedTab);
+    if (this.sseTimerId < 0) {
+      this.sseTimerId = setInterval(() => {
+        this.consumeRealtimeEvents();
+      }, 1000);
+    }
+    this.restoreConfig();
+    this.restoreBackgroundSyncPreference();
+    this.restoreAppearanceMode();
+    this.restoreAppearanceTheme();
+    this.restoreLocalHistory();
+    this.initializeSpaceNode();
+  }
+
+  public onPageShow(): void {
+    this.desktopGestureSharePageVisible = true;
+    this.registerDesktopGestureShare();
+  }
+
+  public onPageHide(): void {
+    this.desktopGestureSharePageVisible = false;
+    this.unregisterDesktopGestureShare();
+  }
+
+  public stop(): void {
+    if (this.sseTimerId >= 0) {
+      clearInterval(this.sseTimerId);
+      this.sseTimerId = -1;
+    }
+    if (this.historySearchTimerId >= 0) {
+      clearTimeout(this.historySearchTimerId);
+      this.historySearchTimerId = -1;
+    }
+    let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
+    client.stopRealtime();
+    this.realtimeActive = false;
+    this.desktopGestureSharePageVisible = false;
+    this.unregisterDesktopGestureShare();
+    this.releaseDesktopAudio();
+    this.removeLatestCachedFile();
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context !== undefined && this.composerFileHistoryId.length > 0 && this.composerFileUri.length > 0) {
+      this.historyStorageService.discardManagedFile(context, this.composerFileUri);
+      this.composerFileHistoryId = '';
+      this.composerFileUri = '';
+    }
+    this.uiContextRef = null;
+  }
+
+  public showLatestClipboardContent(): void {
+    this.desktopSelectedId = '';
+    this.desktopSelectedText = '';
+    this.desktopSelectedMeta = '';
+    this.desktopSelectedDirection = '';
+    this.desktopGestureShareHintDismissed = false;
+    this.desktopSelectedImage = null;
+    this.desktopSelectedFileData = null;
+    this.desktopSelectedFilePath = '';
+    this.desktopFilePreviewState = 0;
+    this.resetDesktopVideoAspectRatio();
+    this.releaseDesktopAudio();
+  }
+
+  public getConfig(): ServerConfig {
+    let config: ServerConfig = {
+      baseUrl: this.serverUrl,
+      username: this.username,
+      password: this.password
+    };
+    return config;
+  }
+
+  public restoreConfig(): void {
+    if (this.configRestored) {
+      return;
+    }
+    this.configRestored = true;
+    try {
+      let context: common.Context | undefined = this.getUIContext().getHostContext();
+      if (context === undefined) {
+        return;
+      }
+      let config: ServerConfig = this.configStorageService.load(context);
+      this.serverUrl = config.baseUrl;
+      this.username = config.username;
+      this.password = config.password;
+      this.legacyConnectionExpanded = this.hasConfig();
+      if (this.hasConfig()) {
+        this.realtimeAutoConnect = true;
+        this.startRealtime();
+      }
+    } catch (error) {
+      this.statusCode = 3;
+    }
+  }
+
+  public saveConfig(): void {
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context === undefined) {
+      return;
+    }
+    this.configStorageService.save(context, this.getConfig());
+  }
+
+  public restoreBackgroundSyncPreference(): void {
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context === undefined) {
+      return;
+    }
+    this.backgroundSyncEnabled = this.backgroundSyncPreferenceService.load(context);
+    AppStorage.setOrCreate('backgroundSyncEnabled', this.backgroundSyncEnabled);
+  }
+
+  public setBackgroundSyncEnabled(enabled: boolean): void {
+    this.backgroundSyncEnabled = enabled;
+    AppStorage.setOrCreate('backgroundSyncEnabled', enabled);
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context !== undefined) {
+      this.backgroundSyncPreferenceService.save(context, enabled);
+    }
+  }
+
+  public restoreAppearanceMode(): void {
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context === undefined) {
+      return;
+    }
+    this.appearanceMode = this.appearanceStorageService.load(context);
+  }
+
+  public restoreAppearanceTheme(): void {
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context === undefined) {
+      return;
+    }
+    let storedThemeId: string = this.appearanceStorageService.loadTheme(context);
+    this.appearanceThemeId = this.getAppearanceTheme(storedThemeId).id;
+  }
+
+  public selectAppearanceMode(mode: string): void {
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context === undefined) {
+      return;
+    }
+    try {
+      let colorMode: ConfigurationConstant.ColorMode = this.appearanceStorageService.getColorMode(mode);
+      context.getApplicationContext().setColorMode(colorMode);
+      this.appearanceMode = mode;
+      this.appearanceStorageService.save(context, mode);
+    } catch (error) {
+      console.error('UniClipboard failed to update the appearance mode.');
+    }
+  }
+
+  public selectAppearanceTheme(themeId: string): void {
+    let theme: AppearanceThemeOption = this.getAppearanceTheme(themeId);
+    this.appearanceThemeId = theme.id;
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context !== undefined) {
+      this.appearanceStorageService.saveTheme(context, theme.id);
+    }
+  }
+
+  public getAppearanceTheme(themeId: string): AppearanceThemeOption {
+    for (let index: number = 0; index < APPEARANCE_THEME_OPTIONS.length; index++) {
+      let option: AppearanceThemeOption = APPEARANCE_THEME_OPTIONS[index];
+      if (option.id === themeId) {
+        return option;
+      }
+    }
+    return APPEARANCE_THEME_OPTIONS[0];
+  }
+
+  public appearanceThemeLabel(themeId: string): Resource {
+    if (themeId === 'sky_cyan') {
+      return $r('app.string.appearance_theme_sky_cyan');
+    }
+    if (themeId === 'aurora_green') {
+      return $r('app.string.appearance_theme_aurora_green');
+    }
+    if (themeId === 'nebula_purple') {
+      return $r('app.string.appearance_theme_nebula_purple');
+    }
+    if (themeId === 'sunset_orange') {
+      return $r('app.string.appearance_theme_sunset_orange');
+    }
+    if (themeId === 'blossom_pink') {
+      return $r('app.string.appearance_theme_blossom_pink');
+    }
+    return $r('app.string.appearance_theme_default');
+  }
+
+  public accentColor(): ResourceColor {
+    if (this.appearanceThemeId === APPEARANCE_THEME_DEFAULT) {
+      return $r('app.color.accent');
+    }
+    return this.getAppearanceTheme(this.appearanceThemeId).primaryColor;
+  }
+
+  public accentSecondaryColor(): ResourceColor {
+    if (this.appearanceThemeId === APPEARANCE_THEME_DEFAULT) {
+      return $r('app.color.accent_secondary');
+    }
+    return this.getAppearanceTheme(this.appearanceThemeId).secondaryColor;
+  }
+
+  public historyMenuSymbol(symbol: Resource): SymbolGlyphModifier {
+    let modifier: SymbolGlyphModifier = new SymbolGlyphModifier(symbol);
+    modifier.fontSize('20vp');
+    modifier.fontColor([this.accentSecondaryColor()]);
+    return modifier;
+  }
+
+  public historyDeleteMenuSymbol(): SymbolGlyphModifier {
+    let modifier: SymbolGlyphModifier = new SymbolGlyphModifier($r('sys.symbol.xmark'));
+    modifier.fontSize('20vp');
+    modifier.fontColor([$r('app.color.danger')]);
+    return modifier;
+  }
+
+  public accentSoftColor(): ResourceColor {
+    if (this.appearanceThemeId === APPEARANCE_THEME_DEFAULT) {
+      return $r('app.color.accent_soft');
+    }
+    return '#19' + this.getAppearanceTheme(this.appearanceThemeId).primaryColor.substring(1);
+  }
+
+  public accentMediumColor(): ResourceColor {
+    if (this.appearanceThemeId === APPEARANCE_THEME_DEFAULT) {
+      return $r('app.color.accent_medium');
+    }
+    return '#33' + this.getAppearanceTheme(this.appearanceThemeId).primaryColor.substring(1);
+  }
+
+  public titleBarConnectionIcon(): IconType {
+    if (this.isConnectionAvailable()) {
+      return $r('sys.symbol.connection');
+    }
+    const modifier: SymbolGlyphModifier =
+      new SymbolGlyphModifier($r('sys.symbol.unconnection'));
+    modifier.fontColor([$r('app.color.danger')]);
+    return modifier;
+  }
+
+  public async restoreLocalHistory(): Promise<void> {
+    if (this.historyRestoreStarted) {
+      return;
+    }
+    this.historyRestoreStarted = true;
+    try {
+      let context: common.Context | undefined = this.getUIContext().getHostContext();
+      if (context === undefined) {
+        return;
+      }
+      let storedItems: ClipboardHistoryItem[] = await this.historyStorageService.load(context);
+      let mergedItems: ClipboardHistoryItem[] = [];
+      let knownIds: Set<string> = new Set<string>();
+      for (let index: number = 0; index < this.history.length && mergedItems.length < 200; index++) {
+        let item: ClipboardHistoryItem = this.history[index];
+        mergedItems.push(item);
+        knownIds.add(item.id);
+      }
+      for (let index: number = 0; index < storedItems.length && mergedItems.length < 200; index++) {
+        let item: ClipboardHistoryItem = storedItems[index];
+        if (!knownIds.has(item.id)) {
+          mergedItems.push(item);
+          knownIds.add(item.id);
+        }
+      }
+      this.history = mergedItems;
+    } catch (error) {
+      console.error('UniClipboard failed to restore local clipboard history.');
+    } finally {
+      this.historyRestored = true;
+      if (this.historySavePending) {
+        this.historySavePending = false;
+        this.scheduleHistorySave();
+      }
+    }
+  }
+
+  public scheduleHistorySave(): void {
+    if (!this.historyRestored || this.historySaveBusy) {
+      this.historySavePending = true;
+      return;
+    }
+    this.persistLocalHistory();
+  }
+
+  public async persistLocalHistory(): Promise<void> {
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context === undefined) {
+      this.historySavePending = true;
+      return;
+    }
+    let items: ClipboardHistoryItem[] = [];
+    for (let index: number = 0; index < this.history.length && index < 200; index++) {
+      items.push(this.history[index]);
+    }
+    this.historySaveBusy = true;
+    try {
+      await this.historyStorageService.save(context, items);
+    } catch (error) {
+      console.error('UniClipboard failed to persist local clipboard history.');
+    } finally {
+      this.historySaveBusy = false;
+      if (this.historySavePending) {
+        this.historySavePending = false;
+        this.scheduleHistorySave();
+      }
+    }
+  }
+
+  public async initializeSpaceNode(): Promise<void> {
+    if (this.spaceNodeState === 1 || this.spaceNodeState === 2) {
+      return;
+    }
+    this.spaceNodeState = 1;
+    this.spacePeerConnected = false;
+    try {
+      let context: common.Context | undefined = this.getUIContext().getHostContext();
+      if (context === undefined) {
+        this.spaceNodeState = 3;
+        return;
+      }
+      let status: NativeSpaceStatus = await this.spaceNodeService.start(
+        context.filesDir, context.cacheDir, deviceInfo.deviceType);
+      this.spaceNodeState = status.running ? 2 : 3;
+      this.setSpaceJoined(status.joined);
+      this.spaceDeviceName = status.deviceName;
+      this.spaceCreatedId = status.spaceId;
+      if (this.spaceJoined) {
+        await this.refreshSpaceDevices();
+      }
+      await this.initializeMobileSyncServer();
+    } catch (error) {
+      this.spaceNodeState = 3;
+    }
+  }
+
+  public async initializeMobileSyncServer(): Promise<void> {
+    try {
+      let status: NativeMobileSyncStatus = await this.mobileSyncServerService.status();
+      this.mobileSyncEnabled = status.enabled;
+      this.mobileSyncRunning = status.running;
+      this.mobileSyncPort = status.port.toString();
+      this.mobileSyncUrls = status.urls;
+      await this.refreshMobileSyncDevices();
+      if (status.enabled && !status.running) {
+        let restarted: NativeMobileSyncStatus = await this.mobileSyncServerService.setEnabled(
+          true, this.mobileSyncPortNumber());
+        this.mobileSyncRunning = restarted.running;
+        this.mobileSyncUrls = restarted.urls;
+      }
+    } catch (error) {
+      this.mobileSyncState = 3;
+      this.mobileSyncRunning = false;
+    }
+  }
+
+  public mobileSyncPortNumber(): number {
+    let port: number = parseInt(this.mobileSyncPort.trim(), 10);
+    if (isNaN(port) || port < 1 || port > 65535) {
+      return 42720;
+    }
+    return port;
+  }
+
+  public async refreshMobileSyncDevices(): Promise<void> {
+    if (this.mobileSyncDeviceRefreshBusy) {
+      return;
+    }
+    this.mobileSyncDeviceRefreshBusy = true;
+    try {
+      this.mobileSyncDevices = await this.mobileSyncServerService.listDevices();
+    } catch (error) {
+      this.mobileSyncDevices = [];
+    } finally {
+      this.mobileSyncDeviceRefreshBusy = false;
+    }
+  }
+
+  public async toggleMobileSyncServer(enabled: boolean): Promise<void> {
+    if (this.mobileSyncBusy) {
+      return;
+    }
+    this.mobileSyncBusy = true;
+    this.mobileSyncState = 0;
+    try {
+      let status: NativeMobileSyncStatus = await this.mobileSyncServerService.setEnabled(
+        enabled, this.mobileSyncPortNumber());
+      this.mobileSyncEnabled = status.enabled;
+      this.mobileSyncRunning = status.running;
+      this.mobileSyncPort = status.port.toString();
+      this.mobileSyncUrls = status.urls;
+      if (enabled && !status.running) {
+        this.mobileSyncState = 3;
+      }
+      await this.refreshMobileSyncDevices();
+    } catch (error) {
+      this.mobileSyncEnabled = false;
+      this.mobileSyncRunning = false;
+      this.mobileSyncState = 3;
+    } finally {
+      this.mobileSyncBusy = false;
+    }
+  }
+
+  public async createMobileSyncDevice(): Promise<void> {
+    if (this.mobileSyncBusy || this.mobileSyncDeviceName.trim().length === 0) {
+      return;
+    }
+    this.mobileSyncBusy = true;
+    this.mobileSyncState = 0;
+    this.mobileSyncCredential = null;
+    try {
+      let credential: NativeMobileSyncCredential = await this.mobileSyncServerService.registerDevice(
+        this.mobileSyncDeviceName.trim(), this.mobileSyncCustomUsername.trim(),
+        this.mobileSyncCustomPassword, this.mobileSyncPortNumber());
+      this.mobileSyncCredential = credential;
+      this.mobileSyncEnabled = true;
+      this.mobileSyncRunning = true;
+      this.mobileSyncUrls = credential.urls;
+      await this.refreshMobileSyncDevices();
+      this.mobileSyncState = 2;
+      this.mobileSyncCustomPassword = '';
+    } catch (error) {
+      this.mobileSyncState = 3;
+    } finally {
+      this.mobileSyncBusy = false;
+    }
+  }
+
+  public async revokeMobileSyncDevice(device: NativeMobileSyncDevice): Promise<void> {
+    if (this.desktopDeviceMutationBusy || this.mobileSyncBusy) {
+      return;
+    }
+    try {
+      let result = await this.getUIContext().getPromptAction().showDialog({
+        title: $r('app.string.mobile_sync_revoke_title'),
+        message: $r('app.string.mobile_sync_revoke_message'),
+        buttons: [
+          { text: $r('app.string.cancel_action'), color: $r('app.color.text_secondary') },
+          { text: $r('app.string.mobile_sync_revoke_confirm'), color: $r('app.color.danger') }
+        ]
+      });
+      if (result.index !== 1) {
+        return;
+      }
+      this.desktopDeviceMutationBusy = true;
+      await this.mobileSyncServerService.revokeDevice(device.deviceId);
+      await this.refreshMobileSyncDevices();
+      this.statusCode = 2;
+    } catch (error) {
+      this.mobileSyncState = 3;
+      this.statusCode = 3;
+    } finally {
+      this.desktopDeviceMutationBusy = false;
+    }
+  }
+
+  public async revokeSpaceDevice(device: NativeSpaceDevice): Promise<void> {
+    if (device.isLocal || this.desktopDeviceMutationBusy || this.spaceConnectBusy ||
+      !this.spaceJoined || this.spaceNodeState !== 2) {
+      return;
+    }
+    try {
+      let result = await this.getUIContext().getPromptAction().showDialog({
+        title: $r('app.string.space_revoke_device_title'),
+        message: $r('app.string.space_revoke_device_message'),
+        buttons: [
+          { text: $r('app.string.cancel_action'), color: $r('app.color.text_secondary') },
+          { text: $r('app.string.space_revoke_device_confirm'), color: $r('app.color.danger') }
+        ]
+      });
+      if (result.index !== 1) {
+        return;
+      }
+      this.desktopDeviceMutationBusy = true;
+      await this.spaceNodeService.revoke(device.deviceId);
+      await this.refreshSpaceDevices();
+      this.statusCode = 2;
+    } catch (error) {
+      this.statusCode = 3;
+    } finally {
+      this.desktopDeviceMutationBusy = false;
+    }
+  }
+
+  public async consumeMobileSyncEvents(): Promise<void> {
+    let events: NativeMobileSyncInboundEvent[] = this.mobileSyncServerService.drainInboundEvents();
+    for (let index: number = 0; index < events.length; index++) {
+      let event: NativeMobileSyncInboundEvent = events[index];
+      this.latestContentId = event.contentId;
+      if (event.kind === 'Text') {
+        this.latestText = event.text;
+        this.latestKind = 'Text';
+        this.latestImage = null;
+        this.addHistory(event.text, 'received');
+        try {
+          await this.clipboardService.writeText(event.text);
+          this.notifyReceivedContent('Text', event.text, null, 0, event.sourceLabel);
+        } catch (error) {
+          this.statusCode = 3;
+        }
+      } else if (event.kind === 'Image') {
+        try {
+          let pixelMap: image.PixelMap = await this.clipboardService.decodeImage(event.data);
+          this.latestImage = pixelMap;
+          this.latestImageRevision += 1;
+          this.latestKind = 'Image';
+          this.latestText = event.dataName.length > 0 ? event.dataName : 'image.png';
+          this.addHistory(this.latestText, 'received', 'Image', pixelMap);
+          await this.clipboardService.writeImage(pixelMap);
+          this.notifyReceivedContent('Image', this.latestText, pixelMap, event.data.length,
+            event.sourceLabel);
+        } catch (error) {
+          this.statusCode = 3;
+        }
+      } else if (event.kind === 'File') {
+        let fileName: string = event.dataName.length > 0 ? event.dataName : event.text;
+        let filePreview: image.PixelMap | null = null;
+        if (this.isImageFileName(fileName) && event.data.length > 0) {
+          try {
+            filePreview = await this.clipboardService.decodeImage(event.data);
+          } catch (error) {
+            filePreview = null;
+          }
+        }
+        this.latestKind = 'File';
+        this.latestText = fileName;
+        this.latestFileName = fileName;
+        this.latestFileData = event.data;
+        this.latestFilePath = '';
+        this.latestFileRevision += 1;
+        this.addHistory(fileName, 'received', 'File', null, event.data);
+        this.notifyReceivedContent('File', fileName, filePreview, event.data.length,
+          event.sourceLabel);
+      }
+      this.statusCode = 2;
+      this.animateLatestContent();
+    }
+    if (events.length > 0) {
+      await this.refreshMobileSyncDevices();
+    }
+  }
+
+  public async initializeRecommendedSpaceDeviceName(): Promise<void> {
+    if (this.spaceCreateDeviceName.trim().length > 0) {
+      return;
+    }
+    let recommendedName: string = deviceInfo.marketName.trim();
+    if (recommendedName.length === 0) {
+      let context: common.Context | undefined = this.getUIContext().getHostContext();
+      if (context !== undefined) {
+        try {
+          if (deviceInfo.deviceType === 'phone') {
+            recommendedName = await context.resourceManager.getStringByName('space_device_recommended_phone');
+          } else if (deviceInfo.deviceType === 'tablet') {
+            recommendedName = await context.resourceManager.getStringByName('space_device_recommended_tablet');
+          } else if (deviceInfo.deviceType === '2in1') {
+            recommendedName = await context.resourceManager.getStringByName('space_device_recommended_computer');
+          } else {
+            recommendedName = await context.resourceManager.getStringByName('space_device_recommended_default');
+          }
+        } catch (error) {
+          console.error('UniClipboard failed to load the recommended device name.');
+        }
+      }
+    }
+    if (recommendedName.length > 0) {
+      this.spaceCreateDeviceName = recommendedName;
+      this.spaceCreateDeviceNameRecommended = true;
+    }
+  }
+
+  public canJoinSpace(): boolean {
+    if (this.spaceNodeState !== 2 || this.spaceJoinBusy ||
+      this.spaceInvitationCode.trim().length === 0 || this.spacePassphrase.length === 0) {
+      return false;
+    }
+    if (this.spaceJoined) {
+      return this.spaceSwitchOpen;
+    }
+    return this.spaceJoinDeviceName.trim().length > 0;
+  }
+
+  public async joinCurrentSpace(): Promise<void> {
+    if (!this.canJoinSpace()) {
+      return;
+    }
+    this.spaceJoinBusy = true;
+    this.spaceJoinState = 0;
+    try {
+      let switching: boolean = this.spaceJoined;
+      let deviceName: string = this.spaceJoinDeviceName.trim();
+      let result: NativeJoinSpaceResult;
+      if (switching) {
+        result = await this.spaceNodeService.switchTo(
+          this.spaceInvitationCode.trim(), this.spacePassphrase);
+      } else {
+        result = await this.spaceNodeService.join(
+          this.spaceInvitationCode.trim(), this.spacePassphrase, deviceName);
+      }
+      this.setSpaceJoined(result.spaceId.length > 0);
+      this.spacePeerConnected = false;
+      if (!switching) {
+        this.spaceDeviceName = deviceName;
+      }
+      this.spaceCreatedId = result.spaceId;
+      this.spaceCreatePassphrase = this.spacePassphrase;
+      this.spaceInvitationCode = '';
+      this.spacePassphrase = '';
+      this.spaceJoinDeviceName = '';
+      this.spaceJoinState = 1;
+      await this.refreshSpaceDevices();
+      if (switching) {
+        this.spaceSwitchOpen = false;
+      }
+    } catch (error) {
+      let errorMessage: string = 'unavailable';
+      if (error instanceof Error) {
+        let joinError: Error = error as Error;
+        errorMessage = joinError.message;
+      }
+      console.error('UniClipboard join space failed: ' + errorMessage);
+      this.spaceJoinState = 2;
+    } finally {
+      this.spaceJoinBusy = false;
+    }
+  }
+
+  public canCreateSpace(): boolean {
+    return this.spaceNodeState === 2 && (!this.spaceJoined || this.spaceSwitchOpen) && !this.spaceCreateBusy &&
+      this.spaceCreateDeviceName.trim().length > 0 && this.spaceCreatePassphrase.length >= 8 &&
+      this.spaceCreatePassphrase === this.spaceCreatePassphraseConfirm;
+  }
+
+  public async confirmReplaceCurrentSpace(): Promise<boolean> {
+    try {
+      let result = await this.getUIContext().getPromptAction().showDialog({
+        title: $r('app.string.space_replace_confirm_title'),
+        message: $r('app.string.space_replace_confirm_message'),
+        buttons: [
+          { text: $r('app.string.cancel_action'), color: $r('app.color.text_secondary') },
+          { text: $r('app.string.space_replace_confirm_action'), color: $r('app.color.danger') }
+        ]
+      });
+      return result.index === 1;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  public async createCurrentSpace(): Promise<void> {
+    if (!this.canCreateSpace()) {
+      return;
+    }
+    let replacing: boolean = this.spaceJoined;
+    if (replacing) {
+      let confirmed: boolean = await this.confirmReplaceCurrentSpace();
+      if (!confirmed) {
+        return;
+      }
+    }
+    this.spaceCreateBusy = true;
+    this.spaceCreateState = 0;
+    try {
+      let deviceName: string = this.spaceCreateDeviceName.trim();
+      let result: NativeCreateSpaceResult;
+      if (replacing) {
+        result = await this.spaceNodeService.replace(this.spaceCreatePassphrase, deviceName);
+      } else {
+        result = await this.spaceNodeService.create(this.spaceCreatePassphrase, deviceName);
+      }
+      this.setSpaceJoined(result.spaceId.length > 0);
+      this.spacePeerConnected = false;
+      this.spaceCreatedId = result.spaceId;
+      this.spaceDeviceName = deviceName;
+      this.spaceDevices = [];
+      this.spaceCreatePassphraseConfirm = '';
+      this.spaceCreateState = 1;
+      await this.refreshSpaceDevices();
+      if (replacing) {
+        this.spaceSwitchOpen = false;
+      }
+    } catch (error) {
+      this.spaceCreateState = 2;
+    } finally {
+      this.spaceCreateBusy = false;
+    }
+  }
+
+  public async issueCurrentSpaceInvitation(): Promise<void> {
+    if (!this.canIssueSpaceInvitation()) {
+      return;
+    }
+    this.spaceInvitationBusy = true;
+    try {
+      let invitation: NativeSpaceInvitation = await this.spaceNodeService.issueInvitation();
+      this.spaceIssuedInvitationCode = invitation.code;
+      this.spaceInvitationExpiresAtMs = invitation.expiresAtMs;
+      this.spaceCreateState = 1;
+    } catch (error) {
+      this.spaceCreateState = 3;
+    } finally {
+      this.spaceInvitationBusy = false;
+    }
+  }
+
+  public canIssueSpaceInvitation(): boolean {
+    return this.spaceNodeState === 2 && this.spaceJoined && !this.spaceInvitationBusy &&
+      this.spaceCreatePassphrase.length >= 8;
+  }
+
+  public buildSpaceInvitationUri(): string {
+    if (this.spaceIssuedInvitationCode.length === 0 || this.spaceCreatePassphrase.length === 0) {
+      return '';
+    }
+    return 'uniclipboard://join-space?v=1&code=' + encodeURIComponent(this.spaceIssuedInvitationCode) +
+      '&pwd=' + encodeURIComponent(this.spaceCreatePassphrase);
+  }
+
+  public async shareCurrentSpaceInvitation(): Promise<void> {
+    let invitationUri: string = this.buildSpaceInvitationUri();
+    if (invitationUri.length === 0) {
+      return;
+    }
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context === undefined) {
+      this.showFeedbackToast($r('app.string.space_share_invitation_failed'));
+      return;
+    }
+    try {
+      let title: string = await context.resourceManager.getStringByName('space_invitation_title');
+      let codeLabel: string = await context.resourceManager.getStringByName('space_share_code_label');
+      let passphraseLabel: string =
+        await context.resourceManager.getStringByName('space_share_passphrase_label');
+      let linkLabel: string = await context.resourceManager.getStringByName('space_share_link_label');
+      let sharedContent: string = title + '\n' +
+        codeLabel + ': ' + this.spaceIssuedInvitationCode + '\n' +
+        passphraseLabel + ': ' + this.spaceCreatePassphrase + '\n' +
+        linkLabel + ': ' + invitationUri;
+      let record: systemShare.SharedRecord = {
+        utd: uniformTypeDescriptor.UniformDataType.PLAIN_TEXT,
+        content: sharedContent,
+        title: title
+      };
+      let sharedData: systemShare.SharedData = new systemShare.SharedData(record);
+      let shareController: systemShare.ShareController = new systemShare.ShareController(sharedData);
+      let options: systemShare.ShareControllerOptions = {
+        selectionMode: systemShare.SelectionMode.SINGLE
+      };
+      let abilityContext: common.UIAbilityContext = context as common.UIAbilityContext;
+      await shareController.show(abilityContext, options);
+    } catch (error) {
+      console.error('UniClipboard failed to share the space invitation.');
+      this.showFeedbackToast($r('app.string.space_share_invitation_failed'));
+    }
+  }
+
+  public isSpaceInvitationCode(value: string): boolean {
+    let code: string = value.trim().toUpperCase();
+    return code.length === 9 && code.charAt(4) === '-';
+  }
+
+  public importSpaceInvitation(value: string): boolean {
+    let payload: string = value.trim();
+    if (this.isSpaceInvitationCode(payload)) {
+      this.spaceInvitationCode = payload.toUpperCase();
+      this.spaceInvitationScanState = 1;
+      this.spaceJoinState = 0;
+      return true;
+    }
+    let prefix: string = 'uniclipboard://join-space?';
+    if (!payload.startsWith(prefix)) {
+      this.spaceInvitationScanState = 2;
+      return false;
+    }
+    let code: string = '';
+    let passphrase: string = '';
+    try {
+      let query: string = payload.substring(prefix.length);
+      let pairs: string[] = query.split('&');
+      for (let index: number = 0; index < pairs.length; index++) {
+        let pair: string = pairs[index];
+        let separator: number = pair.indexOf('=');
+        if (separator <= 0) {
+          continue;
+        }
+        let key: string = pair.substring(0, separator);
+        let decodedValue: string = decodeURIComponent(pair.substring(separator + 1));
+        if (key === 'code') {
+          code = decodedValue.toUpperCase();
+        } else if (key === 'pwd') {
+          passphrase = decodedValue;
+        }
+      }
+    } catch (error) {
+      this.spaceInvitationScanState = 2;
+      return false;
+    }
+    if (!this.isSpaceInvitationCode(code) || passphrase.length === 0) {
+      this.spaceInvitationScanState = 2;
+      return false;
+    }
+    this.spaceInvitationCode = code;
+    this.spacePassphrase = passphrase;
+    this.spaceInvitationScanState = 1;
+    this.spaceJoinState = 0;
+    return true;
+  }
+
+  public scanSpaceInvitation(): void {
+    let options: scanBarcode.ScanOptions = {
+      scanTypes: [scanCore.ScanType.QR_CODE],
+      enableMultiMode: false,
+      enableAlbum: true
+    };
+    this.spaceInvitationScanState = 0;
+    try {
+      scanBarcode.startScanForResult(this.getUIContext().getHostContext(), options,
+        (error: BusinessError, result: scanBarcode.ScanResult): void => {
+          if (error) {
+            this.spaceInvitationScanState = 2;
+            return;
+          }
+          this.importSpaceInvitation(result.originalValue);
+        });
+    } catch (error) {
+      this.spaceInvitationScanState = 2;
+    }
+  }
+
+  public invitationExpiryText(): string {
+    if (this.spaceInvitationExpiresAtMs <= 0) {
+      return '';
+    }
+    let expiry: Date = new Date(this.spaceInvitationExpiresAtMs);
+    let hours: string = expiry.getHours().toString().padStart(2, '0');
+    let minutes: string = expiry.getMinutes().toString().padStart(2, '0');
+    let seconds: string = expiry.getSeconds().toString().padStart(2, '0');
+    return hours + ':' + minutes + ':' + seconds;
+  }
+
+  public selectPage(index: number): void {
+    this.selectedTab = index;
+    this.largeSection = index === 0 ? 0 : (index === 1 ? 1 : 2);
+    let destinationName: string = index === 0 ? 'sync' : (index === 1 ? 'devices' : 'settings');
+    this.largeNavStack.clear(false);
+    this.largeNavStack.pushPath({ name: destinationName }, false);
+    if (index === 1) {
+      this.refreshMobileSyncDevices();
+      if (this.spaceJoined) {
+        this.refreshSpaceDevices();
+      }
+    }
+  }
+
+  public openConnectionSettings(): void {
+    this.largeSettingsSection = 1;
+    this.selectPage(2);
+  }
+
+  public openFeedback(): void {
+    this.showFeedbackSheet = true;
+  }
+
+  public openAbout(): void {
+    if (this.showAboutSheet) {
+      return;
+    }
+    this.showAboutSheet = true;
+  }
+
+  public openFeedbackFromAbout(): void {
+    this.showAboutSheet = false;
+    setTimeout((): void => {
+      this.showFeedbackSheet = true;
+    }, 220);
+  }
+
+  public showFeedbackToast(message: Resource): void {
+    try {
+      this.getUIContext().getPromptAction().showToast({ message: message });
+    } catch (error) {
+      console.error('UniClipboard failed to show feedback status.');
+    }
+  }
+
+  public async submitFeedback(): Promise<void> {
+    let feedback: string = this.feedbackText.trim();
+    if (feedback.length === 0) {
+      this.showFeedbackToast($r('app.string.feedback_empty_hint'));
+      return;
+    }
+
+    try {
+      await this.clipboardService.writeText(feedback);
+      this.showFeedbackToast($r('app.string.feedback_copied'));
+    } catch (error) {
+      this.showFeedbackToast($r('app.string.feedback_copy_failed'));
+    }
+
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context === undefined) {
+      this.showFeedbackToast($r('app.string.feedback_email_open_failed'));
+      return;
+    }
+
+    let subject: string = 'UniClipboard Feedback';
+    try {
+      subject = await context.resourceManager.getStringByName('feedback_email_subject');
+    } catch (error) {
+      console.error('UniClipboard failed to load the feedback email subject.');
+    }
+    let abilityContext: common.UIAbilityContext = context as common.UIAbilityContext;
+    let emailUri: string = 'mailto:' + FEEDBACK_EMAIL + '?subject=' + encodeURIComponent(subject) +
+      '&body=' + encodeURIComponent(feedback);
+    abilityContext.startAbility({
+      action: 'ohos.want.action.sendToData',
+      uri: emailUri
+    }).then((): void => {
+      this.showFeedbackSheet = false;
+    }).catch((error: BusinessError): void => {
+      console.error('UniClipboard failed to open the email app: ' + error.code.toString());
+      this.showFeedbackToast($r('app.string.feedback_email_open_failed'));
+    });
+  }
+
+  public selectLargeSection(index: number): void {
+    this.largeSection = index;
+    this.selectedTab = index;
+    let destinationName: string = index === 0 ? 'desktopClipboard' :
+      index === 1 ? 'desktopDevices' : 'desktopSettings';
+    this.largeNavStack.clear(false);
+    this.largeNavStack.pushPath({ name: destinationName }, false);
+    if (index === 1) {
+      this.refreshMobileSyncDevices();
+      if (this.spaceJoined) {
+        this.refreshSpaceDevices();
+      }
+    }
+  }
+
+  public animateLatestContent(): void {
+    this.getUIContext().animateTo({
+      duration: 300,
+      curve: Curve.EaseOut,
+      iterations: 2,
+      playMode: PlayMode.Alternate,
+      onFinish: (): void => {
+        this.latestContentPulse = 1;
+      }
+    }, (): void => {
+      this.latestContentPulse = 1.025;
+    });
+  }
+
+  public animateHistoryUpdate(): void {
+    this.getUIContext().animateTo({
+      duration: 320,
+      curve: Curve.EaseOut,
+      iterations: 2,
+      playMode: PlayMode.Alternate,
+      onFinish: (): void => {
+        this.historyPulse = 1;
+      }
+    }, (): void => {
+      this.historyPulse = 1.018;
+    });
+  }
+
+  public async refreshSpaceDevices(): Promise<void> {
+    if (!this.spaceJoined || this.spaceNodeState !== 2 || this.spaceDeviceRefreshBusy) {
+      return;
+    }
+    this.spaceDeviceRefreshBusy = true;
+    try {
+      let devices: NativeSpaceDevice[] = await this.spaceNodeService.devices();
+      this.spaceDevices = devices;
+      this.spacePeerConnected = devices.some((device: NativeSpaceDevice): boolean => {
+        return !device.isLocal && device.online;
+      });
+    } catch (error) {
+      console.error('UniClipboard refresh space devices failed');
+    } finally {
+      this.spaceDeviceRefreshBusy = false;
+    }
+  }
+
+  public async connectSpaceDevice(device: NativeSpaceDevice): Promise<void> {
+    if (device.isLocal || this.spaceConnectBusy || this.desktopDeviceMutationBusy ||
+      this.spaceNodeState !== 2 || !this.spaceJoined) {
+      return;
+    }
+    this.spaceConnectBusy = true;
+    this.spaceConnectingDeviceId = device.deviceId;
+    this.spaceConnectState = 1;
+    try {
+      let online: boolean = await this.spaceNodeService.connect(device.deviceId);
+      await this.refreshSpaceDevices();
+      this.spaceConnectState = online ? 2 : 3;
+      if (online) {
+        this.spacePeerConnected = true;
+        this.statusCode = 2;
+      }
+    } catch (error) {
+      this.spaceConnectState = 3;
+      this.statusCode = 3;
+    } finally {
+      this.spaceConnectingDeviceId = '';
+      this.spaceConnectBusy = false;
+    }
+  }
+
+  public async connectAllSpaceDevices(): Promise<void> {
+    if (this.spaceConnectBusy || this.desktopDeviceMutationBusy ||
+      this.spaceNodeState !== 2 || !this.spaceJoined) {
+      return;
+    }
+    this.spaceConnectBusy = true;
+    this.spaceConnectingDeviceId = '*';
+    this.spaceConnectState = 1;
+    let anyOnline: boolean = false;
+    try {
+      await this.refreshSpaceDevices();
+      for (let index: number = 0; index < this.spaceDevices.length; index++) {
+        let device: NativeSpaceDevice = this.spaceDevices[index];
+        if (!device.isLocal) {
+          let online: boolean = await this.spaceNodeService.connect(device.deviceId);
+          if (online) {
+            anyOnline = true;
+          }
+        }
+      }
+      await this.refreshSpaceDevices();
+      this.spacePeerConnected = anyOnline || this.spacePeerConnected;
+      this.spaceConnectState = this.spacePeerConnected ? 2 : 3;
+      this.statusCode = this.spacePeerConnected ? 2 : 3;
+    } catch (error) {
+      this.spaceConnectState = 3;
+      this.statusCode = 3;
+    } finally {
+      this.spaceConnectingDeviceId = '';
+      this.spaceConnectBusy = false;
+    }
+  }
+
+  public async refreshDesktopMessages(): Promise<void> {
+    if (this.desktopRefreshBusy) {
+      return;
+    }
+    this.desktopRefreshBusy = true;
+    try {
+      if (this.spaceJoined) {
+        this.spaceNodeService.wakeConnections();
+        await this.connectAllSpaceDevices();
+        await this.consumeSpaceTextEvents();
+      }
+      if (this.hasConfig()) {
+        await this.loadServerHistory(true);
+      } else if (!this.spaceJoined) {
+        this.statusCode = 3;
+      }
+    } finally {
+      this.desktopRefreshBusy = false;
+    }
+  }
+
+  public desktopAllFiltersClear(): boolean {
+    return !this.desktopStarredOnly && this.desktopTypeFilter === 0 && this.desktopTagFilter === 0 &&
+      this.desktopSourceFilter === 0 && this.desktopTimeFilter === 0 && this.desktopExtensionFilter.length === 0;
+  }
+
+  public desktopSearchMatches(text: string): boolean {
+    let query: string = this.historySearchText.trim().toLowerCase();
+    return query.length === 0 || text.toLowerCase().indexOf(query) >= 0;
+  }
+
+  public scheduleDesktopHistorySearch(value: string): void {
+    this.historySearchText = value;
+    if (this.historySearchTimerId >= 0) {
+      clearTimeout(this.historySearchTimerId);
+      this.historySearchTimerId = -1;
+    }
+    if (!this.hasConfig()) {
+      return;
+    }
+    this.historySearchTimerId = setTimeout((): void => {
+      this.historySearchTimerId = -1;
+      this.loadServerHistory(true);
+    }, 300);
+  }
+
+  public submitDesktopHistorySearch(): void {
+    if (this.historySearchTimerId >= 0) {
+      clearTimeout(this.historySearchTimerId);
+      this.historySearchTimerId = -1;
+    }
+    if (this.hasConfig()) {
+      this.loadServerHistory(true);
+    }
+  }
+
+  public desktopFilterSelected(group: number, value: number): boolean {
+    if (group === 0) {
+      return value === 0 ? this.desktopAllFiltersClear() : this.desktopStarredOnly;
+    }
+    if (group === 1) {
+      return this.desktopTypeFilter === value;
+    }
+    if (group === 2) {
+      return this.desktopTagFilter === value;
+    }
+    if (group === 3) {
+      return this.desktopSourceFilter === value;
+    }
+    return this.desktopTimeFilter === value;
+  }
+
+  public applyDesktopFilter(group: number, value: number): void {
+    let previousStarredOnly: boolean = this.desktopStarredOnly;
+    if (group === 0 && value === 0) {
+      this.desktopStarredOnly = false;
+      this.desktopTypeFilter = 0;
+      this.desktopTagFilter = 0;
+      this.desktopSourceFilter = 0;
+      this.desktopTimeFilter = 0;
+      this.desktopExtensionFilter = '';
+    } else if (group === 0) {
+      this.desktopStarredOnly = !this.desktopStarredOnly;
+    } else if (group === 1) {
+      this.desktopTypeFilter = this.desktopTypeFilter === value ? 0 : value;
+    } else if (group === 2) {
+      this.desktopTagFilter = this.desktopTagFilter === value ? 0 : value;
+    } else if (group === 3) {
+      this.desktopSourceFilter = value;
+    } else {
+      this.desktopTimeFilter = value;
+    }
+    let shouldReload: boolean = previousStarredOnly !== this.desktopStarredOnly;
+    this.historyStarredOnly = this.desktopStarredOnly;
+    if (shouldReload && this.hasConfig()) {
+      this.loadServerHistory(true);
+    }
+  }
+
+  public applyDesktopExtensionFilter(extension: string): void {
+    this.desktopExtensionFilter = this.desktopExtensionFilter === extension ? '' : extension;
+  }
+
+  public desktopTextLooksRich(text: string): boolean {
+    let lowerText: string = text.toLowerCase();
+    return lowerText.indexOf('<p') >= 0 || lowerText.indexOf('<div') >= 0 ||
+      lowerText.indexOf('<span') >= 0 || lowerText.indexOf('<strong') >= 0 ||
+      lowerText.indexOf('<html') >= 0;
+  }
+
+  public desktopLinkHostIsValid(host: string): boolean {
+    if (host.length === 0 || host.endsWith('.')) {
+      return false;
+    }
+    if (host === 'localhost') {
+      return true;
+    }
+    let portIndex: number = host.lastIndexOf(':');
+    let hostWithoutPort: string = portIndex > 0 ? host.substring(0, portIndex) : host;
+    let dotIndex: number = hostWithoutPort.indexOf('.');
+    return dotIndex > 0 && dotIndex < hostWithoutPort.length - 1;
+  }
+
+  public desktopTextLooksLikeLink(text: string): boolean {
+    let candidate: string = text.trim().toLowerCase();
+    if (candidate.length === 0 || candidate.indexOf(' ') >= 0 || candidate.indexOf('\n') >= 0 ||
+      candidate.indexOf('\r') >= 0 || candidate.indexOf('\t') >= 0) {
+      return false;
+    }
+    if (candidate.indexOf('mailto:') === 0) {
+      let email: string = candidate.substring(7);
+      let atIndex: number = email.indexOf('@');
+      let dotIndex: number = email.lastIndexOf('.');
+      return atIndex > 0 && dotIndex > atIndex + 1 && dotIndex < email.length - 1;
+    }
+    let hostStart: number = -1;
+    if (candidate.indexOf('https://') === 0) {
+      hostStart = 8;
+    } else if (candidate.indexOf('http://') === 0) {
+      hostStart = 7;
+    } else if (candidate.indexOf('ftp://') === 0) {
+      hostStart = 6;
+    } else if (candidate.indexOf('www.') === 0) {
+      hostStart = 0;
+    }
+    if (hostStart < 0 || hostStart >= candidate.length) {
+      return false;
+    }
+    let hostEnd: number = candidate.length;
+    let pathIndex: number = candidate.indexOf('/', hostStart);
+    if (pathIndex >= 0 && pathIndex < hostEnd) {
+      hostEnd = pathIndex;
+    }
+    let queryIndex: number = candidate.indexOf('?', hostStart);
+    if (queryIndex >= 0 && queryIndex < hostEnd) {
+      hostEnd = queryIndex;
+    }
+    let fragmentIndex: number = candidate.indexOf('#', hostStart);
+    if (fragmentIndex >= 0 && fragmentIndex < hostEnd) {
+      hostEnd = fragmentIndex;
+    }
+    return this.desktopLinkHostIsValid(candidate.substring(hostStart, hostEnd));
+  }
+
+  public desktopTextLooksLikeCode(text: string): boolean {
+    let sourceText: string = text.trim();
+    if (sourceText.length === 0 || this.desktopTextLooksLikeLink(sourceText)) {
+      return false;
+    }
+    let normalizedText: string = sourceText.toLowerCase();
+    let score: number = 0;
+    if (normalizedText.indexOf('import ') === 0 || normalizedText.indexOf('export ') === 0 ||
+      normalizedText.indexOf('package ') === 0 || normalizedText.indexOf('#include') === 0 ||
+      normalizedText.indexOf('using ') === 0 || normalizedText.indexOf('namespace ') === 0 ||
+      normalizedText.indexOf('fn ') === 0 || normalizedText.indexOf('func ') === 0) {
+      score += 2;
+    }
+    if (normalizedText.indexOf('function ') >= 0 || normalizedText.indexOf('class ') >= 0 ||
+      normalizedText.indexOf('interface ') >= 0 || normalizedText.indexOf('struct ') >= 0 ||
+      normalizedText.indexOf('enum ') >= 0 || normalizedText.indexOf('const ') >= 0 ||
+      normalizedText.indexOf('let ') >= 0 || normalizedText.indexOf('public ') >= 0 ||
+      normalizedText.indexOf('private ') >= 0) {
+      score += 2;
+    }
+    if (sourceText.indexOf('=>') >= 0 || sourceText.indexOf('===') >= 0 ||
+      sourceText.indexOf('!==') >= 0 || sourceText.indexOf('::') >= 0 ||
+      sourceText.indexOf('->') >= 0 || sourceText.indexOf(':=') >= 0) {
+      score += 2;
+    }
+    if (sourceText.indexOf('\n') >= 0 || sourceText.indexOf('\r') >= 0) {
+      score += 1;
+    }
+    if (sourceText.indexOf('{') >= 0 && sourceText.indexOf('}') >= 0) {
+      score += 1;
+    }
+    if (sourceText.indexOf('(') >= 0 && sourceText.indexOf(')') >= 0) {
+      score += 1;
+    }
+    if (sourceText.indexOf(';') >= 0) {
+      score += 1;
+    }
+    if (sourceText.indexOf('```') >= 0 || normalizedText.indexOf('#!/') === 0) {
+      score += 3;
+    }
+    if ((sourceText.indexOf('{') === 0 || sourceText.indexOf('[') === 0) &&
+      sourceText.indexOf('\":') >= 0) {
+      score += 3;
+    }
+    if ((normalizedText.indexOf('select ') === 0 && normalizedText.indexOf(' from ') > 0) ||
+      normalizedText.indexOf('insert into ') === 0 || normalizedText.indexOf('create table ') === 0) {
+      score += 3;
+    }
+    return score >= 3;
+  }
+
+  public desktopContentExtension(text: string): string {
+    let normalizedText: string = text.trim().toLowerCase();
+    let queryIndex: number = normalizedText.indexOf('?');
+    if (queryIndex >= 0) {
+      normalizedText = normalizedText.substring(0, queryIndex);
+    }
+    let fragmentIndex: number = normalizedText.indexOf('#');
+    if (fragmentIndex >= 0) {
+      normalizedText = normalizedText.substring(0, fragmentIndex);
+    }
+    let slashIndex: number = normalizedText.lastIndexOf('/');
+    let backslashIndex: number = normalizedText.lastIndexOf('\\');
+    let separatorIndex: number = slashIndex > backslashIndex ? slashIndex : backslashIndex;
+    let fileName: string = normalizedText.substring(separatorIndex + 1);
+    let dotIndex: number = fileName.lastIndexOf('.');
+    if (dotIndex <= 0 || dotIndex >= fileName.length - 1) {
+      return '';
+    }
+    let extension: string = fileName.substring(dotIndex + 1);
+    return extension.length <= 10 ? extension : '';
+  }
+
+  public desktopExtensionIsImage(extension: string): boolean {
+    return extension === 'jpg' || extension === 'jpeg' || extension === 'png' || extension === 'gif' ||
+      extension === 'webp' || extension === 'bmp' || extension === 'svg' || extension === 'heic';
+  }
+
+  public desktopExtensionIsCode(extension: string): boolean {
+    return extension === 'ts' || extension === 'ets' || extension === 'js' || extension === 'json' ||
+      extension === 'rs' || extension === 'go' || extension === 'py' || extension === 'java' ||
+      extension === 'c' || extension === 'h' || extension === 'cpp' || extension === 'css' ||
+      extension === 'html' || extension === 'xml';
+  }
+
+  public desktopTypeMatchesFilter(kind: string, text: string): boolean {
+    if (this.desktopTypeFilter === 1) {
+      return kind === 'Text' && !this.desktopTextLooksRich(text);
+    }
+    if (this.desktopTypeFilter === 2) {
+      return kind === 'RichText' || kind === 'Html' ||
+        (kind === 'Text' && this.desktopTextLooksRich(text));
+    }
+    if (this.desktopTypeFilter === 3) {
+      return kind === 'Image';
+    }
+    if (this.desktopTypeFilter === 4) {
+      return kind === 'File' || kind === 'Folder';
+    }
+    return true;
+  }
+
+  public desktopTagMatchesFilter(kind: string, text: string): boolean {
+    if (this.desktopTagFilter === 0) {
+      return true;
+    }
+    let normalizedText: string = text.trim().toLowerCase();
+    let extension: string = this.desktopContentExtension(text);
+    if (this.desktopTagFilter === 1) {
+      return this.desktopTextLooksLikeLink(text);
+    }
+    if (this.desktopTagFilter === 2) {
+      return this.desktopExtensionIsCode(extension) || this.desktopTextLooksLikeCode(text);
+    }
+    if (this.desktopTagFilter === 3) {
+      return kind === 'Image' || this.desktopExtensionIsImage(extension);
+    }
+    return kind === 'Folder' || normalizedText.endsWith('/') || normalizedText.endsWith('\\');
+  }
+
+  public desktopSourceMatchesFilter(serverItem: boolean): boolean {
+    if (this.desktopSourceFilter === 1) {
+      return serverItem;
+    }
+    if (this.desktopSourceFilter === 2) {
+      return !serverItem;
+    }
+    return true;
+  }
+
+  public desktopExtensionMatchesFilter(text: string): boolean {
+    if (this.desktopExtensionFilter.length === 0) {
+      return true;
+    }
+    return this.desktopContentExtension(text) === this.desktopExtensionFilter;
+  }
+
+  public desktopTimeMatchesFilter(timestampMs: number): boolean {
+    if (this.desktopTimeFilter === 0) {
+      return true;
+    }
+    if (timestampMs <= 0) {
+      return false;
+    }
+    let nowMs: number = Date.now();
+    let nowDate: Date = new Date(nowMs);
+    let todayStartMs: number = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate()).getTime();
+    let oneDayMs: number = 24 * 60 * 60 * 1000;
+    if (this.desktopTimeFilter === 1) {
+      return timestampMs >= todayStartMs && timestampMs <= nowMs;
+    }
+    if (this.desktopTimeFilter === 2) {
+      return timestampMs >= todayStartMs - oneDayMs && timestampMs < todayStartMs;
+    }
+    if (this.desktopTimeFilter === 3) {
+      return timestampMs >= nowMs - 7 * oneDayMs && timestampMs <= nowMs;
+    }
+    if (this.desktopTimeFilter === 4) {
+      return timestampMs >= nowMs - 30 * oneDayMs && timestampMs <= nowMs;
+    }
+    if (this.desktopTimeFilter === 5) {
+      let weekDay: number = nowDate.getDay();
+      let daysFromMonday: number = weekDay === 0 ? 6 : weekDay - 1;
+      return timestampMs >= todayStartMs - daysFromMonday * oneDayMs && timestampMs <= nowMs;
+    }
+    let monthStartMs: number = new Date(nowDate.getFullYear(), nowDate.getMonth(), 1).getTime();
+    return timestampMs >= monthStartMs && timestampMs <= nowMs;
+  }
+
+  public desktopFilteredServerHistory(): ServerHistoryItem[] {
+    let items: ServerHistoryItem[] = [];
+    for (let index: number = 0; index < this.serverHistory.length; index++) {
+      let item: ServerHistoryItem = this.serverHistory[index];
+      let starredMatches: boolean = !this.desktopStarredOnly || item.starred;
+      if (starredMatches && this.desktopSearchMatches(item.text) && this.desktopSourceMatchesFilter(true) &&
+        this.desktopTypeMatchesFilter(item.kind, item.text) && this.desktopTagMatchesFilter(item.kind, item.text) &&
+        this.desktopTimeMatchesFilter(item.timestampMs) && this.desktopExtensionMatchesFilter(item.text)) {
+        items.push(item);
+      }
+    }
+    return items;
+  }
+
+  public desktopFilteredSessionHistory(): ClipboardHistoryItem[] {
+    let items: ClipboardHistoryItem[] = [];
+    for (let index: number = 0; index < this.history.length; index++) {
+      let item: ClipboardHistoryItem = this.history[index];
+      let starredMatches: boolean = !this.desktopStarredOnly || item.starred;
+      if (starredMatches && this.desktopSearchMatches(item.text) && this.desktopSourceMatchesFilter(false) &&
+        this.desktopTypeMatchesFilter(item.kind, item.text) && this.desktopTagMatchesFilter(item.kind, item.text) &&
+        this.desktopTimeMatchesFilter(item.timestampMs) && this.desktopExtensionMatchesFilter(item.text)) {
+        items.push(item);
+      }
+    }
+    return items;
+  }
+
+  public async selectDesktopServerItem(item: ServerHistoryItem): Promise<void> {
+    this.desktopSelectedId = item.id;
+    this.desktopSelectedText = item.text;
+    this.desktopSelectedMeta = item.kind + ' · ' + item.time;
+    this.desktopSelectedDirection = '';
+    this.desktopGestureShareHintDismissed = false;
+    this.desktopSelectedImage = null;
+    this.desktopSelectedImageRevision += 1;
+    this.desktopSelectedFileData = null;
+    this.desktopSelectedFilePath = '';
+    this.desktopFilePreviewState = 0;
+    this.resetDesktopVideoAspectRatio();
+    this.releaseDesktopAudio();
+    if (!item.hasData || (item.kind !== 'File' && item.kind !== 'Image')) {
+      return;
+    }
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context === undefined) {
+      this.desktopFilePreviewState = 2;
+      return;
+    }
+    if (item.kind === 'File') {
+      let cachedPath: string = this.historyStorageService.findServerFile(context, item.id, item.text);
+      if (cachedPath.length > 0) {
+        this.desktopSelectedFilePath = cachedPath;
+        return;
+      }
+    }
+    this.desktopFilePreviewState = 1;
+    try {
+      let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
+      let data: Uint8Array = await client.getHistoryPayload(item);
+      if (this.desktopSelectedId !== item.id || data.length === 0) {
+        return;
+      }
+      if (item.kind === 'Image') {
+        this.desktopSelectedImage = await this.clipboardService.decodeImage(data);
+        this.desktopSelectedImageRevision += 1;
+      } else {
+        let filePath: string = this.historyStorageService.storeServerFile(context, item.id, item.text, data);
+        if (filePath.length === 0) {
+          throw new Error('failed to persist server history file');
+        }
+        this.desktopSelectedFilePath = filePath;
+      }
+      this.desktopFilePreviewState = 0;
+    } catch (error) {
+      if (this.desktopSelectedId === item.id) {
+        this.desktopFilePreviewState = 2;
+      }
+    }
+  }
+
+  public selectDesktopSessionItem(item: ClipboardHistoryItem): void {
+    this.desktopSelectedId = item.id;
+    this.desktopSelectedText = item.text;
+    this.desktopSelectedMeta = item.time;
+    this.desktopSelectedDirection = item.direction;
+    this.desktopGestureShareHintDismissed = false;
+    this.desktopSelectedImage = item.imagePreview;
+    this.desktopSelectedImageRevision += 1;
+    this.desktopSelectedFileData = item.fileData;
+    this.desktopSelectedFilePath = item.filePath;
+    this.desktopFilePreviewState = 0;
+    this.resetDesktopVideoAspectRatio();
+    this.releaseDesktopAudio();
+  }
+
+  public desktopDetailText(): string {
+    if (this.desktopSelectedText.length > 0) {
+      return this.desktopSelectedText;
+    }
+    return this.latestText;
+  }
+
+  public desktopShowsLatestImage(): boolean {
+    return this.desktopDisplayImage() !== null;
+  }
+
+  public desktopDisplayImage(): image.PixelMap | null {
+    if (this.desktopSelectedId.length > 0) {
+      return this.desktopSelectedImage;
+    }
+    return this.latestKind === 'Image' ? this.latestImage : null;
+  }
+
+  public desktopShowsFile(): boolean {
+    if (this.desktopSelectedId.length > 0) {
+      return this.desktopSelectedFileData !== null || this.desktopSelectedFilePath.length > 0;
+    }
+    return this.latestKind === 'File' &&
+      (this.latestFileData !== null || this.latestFilePath.length > 0);
+  }
+
+  public desktopFileName(): string {
+    if (this.desktopSelectedId.length > 0) {
+      return this.desktopSelectedText;
+    }
+    return this.latestFileName.length > 0 ? this.latestFileName : this.latestText;
+  }
+
+  public desktopFileSourcePath(): string {
+    if (this.desktopSelectedId.length > 0) {
+      return this.desktopSelectedFilePath;
+    }
+    return this.latestFilePath;
+  }
+
+  public desktopFilePreviewUri(): string {
+    let sourcePath: string = this.desktopFileSourcePath();
+    if (sourcePath.length === 0) {
+      return '';
+    }
+    if (!sourcePath.startsWith('/')) {
+      return sourcePath;
+    }
+    try {
+      return fileUri.getUriFromPath(sourcePath);
+    } catch (error) {
+      return '';
+    }
+  }
+
+  public async registerDesktopGestureShare(): Promise<void> {
+    if (this.desktopGestureShareWindowId >= 0 || this.desktopGestureShareRegistering ||
+      !this.desktopGestureSharePageVisible) {
+      return;
+    }
+    if (!canIUse('SystemCapability.Collaboration.HarmonyShare')) {
+      this.desktopGestureShareState = 5;
+      return;
+    }
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context === undefined) {
+      this.desktopGestureShareState = 4;
+      return;
+    }
+    this.desktopGestureShareRegistering = true;
+    try {
+      let mainWindow: window.Window = await window.getLastWindow(context);
+      if (!this.desktopGestureSharePageVisible) {
+        return;
+      }
+      let windowId: number = mainWindow.getWindowProperties().id;
+      let capability: harmonyShare.SendCapabilityRegistry = {
+        windowId: windowId,
+        sendOnly: true
+      };
+      harmonyShare.on('gesturesShare', capability, (target: harmonyShare.SharableTarget): void => {
+        this.shareDesktopContentByGesture(target);
+      });
+      this.desktopGestureShareWindowId = windowId;
+      this.desktopGestureShareState = 1;
+    } catch (error) {
+      console.error('UniClipboard failed to register gesturesShare.');
+      this.desktopGestureShareState = 4;
+    } finally {
+      this.desktopGestureShareRegistering = false;
+    }
+  }
+
+  public unregisterDesktopGestureShare(): void {
+    let windowId: number = this.desktopGestureShareWindowId;
+    this.desktopGestureShareWindowId = -1;
+    if (this.desktopGestureShareResetTimerId >= 0) {
+      clearTimeout(this.desktopGestureShareResetTimerId);
+      this.desktopGestureShareResetTimerId = -1;
+    }
+    if (windowId < 0 || !canIUse('SystemCapability.Collaboration.HarmonyShare')) {
+      return;
+    }
+    let capability: harmonyShare.SendCapabilityRegistry = {
+      windowId: windowId,
+      sendOnly: true
+    };
+    try {
+      harmonyShare.off('gesturesShare', capability);
+    } catch (error) {
+      console.error('UniClipboard failed to unregister gesturesShare.');
+    }
+  }
+
+  public resetDesktopGestureShareStateLater(): void {
+    if (this.desktopGestureShareResetTimerId >= 0) {
+      clearTimeout(this.desktopGestureShareResetTimerId);
+    }
+    this.desktopGestureShareResetTimerId = setTimeout((): void => {
+      this.desktopGestureShareResetTimerId = -1;
+      if (this.desktopGestureShareWindowId >= 0) {
+        this.desktopGestureShareState = 1;
+      }
+    }, 2200);
+  }
+
+  public desktopHasGestureShareContent(): boolean {
+    return this.desktopShowsFile() || this.desktopShowsLatestImage() || this.desktopDetailText().trim().length > 0;
+  }
+
+  public desktopGestureShareContentKind(): number {
+    if (this.desktopShowsFile()) {
+      return this.desktopGestureShareFileContentKind();
+    }
+    if (this.desktopShowsLatestImage()) {
+      return 2;
+    }
+    if (this.desktopDetailText().trim().length > 0) {
+      return 3;
+    }
+    return 0;
+  }
+
+  public desktopGestureShareFileUtd(): string {
+    let extension: string = this.desktopFileExtension();
+    if (extension.length === 0) {
+      return uniformTypeDescriptor.UniformDataType.FILE;
+    }
+    try {
+      let utdType: string = uniformTypeDescriptor.getUniformDataTypeByFilenameExtension('.' + extension);
+      if (utdType.length === 0 || utdType.startsWith('flex.')) {
+        return uniformTypeDescriptor.UniformDataType.FILE;
+      }
+      return utdType;
+    } catch (error) {
+      return uniformTypeDescriptor.UniformDataType.FILE;
+    }
+  }
+
+  public desktopGestureShareFileContentKind(): number {
+    let utdType: string = this.desktopGestureShareFileUtd();
+    if (utdType === 'com.adobe.pdf') {
+      return 7;
+    }
+    if (utdType === 'com.microsoft.word.doc' ||
+      utdType === 'org.openxmlformats.wordprocessingml.document') {
+      return 9;
+    }
+    if (utdType === 'com.microsoft.excel.xls' ||
+      utdType === 'org.openxmlformats.spreadsheetml.sheet') {
+      return 10;
+    }
+    if (utdType === 'com.microsoft.powerpoint.ppt' ||
+      utdType === 'org.openxmlformats.presentationml.presentation') {
+      return 11;
+    }
+    if (utdType === uniformTypeDescriptor.UniformDataType.FILE) {
+      return 1;
+    }
+    try {
+      let typeDescriptor: uniformTypeDescriptor.TypeDescriptor =
+        uniformTypeDescriptor.getTypeDescriptor(utdType);
+      if (typeDescriptor.belongsTo(uniformTypeDescriptor.UniformDataType.IMAGE)) {
+        return 4;
+      }
+      if (typeDescriptor.belongsTo(uniformTypeDescriptor.UniformDataType.VIDEO)) {
+        return 5;
+      }
+      if (typeDescriptor.belongsTo(uniformTypeDescriptor.UniformDataType.AUDIO)) {
+        return 6;
+      }
+      if (typeDescriptor.belongsTo('general.archive')) {
+        return 8;
+      }
+      if (typeDescriptor.belongsTo('general.text') || typeDescriptor.belongsTo('general.composite-object')) {
+        return 12;
+      }
+    } catch (error) {
+      return 1;
+    }
+    return 1;
+  }
+
+  public async createDesktopGestureImageUri(): Promise<string> {
+    let pixelMap: image.PixelMap | null = this.desktopDisplayImage();
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (pixelMap === null || context === undefined) {
+      return '';
+    }
+    let targetPath: string = context.cacheDir + '/uniclipboard-gesture-share.png';
+    let targetFile: fileIo.File | null = null;
+    let packer: image.ImagePacker | null = null;
+    try {
+      targetFile = fileIo.openSync(targetPath,
+        fileIo.OpenMode.CREATE | fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.TRUNC);
+      packer = image.createImagePacker();
+      let options: image.PackingOption = {
+        format: 'image/png',
+        quality: 100
+      };
+      await packer.packToFile(pixelMap, targetFile.fd, options);
+      return fileUri.getUriFromPath(targetPath);
+    } catch (error) {
+      console.error('UniClipboard failed to prepare the gesture share image.');
+      return '';
+    } finally {
+      if (packer !== null) {
+        try {
+          await packer.release();
+        } catch (error) {
+        }
+      }
+      if (targetFile !== null) {
+        try {
+          fileIo.closeSync(targetFile.fd);
+        } catch (error) {
+        }
+      }
+    }
+  }
+
+  public async createDesktopGestureShareRecord(): Promise<systemShare.SharedRecord | null> {
+    if (this.desktopShowsFile()) {
+      let fileUriValue: string = this.desktopFilePreviewUri();
+      let fileName: string = this.desktopFileName();
+      if (fileUriValue.length === 0 || fileName.length === 0) {
+        return null;
+      }
+      let utdType: string = this.desktopGestureShareFileUtd();
+      let fileRecord: systemShare.SharedRecord = {
+        utd: utdType,
+        uri: fileUriValue,
+        title: fileName,
+        description: fileName
+      };
+      return fileRecord;
+    }
+    if (this.desktopShowsLatestImage()) {
+      let imageUri: string = await this.createDesktopGestureImageUri();
+      if (imageUri.length === 0) {
+        return null;
+      }
+      let imageRecord: systemShare.SharedRecord = {
+        utd: uniformTypeDescriptor.UniformDataType.PNG,
+        uri: imageUri,
+        thumbnailUri: imageUri
+      };
+      return imageRecord;
+    }
+    let textContent: string = this.desktopDetailText();
+    if (textContent.trim().length > 0) {
+      let textRecord: systemShare.SharedRecord = {
+        utd: uniformTypeDescriptor.UniformDataType.PLAIN_TEXT,
+        content: textContent,
+        title: textContent.length > 40 ? textContent.substring(0, 40) : textContent
+      };
+      return textRecord;
+    }
+    return null;
+  }
+
+  public async shareDesktopContentByGesture(target: harmonyShare.SharableTarget): Promise<void> {
+    if (!this.desktopHasGestureShareContent() || this.desktopGestureShareState === 2) {
+      try {
+        await target.reject(harmonyShare.SharableErrorCode.NO_CONTENT_ERROR);
+      } catch (error) {
+      }
+      return;
+    }
+    this.desktopGestureShareState = 2;
+    try {
+      let record: systemShare.SharedRecord | null = await this.createDesktopGestureShareRecord();
+      if (record === null) {
+        this.desktopGestureShareState = 4;
+        await target.reject(harmonyShare.SharableErrorCode.NO_CONTENT_ERROR);
+        this.resetDesktopGestureShareStateLater();
+        return;
+      }
+      let shareData: systemShare.SharedData = new systemShare.SharedData(record);
+      await target.share(shareData);
+      this.desktopGestureShareState = 3;
+    } catch (error) {
+      console.error('UniClipboard gesturesShare failed.');
+      this.desktopGestureShareState = 4;
+    }
+    this.resetDesktopGestureShareStateLater();
+  }
+
+  public desktopFileExtension(): string {
+    let fileName: string = this.desktopFileName();
+    let dotIndex: number = fileName.lastIndexOf('.');
+    if (dotIndex < 0 || dotIndex >= fileName.length - 1) {
+      return '';
+    }
+    return fileName.substring(dotIndex + 1).toLowerCase();
+  }
+
+  public desktopFileMimeType(): string {
+    let extension: string = this.desktopFileExtension();
+    switch (extension) {
+      case 'txt':
+        return 'text/plain';
+      case 'cpp':
+        return 'text/x-c++src';
+      case 'c':
+        return 'text/x-csrc';
+      case 'h':
+        return 'text/x-chdr';
+      case 'java':
+        return 'text/x-java';
+      case 'xhtml':
+        return 'application/xhtml+xml';
+      case 'xml':
+        return 'text/xml';
+      case 'html':
+      case 'htm':
+        return 'text/html';
+      case 'jpg':
+      case 'jpeg':
+        return 'image/jpeg';
+      case 'png':
+        return 'image/png';
+      case 'gif':
+        return 'image/gif';
+      case 'webp':
+        return 'image/webp';
+      case 'bmp':
+        return 'image/bmp';
+      case 'svg':
+        return 'image/svg+xml';
+      case 'm4a':
+        return 'audio/mp4a-latm';
+      case 'aac':
+        return 'audio/aac';
+      case 'mp3':
+        return 'audio/mpeg';
+      case 'ogg':
+        return 'audio/ogg';
+      case 'wav':
+        return 'audio/x-wav';
+      case 'mp4':
+        return 'video/mp4';
+      case 'mkv':
+        return 'video/x-matroska';
+      case 'ts':
+        return 'video/mp2ts';
+      case 'pdf':
+        return 'application/pdf';
+      case 'doc':
+        return 'application/msword';
+      case 'docx':
+        return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      case 'xls':
+        return 'application/vnd.ms-excel';
+      case 'xlsx':
+        return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      case 'ppt':
+        return 'application/vnd.ms-powerpoint';
+      case 'pptx':
+        return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+      case 'csv':
+        return 'text/csv';
+      case 'ofd':
+        return 'general.ofd';
+      default:
+        return '';
+    }
+  }
+
+  public desktopFileIsVideo(): boolean {
+    let extension: string = this.desktopFileExtension();
+    return extension === 'mp4' || extension === 'mkv' || extension === 'ts' ||
+      extension === 'avi' || extension === 'mov' || extension === 'webm' ||
+      extension === 'm4v' || extension === '3gp' || extension === 'mpeg' ||
+      extension === 'mpg' || extension === 'ogv' || extension === 'flv';
+  }
+
+  public desktopFileIsAudio(): boolean {
+    let extension: string = this.desktopFileExtension();
+    return extension === 'm4a' || extension === 'aac' || extension === 'mp3' ||
+      extension === 'ogg' || extension === 'wav' || extension === 'flac' ||
+      extension === 'opus' || extension === 'ape' || extension === 'amr' ||
+      extension === 'midi' || extension === 'mid';
+  }
+
+  public async releaseDesktopAudio(): Promise<void> {
+    let player: media.AVPlayer | null = this.desktopAudioPlayer;
+    let sourceFile: fileIo.File | null = this.desktopAudioSourceFile;
+    this.desktopAudioPlayer = null;
+    this.desktopAudioSourceFile = null;
+    this.desktopAudioKey = '';
+    this.desktopAudioPlayWhenReady = false;
+    this.desktopAudioState = 0;
+    this.desktopAudioPosition = 0;
+    this.desktopAudioDuration = 0;
+    this.desktopAudioSeeking = false;
+    this.resetDesktopAudioMetadata();
+    if (player !== null) {
+      try {
+        await player.release();
+      } catch (error) {
+        console.error('UniClipboard failed to release the audio player.');
+      }
+    }
+    if (sourceFile !== null) {
+      try {
+        fileIo.closeSync(sourceFile.fd);
+      } catch (error) {
+        console.error('UniClipboard failed to close the audio preview file.');
+      }
+    }
+  }
+
+  public async prepareDesktopAudioPlayer(player: media.AVPlayer, previewKey: string): Promise<void> {
+    if (this.desktopAudioPlayer !== player || this.desktopAudioKey !== previewKey ||
+      player.state !== 'initialized') {
+      return;
+    }
+    try {
+      await player.prepare();
+    } catch (error) {
+      if (this.desktopAudioPlayer === player && this.desktopAudioKey === previewKey) {
+        this.desktopAudioState = 5;
+      }
+    }
+  }
+
+  public async prepareDesktopAudio(): Promise<void> {
+    if (!this.desktopFileIsAudio()) {
+      return;
+    }
+    let sourcePath: string = this.desktopFileSourcePath();
+    let previewKey: string = this.desktopFilePreviewKey();
+    if (sourcePath.length === 0 || (this.desktopAudioKey === previewKey && this.desktopAudioPlayer !== null)) {
+      return;
+    }
+    await this.releaseDesktopAudio();
+    if (!this.desktopFileIsAudio() || this.desktopFilePreviewKey() !== previewKey) {
+      return;
+    }
+    this.desktopAudioKey = previewKey;
+    this.desktopAudioState = 1;
+    this.loadDesktopAudioMetadata(sourcePath, previewKey);
+    try {
+      let sourceFile: fileIo.File = fileIo.openSync(sourcePath, fileIo.OpenMode.READ_ONLY);
+      this.desktopAudioSourceFile = sourceFile;
+      let sourceStat: fileIo.Stat = fileIo.statSync(sourceFile.fd);
+      let sourceDescriptor: media.AVFileDescriptor = {
+        fd: sourceFile.fd,
+        offset: 0,
+        length: sourceStat.size
+      };
+      let player: media.AVPlayer = await media.createAVPlayer();
+      if (this.desktopAudioKey !== previewKey) {
+        await player.release();
+        return;
+      }
+      this.desktopAudioPlayer = player;
+      player.on('stateChange', (state: media.AVPlayerState, _reason: media.StateChangeReason): void => {
+        if (this.desktopAudioPlayer !== player || this.desktopAudioKey !== previewKey) {
+          return;
+        }
+        if (state === 'initialized') {
+          this.prepareDesktopAudioPlayer(player, previewKey);
+        } else if (state === 'prepared') {
+          this.desktopAudioDuration = player.duration > 0 ? player.duration : 0;
+          this.desktopAudioState = 2;
+          if (this.desktopAudioPlayWhenReady) {
+            this.playDesktopAudio();
+          }
+        } else if (state === 'playing') {
+          this.desktopAudioState = 3;
+        } else if (state === 'paused') {
+          this.desktopAudioState = 2;
+        } else if (state === 'completed') {
+          this.desktopAudioPosition = this.desktopAudioDuration;
+          this.desktopAudioState = 4;
+        } else if (state === 'stopped') {
+          this.desktopAudioPosition = 0;
+          this.desktopAudioState = 2;
+        } else if (state === 'error') {
+          this.desktopAudioState = 5;
+        }
+      });
+      player.on('timeUpdate', (position: number): void => {
+        if (this.desktopAudioPlayer === player && this.desktopAudioKey === previewKey &&
+          !this.desktopAudioSeeking) {
+          this.desktopAudioPosition = position;
+        }
+      });
+      player.on('durationUpdate', (duration: number): void => {
+        if (this.desktopAudioPlayer === player && this.desktopAudioKey === previewKey) {
+          this.desktopAudioDuration = duration > 0 ? duration : 0;
+        }
+      });
+      player.on('error', (_error: BusinessError): void => {
+        if (this.desktopAudioPlayer === player && this.desktopAudioKey === previewKey) {
+          this.desktopAudioState = 5;
+        }
+      });
+      player.fdSrc = sourceDescriptor;
+    } catch (error) {
+      await this.releaseDesktopAudio();
+      this.desktopAudioState = 5;
+    }
+  }
+
+  public async playDesktopAudio(): Promise<void> {
+    let player: media.AVPlayer | null = this.desktopAudioPlayer;
+    if (player === null) {
+      this.desktopAudioPlayWhenReady = true;
+      await this.prepareDesktopAudio();
+      return;
+    }
+    if (player.state !== 'prepared' && player.state !== 'paused' && player.state !== 'completed') {
+      this.desktopAudioPlayWhenReady = true;
+      return;
+    }
+    try {
+      this.desktopAudioPlayWhenReady = false;
+      if (player.state === 'completed') {
+        this.desktopAudioPosition = 0;
+      }
+      await player.play();
+    } catch (error) {
+      this.desktopAudioState = 5;
+    }
+  }
+
+  public async toggleDesktopAudioPlayback(): Promise<void> {
+    let player: media.AVPlayer | null = this.desktopAudioPlayer;
+    if (player !== null && player.state === 'playing') {
+      try {
+        await player.pause();
+      } catch (error) {
+        this.desktopAudioState = 5;
+      }
+      return;
+    }
+    await this.playDesktopAudio();
+  }
+
+  public seekDesktopAudio(position: number): void {
+    let player: media.AVPlayer | null = this.desktopAudioPlayer;
+    if (player === null || this.desktopAudioDuration <= 0) {
+      return;
+    }
+    if (player.state === 'prepared' || player.state === 'playing' || player.state === 'paused' ||
+      player.state === 'completed') {
+      player.seek(Math.floor(position));
+    }
+  }
+
+  public formatAudioTime(timeMs: number): string {
+    let safeTime: number = Math.max(0, timeMs);
+    let totalSeconds: number = Math.floor(safeTime / 1000);
+    let minutes: number = Math.floor(totalSeconds / 60);
+    let seconds: number = totalSeconds % 60;
+    return minutes.toString() + ':' + (seconds < 10 ? '0' : '') + seconds.toString();
+  }
+
+  public resetDesktopAudioMetadata(): void {
+    this.desktopAudioCover = null;
+    this.desktopAudioCoverRevision++;
+    this.desktopAudioTitle = '';
+    this.desktopAudioArtist = '';
+    this.desktopAudioAlbum = '';
+    this.desktopAudioLyrics = [];
+    this.desktopAudioPlainLyrics = '';
+    this.desktopAudioMetadataState = 0;
+  }
+
+  public desktopAudioDisplayTitle(): string {
+    return this.desktopAudioTitle.length > 0 ? this.desktopAudioTitle : this.desktopFileName();
+  }
+
+  public desktopAudioDisplayArtist(): string {
+    if (this.desktopAudioArtist.length > 0 && this.desktopAudioAlbum.length > 0) {
+      return this.desktopAudioArtist + ' · ' + this.desktopAudioAlbum;
+    }
+    return this.desktopAudioArtist.length > 0 ? this.desktopAudioArtist : this.desktopAudioAlbum;
+  }
+
+  public embeddedLyricsFromMetadata(metadata: media.AVMetadata): string {
+    let customInfo: Record<string, string> | undefined = metadata.customInfo;
+    if (customInfo === undefined) {
+      return '';
+    }
+    let keys: string[] = Object.keys(customInfo);
+    for (let index: number = 0; index < keys.length; index++) {
+      let key: string = keys[index];
+      let normalizedKey: string = key.toLowerCase();
+      if (normalizedKey === 'lyrics' || normalizedKey === 'lyric' ||
+        normalizedKey === 'unsyncedlyrics' || normalizedKey === 'syncedlyrics' ||
+        normalizedKey === 'lrc' || normalizedKey === '©lyr') {
+        let value: string | undefined = customInfo[key];
+        if (value !== undefined && value.trim().length > 0) {
+          return value;
+        }
+      }
+    }
+    return '';
+  }
+
+  public loadDesktopSidecarLyrics(sourcePath: string): string {
+    let dotIndex: number = sourcePath.lastIndexOf('.');
+    if (dotIndex <= 0) {
+      return '';
+    }
+    let basePath: string = sourcePath.substring(0, dotIndex);
+    let candidates: string[] = [basePath + '.lrc', basePath + '.LRC'];
+    for (let index: number = 0; index < candidates.length; index++) {
+      let lyricPath: string = candidates[index];
+      try {
+        if (fileIo.accessSync(lyricPath)) {
+          return fileIo.readTextSync(lyricPath);
+        }
+      } catch (error) {
+        console.error('UniClipboard failed to read the sidecar lyric file.');
+      }
+    }
+    return '';
+  }
+
+  public parseDesktopLyricTime(tag: string): number {
+    let colonIndex: number = tag.indexOf(':');
+    if (colonIndex <= 0 || colonIndex >= tag.length - 1) {
+      return -1;
+    }
+    let minuteText: string = tag.substring(0, colonIndex);
+    let secondText: string = tag.substring(colonIndex + 1);
+    let minutes: number = Number.parseInt(minuteText);
+    let seconds: number = Number.parseFloat(secondText);
+    if (!Number.isFinite(minutes) || !Number.isFinite(seconds) || minutes < 0 || seconds < 0) {
+      return -1;
+    }
+    return Math.floor((minutes * 60 + seconds) * 1000);
+  }
+
+  public parseDesktopLyrics(lyricText: string): void {
+    let normalizedText: string = lyricText.replace(/\r/g, '');
+    let rawLines: string[] = normalizedText.split('\n');
+    let parsedLines: AudioLyricLine[] = [];
+    let hasTimedLine: boolean = false;
+    for (let lineIndex: number = 0; lineIndex < rawLines.length; lineIndex++) {
+      let rawLine: string = rawLines[lineIndex].trim();
+      let cursor: number = 0;
+      let lineTimes: number[] = [];
+      while (cursor < rawLine.length && rawLine.substring(cursor, cursor + 1) === '[') {
+        let closeIndex: number = rawLine.indexOf(']', cursor + 1);
+        if (closeIndex < 0) {
+          break;
+        }
+        let tag: string = rawLine.substring(cursor + 1, closeIndex);
+        let timeMs: number = this.parseDesktopLyricTime(tag);
+        if (timeMs >= 0) {
+          lineTimes.push(timeMs);
+        }
+        cursor = closeIndex + 1;
+      }
+      let lineText: string = rawLine.substring(cursor).trim();
+      if (lineTimes.length > 0 && lineText.length > 0) {
+        hasTimedLine = true;
+        for (let timeIndex: number = 0; timeIndex < lineTimes.length; timeIndex++) {
+          parsedLines.push(new AudioLyricLine(lineTimes[timeIndex], lineText));
+        }
+      }
+    }
+    if (hasTimedLine) {
+      parsedLines.sort((left: AudioLyricLine, right: AudioLyricLine): number => left.timeMs - right.timeMs);
+      this.desktopAudioLyrics = parsedLines;
+      this.desktopAudioPlainLyrics = '';
+    } else {
+      this.desktopAudioLyrics = [];
+      this.desktopAudioPlainLyrics = normalizedText.trim();
+    }
+  }
+
+  public desktopCurrentLyricIndex(): number {
+    if (this.desktopAudioLyrics.length === 0) {
+      return -1;
+    }
+    let currentIndex: number = 0;
+    for (let index: number = 0; index < this.desktopAudioLyrics.length; index++) {
+      if (this.desktopAudioLyrics[index].timeMs <= this.desktopAudioPosition) {
+        currentIndex = index;
+      } else {
+        break;
+      }
+    }
+    return currentIndex;
+  }
+
+  public desktopLyricTextAtOffset(offset: number): string {
+    let index: number = this.desktopCurrentLyricIndex() + offset;
+    if (index < 0 || index >= this.desktopAudioLyrics.length) {
+      return '';
+    }
+    return this.desktopAudioLyrics[index].text;
+  }
+
+  public async loadDesktopAudioMetadata(sourcePath: string, previewKey: string): Promise<void> {
+    if (this.desktopAudioKey !== previewKey) {
+      return;
+    }
+    this.desktopAudioMetadataState = 1;
+    let sidecarLyrics: string = this.loadDesktopSidecarLyrics(sourcePath);
+    if (sidecarLyrics.trim().length > 0 && this.desktopAudioKey === previewKey) {
+      this.parseDesktopLyrics(sidecarLyrics);
+    }
+    let extractor: media.AVMetadataExtractor | null = null;
+    let sourceFile: fileIo.File | null = null;
+    try {
+      sourceFile = fileIo.openSync(sourcePath, fileIo.OpenMode.READ_ONLY);
+      let sourceStat: fileIo.Stat = fileIo.statSync(sourceFile.fd);
+      let sourceDescriptor: media.AVFileDescriptor = {
+        fd: sourceFile.fd,
+        offset: 0,
+        length: sourceStat.size
+      };
+      extractor = await media.createAVMetadataExtractor();
+      extractor.fdSrc = sourceDescriptor;
+      try {
+        let metadata: media.AVMetadata = await extractor.fetchMetadata();
+        if (this.desktopAudioKey === previewKey) {
+          this.desktopAudioTitle = metadata.title === undefined ? '' : metadata.title;
+          if (metadata.artist !== undefined) {
+            this.desktopAudioArtist = metadata.artist;
+          } else if (metadata.albumArtist !== undefined) {
+            this.desktopAudioArtist = metadata.albumArtist;
+          }
+          this.desktopAudioAlbum = metadata.album === undefined ? '' : metadata.album;
+          if (sidecarLyrics.trim().length === 0) {
+            let embeddedLyrics: string = this.embeddedLyricsFromMetadata(metadata);
+            if (embeddedLyrics.trim().length > 0) {
+              this.parseDesktopLyrics(embeddedLyrics);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('UniClipboard failed to read the audio metadata.');
+      }
+      try {
+        let cover: image.PixelMap = await extractor.fetchAlbumCover();
+        if (this.desktopAudioKey === previewKey) {
+          this.desktopAudioCover = cover;
+          this.desktopAudioCoverRevision++;
+        }
+      } catch (error) {
+        console.info('UniClipboard audio file has no embedded cover.');
+      }
+    } catch (error) {
+      console.error('UniClipboard failed to open the audio metadata source.');
+    } finally {
+      if (extractor !== null) {
+        try {
+          await extractor.release();
+        } catch (error) {
+        }
+      }
+      if (sourceFile !== null) {
+        try {
+          fileIo.closeSync(sourceFile.fd);
+        } catch (error) {
+        }
+      }
+      if (this.desktopAudioKey === previewKey) {
+        this.desktopAudioMetadataState = 2;
+      }
+    }
+  }
+
+  public desktopFileIsDocument(): boolean {
+    let extension: string = this.desktopFileExtension();
+    return extension === 'csv' || extension === 'ofd' ||
+      extension === 'txt' || extension === 'rtf' || extension === 'md' ||
+      extension === 'html' || extension === 'htm' || extension === 'xml';
+  }
+
+  public desktopFilePreviewKey(): string {
+    if (this.desktopSelectedId.length > 0) {
+      return this.desktopSelectedId;
+    }
+    return this.latestFileRevision.toString();
+  }
+
+  public desktopImageAspectRatio(): number {
+    let pixelMap: image.PixelMap | null = this.desktopDisplayImage();
+    if (pixelMap === null) {
+      return 1;
+    }
+    try {
+      let imageInfo: image.ImageInfo = pixelMap.getImageInfoSync();
+      if (imageInfo.size.width > 0 && imageInfo.size.height > 0) {
+        return imageInfo.size.width / imageInfo.size.height;
+      }
+    } catch (error) {
+      console.error('UniClipboard failed to read the image preview size.');
+    }
+    return 1;
+  }
+
+  public latestImageAspectRatio(): number {
+    let pixelMap: image.PixelMap | null = this.latestImage;
+    if (pixelMap === null) {
+      return 1;
+    }
+    try {
+      let imageInfo: image.ImageInfo = pixelMap.getImageInfoSync();
+      if (imageInfo.size.width > 0 && imageInfo.size.height > 0) {
+        return imageInfo.size.width / imageInfo.size.height;
+      }
+    } catch (error) {
+      console.error('UniClipboard failed to read the latest image preview size.');
+    }
+    return 1;
+  }
+
+  public resetDesktopVideoAspectRatio(): void {
+    this.desktopVideoAspectRatio = 16 / 9;
+    this.desktopVideoRatioKey = '';
+  }
+
+  public async loadDesktopVideoAspectRatio(): Promise<void> {
+    let sourcePath: string = this.desktopFileSourcePath();
+    let previewKey: string = this.desktopFilePreviewKey();
+    if (!this.desktopFileIsVideo() || sourcePath.length === 0 || this.desktopVideoRatioKey === previewKey) {
+      return;
+    }
+    this.desktopVideoRatioKey = previewKey;
+    let extractor: media.AVMetadataExtractor | null = null;
+    let sourceFile: fileIo.File | null = null;
+    try {
+      sourceFile = fileIo.openSync(sourcePath, fileIo.OpenMode.READ_ONLY);
+      let sourceStat: fileIo.Stat = fileIo.statSync(sourceFile.fd);
+      let sourceDescriptor: media.AVFileDescriptor = {
+        fd: sourceFile.fd,
+        offset: 0,
+        length: sourceStat.size
+      };
+      extractor = await media.createAVMetadataExtractor();
+      extractor.fdSrc = sourceDescriptor;
+      let metadata: media.AVMetadata = await extractor.fetchMetadata();
+      let widthText: string | undefined = metadata.videoWidth;
+      let heightText: string | undefined = metadata.videoHeight;
+      if (widthText === undefined || heightText === undefined) {
+        return;
+      }
+      let width: number = Number.parseInt(widthText);
+      let height: number = Number.parseInt(heightText);
+      let orientation: number = 0;
+      if (metadata.videoOrientation !== undefined) {
+        orientation = Number.parseInt(metadata.videoOrientation);
+      }
+      if (orientation === 90 || orientation === 270) {
+        let originalWidth: number = width;
+        width = height;
+        height = originalWidth;
+      }
+      if (width > 0 && height > 0 && this.desktopFilePreviewKey() === previewKey) {
+        this.desktopVideoAspectRatio = width / height;
+      }
+    } catch (error) {
+      console.error('UniClipboard failed to read the video preview size.');
+    } finally {
+      if (extractor !== null) {
+        try {
+          await extractor.release();
+        } catch (error) {
+        }
+      }
+      if (sourceFile !== null) {
+        try {
+          fileIo.closeSync(sourceFile.fd);
+        } catch (error) {
+        }
+      }
+    }
+  }
+
+  public async openDesktopFilePreview(): Promise<void> {
+    let uri: string = this.desktopFilePreviewUri();
+    let fileName: string = this.desktopFileName();
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (uri.length === 0 || fileName.length === 0 || context === undefined) {
+      this.desktopFilePreviewState = 2;
+      return;
+    }
+    this.desktopFilePreviewState = 1;
+    let previewInfo: filePreview.PreviewInfo = {
+      title: fileName,
+      uri: uri,
+      mimeType: this.desktopFileMimeType()
+    };
+    try {
+      await filePreview.openPreview(context as common.UIAbilityContext, previewInfo);
+      this.desktopFilePreviewState = 0;
+    } catch (error) {
+      console.error('UniClipboard failed to open the file preview.');
+      this.desktopFilePreviewState = 2;
+    }
+  }
+
+  public async copyDesktopSelection(): Promise<void> {
+    try {
+      if (this.desktopShowsLatestImage()) {
+        let pixelMap: image.PixelMap | null = this.desktopDisplayImage();
+        if (pixelMap !== null) {
+          await this.clipboardService.writeImage(pixelMap);
+        }
+      } else {
+        let text: string = this.desktopDetailText();
+        if (text.length === 0) {
+          return;
+        }
+        await this.clipboardService.writeText(text);
+      }
+      this.statusCode = 2;
+    } catch (error) {
+      this.statusCode = 3;
+    }
+  }
+
+  public async copyServerHistoryItem(item: ServerHistoryItem): Promise<void> {
+    await this.selectDesktopServerItem(item);
+    await this.copyDesktopSelection();
+  }
+
+  public async copyLocalHistoryItem(item: ClipboardHistoryItem): Promise<void> {
+    try {
+      if (item.kind === 'Image' && item.imagePreview !== null) {
+        await this.clipboardService.writeImage(item.imagePreview);
+      } else if (item.text.length > 0) {
+        await this.clipboardService.writeText(item.text);
+      }
+      this.statusCode = 2;
+    } catch (error) {
+      this.statusCode = 3;
+    }
+  }
+
+  public toggleLocalHistoryStarred(item: ClipboardHistoryItem): void {
+    let items: ClipboardHistoryItem[] = [];
+    for (let index: number = 0; index < this.history.length; index++) {
+      let current: ClipboardHistoryItem = this.history[index];
+      if (current.id === item.id) {
+        current.starred = !current.starred;
+      }
+      items.push(current);
+    }
+    this.history = items;
+    this.animateHistoryUpdate();
+    this.scheduleHistorySave();
+  }
+
+  public async sendLocalHistoryItem(item: ClipboardHistoryItem): Promise<void> {
+    if (item.kind === 'Image' && item.imagePreview !== null) {
+      this.composerImage = item.imagePreview;
+      await this.sendImage();
+      return;
+    }
+    if (item.kind === 'File' && item.filePath.length > 0) {
+      try {
+        let sourceFile: fileIo.File = fileIo.openSync(item.filePath, fileIo.OpenMode.READ_ONLY);
+        let sourceStat: fileIo.Stat = fileIo.statSync(sourceFile.fd);
+        fileIo.closeSync(sourceFile.fd);
+        this.composerFileUri = item.filePath;
+        this.composerFileSize = sourceStat.size;
+        this.composerFileName = item.text;
+        await this.sendFile();
+      } catch (error) {
+        this.statusCode = 3;
+      }
+      return;
+    }
+    this.composerText = item.text;
+    await this.sendText();
+  }
+
+  public async sendServerHistoryItem(item: ServerHistoryItem): Promise<void> {
+    await this.selectDesktopServerItem(item);
+    if (item.kind === 'Image' && this.desktopSelectedImage !== null) {
+      this.composerImage = this.desktopSelectedImage;
+      await this.sendImage();
+      return;
+    }
+    if (item.kind === 'File' && this.desktopSelectedFilePath.length > 0) {
+      try {
+        let sourceFile: fileIo.File = fileIo.openSync(this.desktopSelectedFilePath, fileIo.OpenMode.READ_ONLY);
+        let sourceStat: fileIo.Stat = fileIo.statSync(sourceFile.fd);
+        fileIo.closeSync(sourceFile.fd);
+        this.composerFileUri = this.desktopSelectedFilePath;
+        this.composerFileSize = sourceStat.size;
+        this.composerFileName = item.text;
+        await this.sendFile();
+      } catch (error) {
+        this.statusCode = 3;
+      }
+      return;
+    }
+    this.composerText = item.text;
+    await this.sendText();
+  }
+
+  public async sendServerHistoryItemToTarget(item: ServerHistoryItem, target: string): Promise<void> {
+    console.info('UniClipboard history send target: ' + target);
+    await this.sendServerHistoryItem(item);
+  }
+
+  public async sendLocalHistoryItemToTarget(item: ClipboardHistoryItem, target: string): Promise<void> {
+    console.info('UniClipboard history send target: ' + target);
+    await this.sendLocalHistoryItem(item);
+  }
+
+  public toggleDesktopSelectedStar(): void {
+    for (let index: number = 0; index < this.serverHistory.length; index++) {
+      let item: ServerHistoryItem = this.serverHistory[index];
+      if (item.id === this.desktopSelectedId) {
+        this.toggleHistoryStarred(item);
+        return;
+      }
+    }
+    let items: ClipboardHistoryItem[] = [];
+    for (let index: number = 0; index < this.history.length; index++) {
+      let item: ClipboardHistoryItem = this.history[index];
+      if (item.id === this.desktopSelectedId) {
+        item.starred = !item.starred;
+      }
+      items.push(item);
+    }
+    this.history = items;
+    this.animateHistoryUpdate();
+    this.scheduleHistorySave();
+  }
+
+  public desktopSelectionStarred(): boolean {
+    for (let index: number = 0; index < this.serverHistory.length; index++) {
+      let item: ServerHistoryItem = this.serverHistory[index];
+      if (item.id === this.desktopSelectedId) {
+        return item.starred;
+      }
+    }
+    for (let index: number = 0; index < this.history.length; index++) {
+      let item: ClipboardHistoryItem = this.history[index];
+      if (item.id === this.desktopSelectedId) {
+        return item.starred;
+      }
+    }
+    return false;
+  }
+
+  public deleteDesktopSelection(): void {
+    for (let index: number = 0; index < this.serverHistory.length; index++) {
+      let item: ServerHistoryItem = this.serverHistory[index];
+      if (item.id === this.desktopSelectedId) {
+        this.confirmDeleteHistory(item);
+        return;
+      }
+    }
+    for (let index: number = 0; index < this.history.length; index++) {
+      let item: ClipboardHistoryItem = this.history[index];
+      if (item.id === this.desktopSelectedId) {
+        this.confirmDeleteLocalHistory(item);
+        return;
+      }
+    }
+  }
+
+  public async confirmDeleteLocalHistory(item: ClipboardHistoryItem): Promise<void> {
+    let confirmed: boolean = false;
+    try {
+      let result = await this.getUIContext().getPromptAction().showDialog({
+        title: $r('app.string.history_delete_title'),
+        message: $r('app.string.history_delete_message'),
+        buttons: [
+          { text: $r('app.string.cancel_action'), color: $r('app.color.text_secondary') },
+          { text: $r('app.string.history_delete_action'), color: $r('app.color.danger') }
+        ]
+      });
+      confirmed = result.index === 1;
+    } catch (error) {
+      return;
+    }
+    if (!confirmed || this.historyMutationBusy) {
+      return;
+    }
+    this.historyMutationBusy = true;
+    try {
+      let items: ClipboardHistoryItem[] = [];
+      for (let index: number = 0; index < this.history.length; index++) {
+        let current: ClipboardHistoryItem = this.history[index];
+        if (current.id !== item.id) {
+          items.push(current);
+        }
+      }
+      this.history = items;
+      this.desktopSelectedId = '';
+      this.desktopSelectedText = '';
+      this.desktopSelectedMeta = '';
+      this.desktopSelectedDirection = '';
+      this.desktopSelectedImage = null;
+      this.desktopSelectedFileData = null;
+      this.desktopSelectedFilePath = '';
+      this.releaseDesktopAudio();
+      let context: common.Context | undefined = this.getUIContext().getHostContext();
+      if (context !== undefined) {
+        this.historyStorageService.removePayload(context, item);
+      }
+      this.scheduleHistorySave();
+    } finally {
+      this.historyMutationBusy = false;
+    }
+  }
+
+  public hasConfig(): boolean {
+    return this.serverUrl.trim().length > 0 &&
+      this.username.trim().length > 0 &&
+      this.password.length > 0;
+  }
+
+  public currentTime(): string {
+    let now: Date = new Date();
+    let hours: string = now.getHours().toString().padStart(2, '0');
+    let minutes: string = now.getMinutes().toString().padStart(2, '0');
+    return hours + ':' + minutes;
+  }
+
+  public addHistory(text: string, direction: string, kind: string = 'Text',
+    imagePreview: image.PixelMap | null = null, fileData: Uint8Array | null = null,
+    filePath: string = '', historyId: string = ''): void {
+    let timestampMs: number = Date.now();
+    let itemId: string = historyId.length > 0 ? historyId : timestampMs.toString();
+    let item: ClipboardHistoryItem = new ClipboardHistoryItem(
+      itemId, text, direction, this.currentTime(), kind, imagePreview, fileData, filePath, timestampMs);
+    let items: ClipboardHistoryItem[] = [item];
+    for (let index: number = 0; index < this.history.length && items.length < 200; index++) {
+      items.push(this.history[index]);
+    }
+    this.history = items;
+    this.animateHistoryUpdate();
+    this.scheduleHistorySave();
+  }
+
+  public connectionChanged(): void {
+    this.realtimeAutoConnect = false;
+    if (this.realtimeActive) {
+      this.stopRealtime();
+    }
+    this.statusCode = 0;
+  }
+
+  public isConnectionAvailable(): boolean {
+    if (this.spaceJoined && !this.hasConfig()) {
+      return this.spacePeerConnected;
+    }
+    return this.spacePeerConnected || this.statusCode === 2 || this.realtimeActive;
+  }
+
+  public async testConnection(): Promise<void> {
+    if (!this.hasConfig()) {
+      this.statusCode = 3;
+      return;
+    }
+    this.busy = true;
+    this.statusCode = 1;
+    try {
+      let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
+      await client.probe();
+      this.saveConfig();
+      this.startRealtime();
+      this.statusCode = 2;
+    } catch (error) {
+      this.statusCode = 3;
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  public importConnectUri(): void {
+    if (this.connectUri.trim().length === 0) {
+      this.connectUriState = 2;
+      return;
+    }
+    try {
+      let config: ServerConfig = this.nativeProtocolService.parseServerConfig(this.connectUri);
+      this.connectionChanged();
+      this.serverUrl = config.baseUrl;
+      this.username = config.username;
+      this.password = config.password;
+      this.connectUri = '';
+      this.connectUriState = 1;
+      this.statusCode = 0;
+      this.saveConfig();
+      this.startRealtime();
+      this.pullLatest();
+    } catch (error) {
+      this.connectUriState = 2;
+    }
+  }
+
+  public scanConnectUri(): void {
+    let options: scanBarcode.ScanOptions = {
+      scanTypes: [scanCore.ScanType.QR_CODE],
+      enableMultiMode: false,
+      enableAlbum: true
+    };
+    this.connectUriState = 0;
+    try {
+      scanBarcode.startScanForResult(this.getUIContext().getHostContext(), options,
+        (error: BusinessError, result: scanBarcode.ScanResult): void => {
+          if (error) {
+            this.connectUriState = 3;
+            return;
+          }
+          this.connectUri = result.originalValue;
+          this.importConnectUri();
+        });
+    } catch (error) {
+      this.connectUriState = 3;
+    }
+  }
+
+  public async pullLatest(): Promise<void> {
+    if (!this.hasConfig()) {
+      if (this.spaceJoined) {
+        await this.connectAllSpaceDevices();
+        return;
+      }
+      this.statusCode = 3;
+      this.openConnectionSettings();
+      return;
+    }
+    this.busy = true;
+    this.statusCode = 1;
+    try {
+      let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
+      let result: SyncContent = await client.getLatestContent();
+      await this.applyLatestContent(result, true);
+      this.desktopSelectedId = '';
+      this.desktopSelectedText = '';
+      this.desktopSelectedMeta = '';
+      this.desktopSelectedDirection = '';
+      this.desktopSelectedImage = null;
+      this.desktopSelectedFileData = null;
+      this.desktopSelectedFilePath = '';
+      this.desktopFilePreviewState = 0;
+      this.resetDesktopVideoAspectRatio();
+      this.releaseDesktopAudio();
+      this.statusCode = 2;
+    } catch (error) {
+      this.statusCode = 3;
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  public async applyLatestContent(result: SyncContent, recordHistory: boolean): Promise<void> {
+    if (this.latestContentId !== result.contentId) {
+      this.desktopGestureShareHintDismissed = false;
+    }
+    let pixelMap: image.PixelMap | null = null;
+    let displayText: string = this.contentDisplayText(result);
+    if (this.desktopSelectedId.length === 0) {
+      await this.releaseDesktopAudio();
+      this.resetDesktopVideoAspectRatio();
+    }
+    if (result.kind === 'Image') {
+      if (result.data.length === 0) {
+        throw new Error('image payload is empty');
+      }
+      pixelMap = await this.clipboardService.decodeImage(result.data);
+    }
+    let fileData: Uint8Array | null = null;
+    let filePath: string = '';
+    let fileName: string = '';
+    if (result.kind === 'File') {
+      fileName = result.dataName.length > 0 ? result.dataName : displayText;
+      if (result.data.length > 0) {
+        fileData = result.data;
+        filePath = this.cacheLatestFile(result.data);
+      }
+    } else {
+      this.removeLatestCachedFile();
+    }
+    this.latestKind = result.kind;
+    this.latestText = displayText;
+    this.latestImage = pixelMap;
+    if (pixelMap !== null) {
+      this.latestImageRevision += 1;
+    }
+    this.latestFileName = fileName;
+    this.latestFileData = fileData;
+    this.latestFilePath = filePath;
+    if (result.kind === 'File') {
+      this.latestFileRevision += 1;
+      this.desktopFilePreviewState = 0;
+    }
+    this.latestContentId = result.contentId;
+    this.animateLatestContent();
+    if (recordHistory) {
+      this.addHistory(displayText, 'received', result.kind, pixelMap, fileData, filePath);
+    }
+  }
+
+  public cacheLatestFile(data: Uint8Array): string {
+    this.removeLatestCachedFile();
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context === undefined || data.length === 0) {
+      return '';
+    }
+    let targetPath: string = context.cacheDir + '/uniclipboard_latest_file_' + Date.now().toString();
+    try {
+      let targetFile: fileIo.File = fileIo.openSync(targetPath,
+        fileIo.OpenMode.CREATE | fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.TRUNC);
+      try {
+        fileIo.writeSync(targetFile.fd, data.buffer);
+      } finally {
+        fileIo.closeSync(targetFile.fd);
+      }
+      this.latestCachedFilePath = targetPath;
+      return targetPath;
+    } catch (error) {
+      try {
+        fileIo.unlinkSync(targetPath);
+      } catch (unlinkError) {
+      }
+      return '';
+    }
+  }
+
+  public removeLatestCachedFile(): void {
+    let cachedPath: string = this.latestCachedFilePath;
+    this.latestCachedFilePath = '';
+    if (cachedPath.length === 0) {
+      return;
+    }
+    try {
+      fileIo.unlinkSync(cachedPath);
+    } catch (error) {
+    }
+  }
+
+  public contentDisplayText(result: SyncContent): string {
+    if (result.dataName.length > 0 && (result.kind === 'Image' || result.text.length === 0)) {
+      return result.dataName;
+    }
+    if (result.kind === 'Image' && result.text.length === 0) {
+      return 'image.png';
+    }
+    return result.text;
+  }
+
+  public latestCopyable(): boolean {
+    return (this.latestKind === 'Text' && this.latestText.length > 0) ||
+      (this.latestKind === 'Image' && this.latestImage !== null) ||
+      (this.latestKind === 'File' &&
+        (this.latestFileData !== null || this.latestFilePath.length > 0));
+  }
+
+  public async copyLatest(): Promise<void> {
+    try {
+      if (this.latestKind === 'Image' && this.latestImage !== null) {
+        await this.clipboardService.writeImage(this.latestImage);
+      } else if (this.latestKind === 'File' &&
+        (this.latestFileData !== null || this.latestFilePath.length > 0)) {
+        await this.saveSelectedFile();
+      } else if (this.latestKind === 'Text' && this.latestText.length > 0) {
+        await this.clipboardService.writeText(this.latestText);
+      }
+    } catch (error) {
+      this.statusCode = 3;
+    }
+  }
+
+  public async readLocalClipboard(): Promise<void> {
+    try {
+      if (!this.clipboardService.hasText()) {
+        this.composerText = '';
+        return;
+      }
+      this.composerText = await this.clipboardService.readText();
+    } catch (error) {
+      this.statusCode = 3;
+    }
+  }
+
+  public async readLocalImage(): Promise<void> {
+    if (this.imageReadState === 1) {
+      return;
+    }
+    this.imageReadState = 1;
+    this.imageSendState = 0;
+    try {
+      let pixelMap: image.PixelMap | null = await this.clipboardService.readImage();
+      this.composerImage = pixelMap;
+      if (pixelMap !== null) {
+        this.composerImageRevision += 1;
+        this.imageReadState = 2;
+      } else {
+        this.imageReadState = 3;
+      }
+      this.statusCode = this.composerImage === null ? 3 : 2;
+    } catch (error) {
+      this.composerImage = null;
+      this.imageReadState = 5;
+      this.statusCode = 3;
+    }
+  }
+
+  public async sendText(): Promise<void> {
+    let text: string = this.composerText.trim();
+    if (text.length === 0) {
+      return;
+    }
+    if (!this.spaceJoined && !this.hasConfig() && !this.mobileSyncRunning) {
+      this.statusCode = 3;
+      this.openConnectionSettings();
+      return;
+    }
+    this.busy = true;
+    this.statusCode = 1;
+    try {
+      let delivered: boolean = false;
+      let mobilePublished: boolean = false;
+      if (this.mobileSyncRunning) {
+        try {
+          this.latestContentId = this.mobileSyncServerService.publishText(text);
+          mobilePublished = true;
+        } catch (error) {
+          mobilePublished = false;
+        }
+      }
+      if (this.hasConfig()) {
+        try {
+          let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
+          this.latestContentId = await client.putText(text);
+          delivered = true;
+          console.info('UniClipboard text sent through desktop relay');
+        } catch (error) {
+          console.warn('UniClipboard desktop relay unavailable, trying P2P');
+        }
+      }
+      if (!delivered && this.spaceJoined) {
+        try {
+          let acceptedCount: number = await this.spaceNodeService.sendText(text);
+          console.info('UniClipboard P2P accepted peer count: ' + acceptedCount.toString());
+          if (acceptedCount > 0) {
+            this.spacePeerConnected = true;
+            this.latestContentId = '';
+            delivered = true;
+          } else if (!mobilePublished) {
+            throw new Error('no online space peer accepted the clipboard');
+          }
+        } catch (error) {
+          if (!mobilePublished) {
+            throw new Error('space text delivery failed');
+          }
+        }
+      }
+      if (!delivered && mobilePublished) {
+        delivered = true;
+      }
+      if (!delivered) {
+        throw new Error('no desktop or space peer accepted the clipboard');
+      }
+      this.latestText = text;
+      this.latestKind = 'Text';
+      this.latestImage = null;
+      if (this.desktopSelectedId.length === 0) {
+        this.releaseDesktopAudio();
+      }
+      this.addHistory(text, 'sent');
+      this.composerText = '';
+      this.statusCode = 2;
+    } catch (error) {
+      if (this.spaceJoined) {
+        this.spacePeerConnected = false;
+      }
+      this.statusCode = 3;
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  public async sendImage(): Promise<void> {
+    if (!this.spaceJoined && !this.hasConfig() && !this.mobileSyncRunning) {
+      this.statusCode = 3;
+      this.openConnectionSettings();
+      return;
+    }
+    let pixelMap: image.PixelMap | null = this.composerImage;
+    if (pixelMap === null) {
+      return;
+    }
+    this.busy = true;
+    this.statusCode = 1;
+    this.imageSendState = 1;
+    try {
+      let delivered: boolean = false;
+      let mobilePublished: boolean = false;
+      if (this.mobileSyncRunning) {
+        try {
+          let mobileData: Uint8Array = await this.clipboardService.encodePng(pixelMap);
+          this.latestContentId = this.mobileSyncServerService.publishImage(mobileData);
+          mobilePublished = true;
+        } catch (error) {
+          mobilePublished = false;
+        }
+      }
+      if (this.hasConfig()) {
+        try {
+          let data: Uint8Array = await this.clipboardService.encodePng(pixelMap);
+          let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
+          this.latestContentId = await client.putImage(data);
+          this.latestText = 'image.png';
+          delivered = true;
+          console.info('UniClipboard image sent through desktop relay');
+        } catch (error) {
+          console.warn('UniClipboard desktop image relay unavailable, trying P2P');
+        }
+      }
+      if (!delivered && this.spaceJoined) {
+        try {
+          let data: Uint8Array = await this.clipboardService.encodeSpaceImage(pixelMap);
+          let acceptedCount: number = await this.spaceNodeService.sendImage(data);
+          console.info('UniClipboard P2P image accepted peer count: ' + acceptedCount.toString());
+          if (acceptedCount > 0) {
+            this.spacePeerConnected = true;
+            this.latestContentId = '';
+            this.latestText = 'image.jpg';
+            delivered = true;
+          } else if (!mobilePublished) {
+            throw new Error('no online space peer accepted the clipboard image');
+          }
+        } catch (error) {
+          if (!mobilePublished) {
+            throw new Error('space image delivery failed');
+          }
+        }
+      }
+      if (!delivered && mobilePublished) {
+        delivered = true;
+      }
+      if (!delivered) {
+        throw new Error('no desktop or space peer accepted the clipboard image');
+      }
+      this.latestKind = 'Image';
+      this.latestImage = pixelMap;
+      if (this.desktopSelectedId.length === 0) {
+        this.releaseDesktopAudio();
+      }
+      this.latestImageRevision += 1;
+      this.composerImage = null;
+      this.addHistory(this.latestText, 'sent', 'Image', pixelMap);
+      this.statusCode = 2;
+      this.imageSendState = 2;
+    } catch (error) {
+      if (this.spaceJoined) {
+        this.spacePeerConnected = false;
+      }
+      this.statusCode = 3;
+      this.imageSendState = 3;
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  public resetComposerFile(removeStagedFile: boolean): void {
+    if (removeStagedFile && this.composerFileHistoryId.length > 0 && this.composerFileUri.length > 0) {
+      let context: common.Context | undefined = this.getUIContext().getHostContext();
+      if (context !== undefined) {
+        this.historyStorageService.discardManagedFile(context, this.composerFileUri);
+      }
+    }
+    this.composerFileData = null;
+    this.composerFileUri = '';
+    this.composerFileSize = 0;
+    this.composerFileName = '';
+    this.composerFileHistoryId = '';
+  }
+
+  public async selectFile(): Promise<void> {
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context === undefined) {
+      this.fileTransferState = 4;
+      return;
+    }
+    this.fileTransferState = 1;
+    try {
+      let documentPicker: picker.DocumentViewPicker =
+        new picker.DocumentViewPicker(context as common.UIAbilityContext);
+      let options: picker.DocumentSelectOptions = new picker.DocumentSelectOptions();
+      let uris: string[] = await documentPicker.select(options);
+      if (uris.length === 0) {
+        this.fileTransferState = 0;
+        return;
+      }
+      let selection: ClipboardFileSelection = this.clipboardService.inspectFile(uris[0]);
+      if (selection.size <= 0) {
+        this.resetComposerFile(true);
+        this.fileTransferState = 5;
+        return;
+      }
+      let historyId: string = Date.now().toString();
+      let stagedPath: string = this.historyStorageService.stageFile(
+        context, selection.uri, historyId, selection.fileName);
+      if (stagedPath.length === 0) {
+        throw new Error('failed to persist selected file');
+      }
+      let previousPath: string = this.composerFileUri;
+      let previousHistoryId: string = this.composerFileHistoryId;
+      this.composerFileData = null;
+      this.composerFileUri = stagedPath;
+      this.composerFileSize = selection.size;
+      this.composerFileName = selection.fileName;
+      this.composerFileHistoryId = historyId;
+      if (previousHistoryId.length > 0 && previousPath.length > 0 && previousPath !== stagedPath) {
+        this.historyStorageService.discardManagedFile(context, previousPath);
+      }
+      this.fileTransferState = 2;
+    } catch (error) {
+      this.resetComposerFile(true);
+      this.fileTransferState = 4;
+    }
+  }
+
+  public async sendFile(): Promise<void> {
+    let sourceUri: string = this.composerFileUri;
+    let sourceSize: number = this.composerFileSize;
+    if ((!this.spaceJoined && !this.hasConfig() && !this.mobileSyncRunning) || sourceUri.length === 0 ||
+      sourceSize <= 0 || this.composerFileName.length === 0) {
+      this.fileTransferState = 4;
+      return;
+    }
+    this.busy = true;
+    this.statusCode = 1;
+    this.fileTransferState = 3;
+    try {
+      let delivered: boolean = false;
+      let mobilePublished: boolean = false;
+      if (this.mobileSyncRunning) {
+        try {
+          this.latestContentId = this.mobileSyncServerService.publishFile(
+            sourceUri, sourceSize, this.composerFileName);
+          mobilePublished = true;
+        } catch (error) {
+          mobilePublished = false;
+        }
+      }
+      if (this.hasConfig()) {
+        try {
+          let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
+          this.latestContentId = await client.putFileFromUri(
+            sourceUri, sourceSize, this.composerFileName);
+          this.pendingFileTransferId = '';
+          delivered = true;
+          console.info('UniClipboard file sent through desktop relay');
+        } catch (error) {
+          console.warn('UniClipboard desktop file relay unavailable, trying P2P');
+        }
+      }
+      if (!delivered && this.spaceJoined) {
+        try {
+          let sendResult: NativeSpaceFileSendResult = await this.spaceNodeService.sendFileFromUri(
+            sourceUri, sourceSize, this.composerFileName);
+          if (sendResult.acceptedCount > 0) {
+            this.pendingFileTransferId = sendResult.transferId;
+            this.latestContentId = '';
+            this.spacePeerConnected = true;
+            delivered = true;
+          } else if (!mobilePublished) {
+            throw new Error('no online space peer accepted the file');
+          }
+        } catch (error) {
+          if (!mobilePublished) {
+            throw new Error('space file delivery failed');
+          }
+        }
+      }
+      if (!delivered && mobilePublished) {
+        delivered = true;
+      }
+      if (!delivered) {
+        throw new Error('no desktop or space peer accepted the file');
+      }
+      this.latestKind = 'File';
+      this.latestText = this.composerFileName;
+      this.latestFileName = this.composerFileName;
+      this.latestFileData = null;
+      this.latestFilePath = sourceUri;
+      this.latestFileRevision += 1;
+      this.desktopFilePreviewState = 0;
+      this.resetDesktopVideoAspectRatio();
+      if (this.desktopSelectedId.length === 0) {
+        this.releaseDesktopAudio();
+      }
+      this.addHistory(this.composerFileName, 'sent', 'File', null, null, sourceUri,
+        this.composerFileHistoryId);
+      this.resetComposerFile(false);
+      this.fileTransferState = 7;
+      this.statusCode = 2;
+    } catch (error) {
+      this.spacePeerConnected = false;
+      this.fileTransferState = 4;
+      this.statusCode = 3;
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  public async saveSelectedFile(): Promise<void> {
+    let data: Uint8Array | null = this.desktopSelectedId.length > 0 ?
+      this.desktopSelectedFileData : this.latestFileData;
+    let sourcePath: string = this.desktopSelectedId.length > 0 ?
+      this.desktopSelectedFilePath : this.latestFilePath;
+    let fileName: string = this.desktopSelectedId.length > 0 ? this.desktopSelectedText : this.latestFileName;
+    if ((data === null && sourcePath.length === 0) || fileName.length === 0) {
+      return;
+    }
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context === undefined) {
+      return;
+    }
+    try {
+      let documentPicker: picker.DocumentViewPicker =
+        new picker.DocumentViewPicker(context as common.UIAbilityContext);
+      let options: picker.DocumentSaveOptions = new picker.DocumentSaveOptions();
+      options.newFileNames = [fileName];
+      let uris: string[] = await documentPicker.save(options);
+      if (uris.length > 0) {
+        if (sourcePath.length > 0) {
+          if (sourcePath.startsWith('/')) {
+            await this.spaceNodeService.copyFileToUri(sourcePath, uris[0]);
+          } else {
+            await this.spaceNodeService.copyUriToUri(sourcePath, uris[0]);
+          }
+        } else if (data !== null) {
+          this.clipboardService.writeFile(uris[0], data);
+        }
+        this.statusCode = 2;
+      }
+    } catch (error) {
+      this.statusCode = 3;
+    }
+  }
+
+  public startRealtime(): void {
+    if (!this.hasConfig()) {
+      this.statusCode = 3;
+      this.openConnectionSettings();
+      return;
+    }
+    try {
+      this.saveConfig();
+      let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
+      client.startRealtime();
+      this.realtimeAutoConnect = true;
+      this.realtimeActive = true;
+      this.statusCode = 1;
+    } catch (error) {
+      this.realtimeActive = false;
+      this.statusCode = 3;
+    }
+  }
+
+  public stopRealtime(): void {
+    let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
+    client.stopRealtime();
+    this.realtimeAutoConnect = false;
+    this.realtimeActive = false;
+    this.statusCode = 0;
+  }
+
+  public toggleRealtime(): void {
+    if (this.realtimeActive) {
+      this.stopRealtime();
+    } else {
+      this.startRealtime();
+    }
+  }
+
+  public async consumeRealtimeEvents(): Promise<void> {
+    await this.consumeMobileSyncEvents();
+    await this.consumeSpaceTextEvents();
+    this.realtimeTick += 1;
+    if (this.spaceInvitationExpiresAtMs > 0 && Date.now() >= this.spaceInvitationExpiresAtMs) {
+      this.spaceIssuedInvitationCode = '';
+      this.spaceInvitationExpiresAtMs = 0;
+    }
+    if (this.spaceJoined && this.realtimeTick % 4 === 0) {
+      this.refreshSpaceDevices();
+    }
+    if (this.mobileSyncEnabled && this.realtimeTick % 4 === 0) {
+      await this.refreshMobileSyncDevices();
+    }
+    if (this.realtimeAutoConnect && this.hasConfig() && !this.realtimeActive &&
+      this.realtimeTick % 5 === 0) {
+      this.startRealtime();
+    }
+    if (!this.realtimeActive || this.sseEventBusy) {
+      return;
+    }
+    this.sseEventBusy = true;
+    try {
+      let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
+      let events: SyncEvent[] = client.drainRealtimeEvents();
+      let shouldPull: boolean = false;
+      let disconnected: boolean = false;
+      for (let index: number = 0; index < events.length; index++) {
+        let event: SyncEvent = events[index];
+        if (event.eventType === 'hello' || event.eventType === 'resync') {
+          shouldPull = true;
+        } else if (event.eventType === 'update' && event.detail !== this.latestContentId) {
+          shouldPull = true;
+        } else if (event.eventType === 'disconnected') {
+          disconnected = true;
+        }
+      }
+      if (disconnected) {
+        this.realtimeActive = false;
+        this.statusCode = 3;
+        return;
+      }
+      if (shouldPull) {
+        await this.pullLatestFromRealtime(client);
+      }
+    } catch (error) {
+      this.realtimeActive = false;
+      this.statusCode = 3;
+    } finally {
+      this.sseEventBusy = false;
+    }
+  }
+
+  public async consumeSpaceTextEvents(): Promise<void> {
+    if (!this.spaceJoined) {
+      return;
+    }
+    if (this.spaceDevices.length === 0) {
+      await this.refreshSpaceDevices();
+    }
+    let events: NativeSpaceTextEvent[] = this.spaceNodeService.drainTextEvents();
+    for (let index: number = 0; index < events.length; index++) {
+      let event: NativeSpaceTextEvent = events[index];
+      this.latestText = event.text;
+      this.latestKind = 'Text';
+      this.latestImage = null;
+      if (this.desktopSelectedId.length === 0) {
+        this.releaseDesktopAudio();
+      }
+      this.latestContentId = event.snapshotHash;
+      this.addHistory(event.text, 'received');
+      try {
+        await this.clipboardService.writeText(event.text);
+        this.notifyReceivedContent('Text', event.text, null, 0,
+          this.sourceLabelForDevice(event.fromDeviceId));
+      } catch (error) {
+        this.statusCode = 3;
+      }
+    }
+    if (events.length > 0 && this.statusCode !== 3) {
+      this.spacePeerConnected = true;
+      this.statusCode = 2;
+    }
+    let imageEvents: NativeSpaceImageEvent[] = this.spaceNodeService.drainImageEvents();
+    for (let index: number = 0; index < imageEvents.length; index++) {
+      let event: NativeSpaceImageEvent = imageEvents[index];
+      try {
+        let pixelMap: image.PixelMap = await this.clipboardService.decodeImage(event.data);
+        this.latestImage = pixelMap;
+        this.latestImageRevision += 1;
+        this.latestKind = 'Image';
+        this.latestText = 'image.jpg';
+        if (this.desktopSelectedId.length === 0) {
+          this.releaseDesktopAudio();
+        }
+        this.latestContentId = event.snapshotHash;
+        this.addHistory('image.jpg', 'received', 'Image', pixelMap);
+        await this.clipboardService.writeImage(pixelMap);
+        this.notifyReceivedContent('Image', 'image.jpg', pixelMap, 0,
+          this.sourceLabelForDevice(event.fromDeviceId));
+      } catch (error) {
+        this.statusCode = 3;
+      }
+    }
+    if (imageEvents.length > 0 && this.statusCode !== 3) {
+      this.spacePeerConnected = true;
+      this.statusCode = 2;
+    }
+    let fileEvents: NativeSpaceFileEvent[] = this.spaceNodeService.drainFileEvents();
+    for (let index: number = 0; index < fileEvents.length; index++) {
+      let event: NativeSpaceFileEvent = fileEvents[index];
+      let filePreview: image.PixelMap | null = null;
+      if (this.isImageFileName(event.fileName) && event.data.length > 0) {
+        try {
+          filePreview = await this.clipboardService.decodeImage(event.data);
+        } catch (error) {
+          filePreview = null;
+        }
+      }
+      this.latestKind = 'File';
+      this.latestText = event.fileName;
+      this.latestFileName = event.fileName;
+      this.latestFileData = event.data;
+      this.latestFilePath = event.localPath;
+      this.latestFileRevision += 1;
+      this.desktopFilePreviewState = 0;
+      this.resetDesktopVideoAspectRatio();
+      if (this.desktopSelectedId.length === 0) {
+        this.releaseDesktopAudio();
+      }
+      this.latestImage = null;
+      this.latestContentId = event.snapshotHash;
+      this.addHistory(event.fileName, 'received', 'File', null,
+        event.data.length > 0 ? event.data : null, event.localPath);
+      this.notifyReceivedContent('File', event.fileName, filePreview, event.data.length,
+        this.sourceLabelForDevice(event.fromDeviceId));
+    }
+    if (fileEvents.length > 0) {
+      this.spacePeerConnected = true;
+      this.statusCode = 2;
+    }
+    let fileStatusEvents: NativeSpaceFileStatusEvent[] = this.spaceNodeService.drainFileStatusEvents();
+    for (let index: number = 0; index < fileStatusEvents.length; index++) {
+      let event: NativeSpaceFileStatusEvent = fileStatusEvents[index];
+      if (event.transferId !== this.pendingFileTransferId) {
+        continue;
+      }
+      if (event.status === 'completed') {
+        this.fileTransferState = 6;
+        this.pendingFileTransferId = '';
+        this.statusCode = 2;
+      } else if (event.status === 'failed' || event.status === 'cancelled') {
+        this.fileTransferState = 4;
+        this.pendingFileTransferId = '';
+        this.statusCode = 3;
+      }
+    }
+    if (events.length > 0 || imageEvents.length > 0 || fileEvents.length > 0) {
+      this.animateLatestContent();
+    }
+  }
+
+  public async pullLatestFromRealtime(client: MobileSyncClient): Promise<void> {
+    let result: SyncContent = await client.getLatestContent();
+    let sameContentId: boolean = result.contentId.length > 0 && result.contentId === this.latestContentId;
+    let incomingDisplayText: string = this.contentDisplayText(result);
+    let sameLegacyContent: boolean = result.contentId.length === 0 && result.kind === 'Text' &&
+      result.kind === this.latestKind &&
+      incomingDisplayText === this.latestText;
+    if (!sameContentId && !sameLegacyContent) {
+      await this.applyLatestContent(result, true);
+      let notificationPreview: image.PixelMap | null = result.kind === 'Image' ? this.latestImage : null;
+      if (result.kind === 'File' && this.isImageFileName(result.dataName) && result.data.length > 0) {
+        try {
+          notificationPreview = await this.clipboardService.decodeImage(result.data);
+        } catch (error) {
+          notificationPreview = null;
+        }
+      }
+      let notificationName: string = result.kind === 'File' && result.dataName.length > 0 ?
+        result.dataName : this.contentDisplayText(result);
+      this.notifyReceivedContent(result.kind, notificationName, notificationPreview, result.data.length);
+    }
+    this.statusCode = 2;
+  }
+
+  public notifyReceivedContent(kind: string, displayName: string, preview: image.PixelMap | null = null,
+    fileSize: number = 0, sourceLabel: string = ''): void {
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context === undefined) {
+      return;
+    }
+    this.receivedNotificationService.notifyReceived(context as common.UIAbilityContext, kind, displayName,
+      preview, fileSize, sourceLabel);
+  }
+
+  public sourceLabelForDevice(deviceId: string): string {
+    if (deviceId.length === 0) {
+      return '';
+    }
+    for (let index: number = 0; index < this.spaceDevices.length; index++) {
+      let device: NativeSpaceDevice = this.spaceDevices[index];
+      if (device.deviceId !== deviceId) {
+        continue;
+      }
+      let typeLabel: string = this.sourceDeviceTypeLabel(device.deviceType);
+      if (device.deviceName.length > 0) {
+        return device.deviceName + ' · ' + typeLabel;
+      }
+      return typeLabel;
+    }
+    return '远端设备';
+  }
+
+  public sourceDeviceTypeLabel(deviceType: string): string {
+    if (deviceType === 'phone') {
+      return '手机';
+    }
+    if (deviceType === 'tablet') {
+      return '平板';
+    }
+    if (deviceType === '2in1') {
+      return '电脑';
+    }
+    if (deviceType === 'tv') {
+      return '电视';
+    }
+    if (deviceType === 'wearable') {
+      return '穿戴设备';
+    }
+    if (deviceType === 'car') {
+      return '车机';
+    }
+    return '电脑';
+  }
+
+  public isImageFileName(name: string): boolean {
+    let dot: number = name.lastIndexOf('.');
+    if (dot < 0 || dot === name.length - 1) {
+      return false;
+    }
+    let extension: string = name.substring(dot + 1).toLowerCase();
+    return extension === 'jpg' || extension === 'jpeg' || extension === 'png' || extension === 'gif' ||
+      extension === 'webp' || extension === 'bmp';
+  }
+
+  public async loadServerHistory(reset: boolean): Promise<void> {
+    if (!this.hasConfig()) {
+      this.statusCode = 3;
+      this.openConnectionSettings();
+      return;
+    }
+    if (this.historyLoading) {
+      if (reset) {
+        this.historyResetPending = true;
+      }
+      return;
+    }
+    if (!reset && this.historyEnd) {
+      return;
+    }
+    let page: number = reset ? 1 : this.historyPage;
+    this.historyLoading = true;
+    this.statusCode = 1;
+    try {
+      let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
+      let items: ServerHistoryItem[] = await client.queryHistory(
+        page, this.historySearchText, this.historyStarredOnly);
+      if (reset) {
+        this.serverHistory = items;
+      } else {
+        this.serverHistory = [...this.serverHistory, ...items];
+      }
+      if (items.length === 0) {
+        this.historyEnd = true;
+      } else {
+        this.historyPage = page + 1;
+        this.historyEnd = false;
+      }
+      this.statusCode = 2;
+    } catch (error) {
+      this.statusCode = 3;
+    } finally {
+      this.historyLoading = false;
+      if (this.historyResetPending) {
+        this.historyResetPending = false;
+        this.loadServerHistory(true);
+      }
+    }
+  }
+
+  public replaceServerHistoryItem(updated: ServerHistoryItem): void {
+    let items: ServerHistoryItem[] = [];
+    for (let index: number = 0; index < this.serverHistory.length; index++) {
+      let item: ServerHistoryItem = this.serverHistory[index];
+      items.push(item.id === updated.id ? updated : item);
+    }
+    this.serverHistory = items;
+  }
+
+  public async toggleHistoryStarred(item: ServerHistoryItem): Promise<void> {
+    if (this.historyMutationBusy) {
+      return;
+    }
+    this.historyMutationBusy = true;
+    try {
+      let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
+      let updated: ServerHistoryItem = await client.setHistoryStarred(item, !item.starred);
+      this.replaceServerHistoryItem(updated);
+      this.statusCode = 2;
+    } catch (error) {
+      this.statusCode = 3;
+    } finally {
+      this.historyMutationBusy = false;
+    }
+  }
+
+  public async toggleHistoryPinned(item: ServerHistoryItem): Promise<void> {
+    if (this.historyMutationBusy) {
+      return;
+    }
+    this.historyMutationBusy = true;
+    try {
+      let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
+      let updated: ServerHistoryItem = await client.setHistoryPinned(item, !item.pinned);
+      this.replaceServerHistoryItem(updated);
+      this.statusCode = 2;
+    } catch (error) {
+      this.statusCode = 3;
+    } finally {
+      this.historyMutationBusy = false;
+    }
+  }
+
+  public async confirmDeleteHistory(item: ServerHistoryItem): Promise<void> {
+    let confirmed: boolean = false;
+    try {
+      let result = await this.getUIContext().getPromptAction().showDialog({
+        title: $r('app.string.history_delete_title'),
+        message: $r('app.string.history_delete_message'),
+        buttons: [
+          { text: $r('app.string.cancel_action'), color: $r('app.color.text_secondary') },
+          { text: $r('app.string.history_delete_action'), color: $r('app.color.danger') }
+        ]
+      });
+      confirmed = result.index === 1;
+    } catch (error) {
+      this.statusCode = 3;
+      return;
+    }
+    if (!confirmed || this.historyMutationBusy) {
+      return;
+    }
+    this.historyMutationBusy = true;
+    try {
+      let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
+      await client.deleteHistory(item);
+      let items: ServerHistoryItem[] = [];
+      for (let index: number = 0; index < this.serverHistory.length; index++) {
+        let current: ServerHistoryItem = this.serverHistory[index];
+        if (current.id !== item.id) {
+          items.push(current);
+        }
+      }
+      this.serverHistory = items;
+      this.statusCode = 2;
+    } catch (error) {
+      this.statusCode = 3;
+    } finally {
+      this.historyMutationBusy = false;
+    }
+  }
+
+}

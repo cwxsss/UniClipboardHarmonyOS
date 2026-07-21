@@ -16,7 +16,7 @@
     ],
     "buildModeSet": [
       {
-        "name": "debug",
+        "name": "debug"
       },
       {
         "name": "release"
@@ -26,7 +26,7 @@
   "modules": [
     {
       "name": "entry",
-      "srcPath": "./entry",
+      "srcPath": "./products/default",
       "targets": [
         {
           "name": "default",
@@ -35,6 +35,14 @@
           ]
         }
       ]
+    },
+    {
+      "name": "clipboard_feature",
+      "srcPath": "./features/clipboard"
+    },
+    {
+      "name": "common",
+      "srcPath": "./common"
     },
     {
       "name": "uniclipboard_native",

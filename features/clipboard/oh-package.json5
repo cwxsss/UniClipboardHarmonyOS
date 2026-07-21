@@ -1,0 +1,11 @@
+{
+  "name": "clipboard_feature",
+  "version": "1.0.0",
+  "description": "UniClipboard clipboard feature UI and business orchestration",
+  "main": "Index.ets",
+  "author": "UniClipboard HarmonyOS contributors",
+  "license": "AGPL-3.0-only",
+  "dependencies": {
+    "common": "@module:common"
+  }
+}

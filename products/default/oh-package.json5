@@ -1,0 +1,12 @@
+{
+  "name": "entry",
+  "version": "1.0.0",
+  "description": "UniClipboard product customization entry module",
+  "main": "",
+  "author": "UniClipboard HarmonyOS contributors",
+  "license": "AGPL-3.0-only",
+  "dependencies": {
+    "clipboard_feature": "@module:clipboard_feature",
+    "common": "@module:common"
+  }
+}

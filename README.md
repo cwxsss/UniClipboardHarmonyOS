@@ -28,7 +28,25 @@ UniClipboard 的 HarmonyOS 原生社区客户端，使用 ArkTS/ArkUI 构建，�
 - 大文本自动转为文件载荷，支持桌面端历史查询、搜索、收藏、置顶和软删除；
 - SSE 前台通知、中文/英文资源、深色/浅色主题；
 - 手机、平板和二合一设备布局；
+- 首次启动引导，以及按屏幕宽度切换的 Compact/Expanded 产品视图；
 - 连接配置使用 Preferences，用户名和密码使用 HarmonyOS Asset Store。
+
+## 分层架构
+
+工程采用单向依赖的四层结构，产品 UI 与业务状态、公共服务和原生协议实现相互分离：
+
+```text
+products/default (Entry HAP)
+  ├─> features/clipboard (HAR)
+  └─> common (HAR) ──> rust/uniclipboard-native/package (Native HAR)
+```
+
+- 产品定制层负责 Ability、响应式设备视图、应用身份资源和产品配置；
+- 基础特性层负责剪贴板共享状态与业务流程编排；
+- 公共能力层提供数据模型、存储、系统剪贴板、通知和同步服务；
+- 原生实现层复用 Rust 协议核心，并通过 Node-API 向 ArkTS 暴露能力。
+
+模块边界、依赖方向和扩展约定详见 [ARCHITECTURE.md](./ARCHITECTURE.md)。
 
 ## 正确使用方式
 
@@ -61,6 +79,12 @@ cd UniClipboardHarmonyOS
 devecocli build
 ```
 
+只构建当前产品入口及其依赖时，可以显式指定模块和目标：
+
+```powershell
+devecocli build --modules entry@default
+```
+
 真机安装需要在 DevEco Studio 中为你自己的应用配置调试或发布签名。仓库不会保存证书、私钥或签名口令。
 
 如果修改了 `rust/` 下的原生代码，先设置 SDK 路径并重建本地包：
@@ -80,17 +104,21 @@ devecocli build
 连接调试设备后运行：
 
 ```powershell
-devecocli run --module entry
+devecocli run --module entry --product default
 ```
 
 ## 源码结构
 
-- `entry/`：HarmonyOS ArkTS/ArkUI 客户端；
+- `products/default/`：默认产品的 Entry HAP、Ability 和 Compact/Expanded 响应式界面；
+- `features/clipboard/`：剪贴板特性 HAR，封装共享状态和业务流程；
+- `common/`：公共能力 HAR，包含模型、存储、通知与同步服务；
 - `AppScope/`：应用级资源与元数据；
 - `rust/uniclipboard-native/`：HarmonyOS Node-API 桥；
 - `rust/uc-mobile/`：移动同步客户端封装；
 - `rust/space-core/`：为本移植版保留的上游 Rust 核心快照；
 - `rust/build-native.ps1`：arm64-v8a 原生库构建与本地包装配脚本。
+
+根目录的 `entry/` 保留为重构前的兼容源码快照；当前构建入口由根 `build-profile.json5` 指向 `products/default/`。
 
 ## 当前边界
 

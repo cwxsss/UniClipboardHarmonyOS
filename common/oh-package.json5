@@ -1,0 +1,11 @@
+{
+  "name": "common",
+  "version": "1.0.0",
+  "description": "Shared models, data management and external interaction capabilities",
+  "main": "Index.ets",
+  "author": "UniClipboard HarmonyOS contributors",
+  "license": "AGPL-3.0-only",
+  "dependencies": {
+    "uniclipboard_native": "@module:uniclipboard_native"
+  }
+}

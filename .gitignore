@@ -4,6 +4,7 @@
 /.ohos-native/
 /.ohos-sdk/
 /oh_modules/
+**/oh_modules/
 /entry/build/
 /entry/oh_modules/
 /build/

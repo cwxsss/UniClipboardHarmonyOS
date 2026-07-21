@@ -1,0 +1,11 @@
+{
+  "module": {
+    "name": "clipboard_feature",
+    "type": "har",
+    "deviceTypes": [
+      "phone",
+      "tablet",
+      "2in1"
+    ]
+  }
+}
