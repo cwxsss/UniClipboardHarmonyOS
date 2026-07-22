@@ -69,8 +69,38 @@ import {
 @Component
 export struct CompactClipboardView {
   @State controller: ClipboardFeatureController = ClipboardFeatureController.getInstance();
+  @State showAboutSheet: boolean = false;
+  @State showFeedbackSheet: boolean = false;
   @Prop avoidAreaRectHeight: number = 0;
   @Prop navigationRectHeight: number = 0;
+
+  private openFeedback(): void {
+    if (this.showFeedbackSheet) {
+      return;
+    }
+    this.showFeedbackSheet = true;
+  }
+
+  private openAbout(): void {
+    if (this.showAboutSheet) {
+      return;
+    }
+    this.showAboutSheet = true;
+  }
+
+  private openFeedbackFromAbout(): void {
+    this.showAboutSheet = false;
+    setTimeout((): void => {
+      this.showFeedbackSheet = true;
+    }, 220);
+  }
+
+  private async submitFeedback(): Promise<void> {
+    let shouldClose: boolean = await this.controller.submitFeedback();
+    if (shouldClose) {
+      this.showFeedbackSheet = false;
+    }
+  }
 
   @Builder
   private spaceJoinCard() {
@@ -2074,7 +2104,7 @@ export struct CompactClipboardView {
         .margin({ top: 24 })
         .enabled(this.controller.feedbackText.trim().length > 0)
         .onClick((): void => {
-          this.controller.submitFeedback();
+          this.submitFeedback();
         })
     }
     .width('100%')
@@ -2111,7 +2141,7 @@ export struct CompactClipboardView {
               isEnabled: true,
               type: IconStyleMode.SMALL,
               action: (): void => {
-                this.controller.showFeedbackSheet = false;
+                this.showFeedbackSheet = false;
               }
             }
           }]
@@ -2207,7 +2237,7 @@ export struct CompactClipboardView {
         .borderRadius($r('app.float.corner_radius_level10'))
         .margin({ top: 22 })
         .onClick((): void => {
-          this.controller.openFeedbackFromAbout();
+          this.openFeedbackFromAbout();
         })
     }
     .width('100%')
@@ -2244,7 +2274,7 @@ export struct CompactClipboardView {
               isEnabled: true,
               type: IconStyleMode.SMALL,
               action: (): void => {
-                this.controller.showAboutSheet = false;
+                this.showAboutSheet = false;
               }
             }
           }]
@@ -2294,7 +2324,7 @@ export struct CompactClipboardView {
               icon: $r('sys.symbol.info_circle'),
               label: $r('app.string.about_title'),
               action: (): void => {
-                this.controller.openAbout();
+                this.openAbout();
               }
             }
           }]
@@ -2361,7 +2391,7 @@ export struct CompactClipboardView {
               icon: $r('sys.symbol.info_circle'),
               label: $r('app.string.about_title'),
               action: (): void => {
-                this.controller.openAbout();
+                this.openAbout();
               }
             }
           }]
@@ -2413,7 +2443,7 @@ export struct CompactClipboardView {
               icon: $r('sys.symbol.info_circle'),
               label: $r('app.string.about_title'),
               action: (): void => {
-                this.controller.openAbout();
+                this.openAbout();
               }
             }
           }]
@@ -3386,31 +3416,35 @@ export struct CompactClipboardView {
 
   build() {
     Stack() {
-      this.compactNavigation()
+      Stack() {
+        this.compactNavigation()
+      }
+      .width('100%')
+      .height('100%')
+      .bindSheet($$this.showFeedbackSheet, this.feedbackSheet(), {
+        detents: [SheetSize.MEDIUM],
+        preferType: SheetType.CENTER,
+        dragBar: false,
+        showClose: false,
+        backgroundColor: $r('app.color.page_background'),
+        blurStyle: BlurStyle.Regular,
+        onWillDisappear: (): void => {
+          this.showFeedbackSheet = false;
+        }
+      })
     }
     .width('100%')
     .height('100%')
     .backgroundColor($r('app.color.page_background'))
-    .bindSheet($$this.controller.showFeedbackSheet, this.feedbackSheet(), {
+    .bindSheet($$this.showAboutSheet, this.aboutSheet(), {
       detents: [SheetSize.MEDIUM],
       preferType: SheetType.CENTER,
       dragBar: false,
       showClose: false,
       backgroundColor: $r('app.color.page_background'),
       blurStyle: BlurStyle.Regular,
-      onDisappear: (): void => {
-        this.controller.showFeedbackSheet = false;
-      }
-    })
-    .bindSheet($$this.controller.showAboutSheet, this.aboutSheet(), {
-      detents: [SheetSize.MEDIUM],
-      preferType: SheetType.CENTER,
-      dragBar: false,
-      showClose: false,
-      backgroundColor: $r('app.color.page_background'),
-      blurStyle: BlurStyle.Regular,
-      onDisappear: (): void => {
-        this.controller.showAboutSheet = false;
+      onWillDisappear: (): void => {
+        this.showAboutSheet = false;
       }
     })
   }

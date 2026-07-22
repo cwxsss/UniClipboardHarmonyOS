@@ -133,8 +133,6 @@ export class ClipboardFeatureController {
   public historyMutationBusy: boolean = false;
   public desktopRefreshBusy: boolean = false;
   public realtimeActive: boolean = false;
-  public showAboutSheet: boolean = false;
-  public showFeedbackSheet: boolean = false;
   public feedbackText: string = '';
   public aboutMaterialLevel: hdsMaterial.MaterialLevel = hdsMaterial.MaterialLevel.SMOOTH;
   public spaceNodeState: number = 0;
@@ -1164,24 +1162,6 @@ export class ClipboardFeatureController {
     this.selectPage(2);
   }
 
-  public openFeedback(): void {
-    this.showFeedbackSheet = true;
-  }
-
-  public openAbout(): void {
-    if (this.showAboutSheet) {
-      return;
-    }
-    this.showAboutSheet = true;
-  }
-
-  public openFeedbackFromAbout(): void {
-    this.showAboutSheet = false;
-    setTimeout((): void => {
-      this.showFeedbackSheet = true;
-    }, 220);
-  }
-
   public showFeedbackToast(message: Resource): void {
     try {
       this.getUIContext().getPromptAction().showToast({ message: message });
@@ -1190,11 +1170,11 @@ export class ClipboardFeatureController {
     }
   }
 
-  public async submitFeedback(): Promise<void> {
+  public async submitFeedback(): Promise<boolean> {
     let feedback: string = this.feedbackText.trim();
     if (feedback.length === 0) {
       this.showFeedbackToast($r('app.string.feedback_empty_hint'));
-      return;
+      return false;
     }
 
     try {
@@ -1207,7 +1187,7 @@ export class ClipboardFeatureController {
     let context: common.Context | undefined = this.getUIContext().getHostContext();
     if (context === undefined) {
       this.showFeedbackToast($r('app.string.feedback_email_open_failed'));
-      return;
+      return false;
     }
 
     let subject: string = 'UniClipboard Feedback';
@@ -1219,15 +1199,17 @@ export class ClipboardFeatureController {
     let abilityContext: common.UIAbilityContext = context as common.UIAbilityContext;
     let emailUri: string = 'mailto:' + FEEDBACK_EMAIL + '?subject=' + encodeURIComponent(subject) +
       '&body=' + encodeURIComponent(feedback);
-    abilityContext.startAbility({
-      action: 'ohos.want.action.sendToData',
-      uri: emailUri
-    }).then((): void => {
-      this.showFeedbackSheet = false;
-    }).catch((error: BusinessError): void => {
-      console.error('UniClipboard failed to open the email app: ' + error.code.toString());
+    try {
+      await abilityContext.startAbility({
+        action: 'ohos.want.action.sendToData',
+        uri: emailUri
+      });
+      return true;
+    } catch (error) {
+      console.error('UniClipboard failed to open the email app.');
       this.showFeedbackToast($r('app.string.feedback_email_open_failed'));
-    });
+      return false;
+    }
   }
 
   public selectLargeSection(index: number): void {

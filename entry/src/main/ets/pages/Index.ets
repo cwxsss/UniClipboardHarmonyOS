@@ -10,7 +10,7 @@ import { fileIo, fileUri, picker } from '@kit.CoreFileKit';
 import { media } from '@kit.MediaKit';
 import { filePreview } from '@kit.PreviewKit';
 import { harmonyShare, systemShare } from '@kit.ShareKit';
-import { uniformTypeDescriptor } from '@kit.ArkData';
+import { preferences, uniformTypeDescriptor } from '@kit.ArkData';
 import {
   hdsMaterial,
   HdsNavDestination,
@@ -45,6 +45,7 @@ import { MobileSyncServerService } from '../service/MobileSyncServerService';
 import { NativeProtocolService } from '../service/NativeProtocolService';
 import { ReceivedNotificationService } from '../service/NotificationService';
 import { SpaceNodeService } from '../service/SpaceNodeService';
+import { OnboardingGuide } from '../components/OnboardingGuide';
 import {
   NativeCreateSpaceResult,
   NativeJoinSpaceResult,
@@ -94,6 +95,8 @@ const APPEARANCE_THEME_OPTIONS: AppearanceThemeOption[] = [
 ];
 
 const FEEDBACK_EMAIL: string = '3514795319@qq.com';
+const ONBOARDING_STORE_NAME: string = 'onboarding_preferences';
+const ONBOARDING_COMPLETED_KEY: string = 'onboarding_completed';
 
 @Entry
 @Component
@@ -137,6 +140,7 @@ struct Index {
   @State realtimeActive: boolean = false;
   @State showAboutSheet: boolean = false;
   @State showFeedbackSheet: boolean = false;
+  @State showOnboardingGuide: boolean = false;
   @State feedbackText: string = '';
   @State aboutMaterialLevel: hdsMaterial.MaterialLevel = hdsMaterial.MaterialLevel.SMOOTH;
   @State spaceNodeState: number = 0;
@@ -267,8 +271,62 @@ struct Index {
   private desktopGestureShareRegistering: boolean = false;
   private desktopGestureSharePageVisible: boolean = false;
   private pendingFileTransferId: string = '';
+  private openOnboardingAfterAbout: boolean = false;
+
+  private loadOnboardingState(): void {
+    try {
+      let context: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
+      let options: preferences.Options = { name: ONBOARDING_STORE_NAME };
+      let store: preferences.Preferences = preferences.getPreferencesSync(context, options);
+      let completed: boolean = store.getSync(ONBOARDING_COMPLETED_KEY, false) as boolean;
+      this.showOnboardingGuide = !completed;
+    } catch (error) {
+      this.showOnboardingGuide = true;
+      console.error('Index: failed to load onboarding state: ' + JSON.stringify(error));
+    }
+  }
+
+  private completeOnboarding(): void {
+    try {
+      let context: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
+      let options: preferences.Options = { name: ONBOARDING_STORE_NAME };
+      let store: preferences.Preferences = preferences.getPreferencesSync(context, options);
+      store.putSync(ONBOARDING_COMPLETED_KEY, true);
+      store.flushSync();
+    } catch (error) {
+      console.error('Index: failed to save onboarding state: ' + JSON.stringify(error));
+    }
+  }
+
+  private reopenOnboardingGuide(): void {
+    if (this.showAboutSheet) {
+      this.openOnboardingAfterAbout = true;
+      this.showAboutSheet = false;
+      return;
+    }
+    this.showOnboardingGuide = true;
+  }
+
+  private onAboutSheetDisappear(): void {
+    this.showAboutSheet = false;
+    if (this.openOnboardingAfterAbout) {
+      this.openOnboardingAfterAbout = false;
+      this.showOnboardingGuide = true;
+    }
+  }
+
+  @Builder
+  private OnboardingGuideBuilder() {
+    OnboardingGuide({
+      visible: this.showOnboardingGuide,
+      onCompleted: (): void => {
+        this.completeOnboarding();
+      }
+    })
+  }
 
   aboutToAppear(): void {
+    this.loadOnboardingState();
     let materialTypes: Array<hdsMaterial.MaterialType> = hdsMaterial.getSystemMaterialTypes();
     if (materialTypes.indexOf(hdsMaterial.MaterialType.IMMERSIVE) >= 0) {
       this.aboutMaterialLevel = hdsMaterial.MaterialLevel.EXQUISITE;
@@ -4909,6 +4967,7 @@ struct Index {
               .width('100%')
               .padding({ top: 10, bottom: 10 })
               .border({ width: { bottom: 1 }, color: $r('app.color.divider') })
+              .clickEffect({ level: ClickEffectLevel.MIDDLE })
               .bindContextMenu(this.historyServerContextMenu(item), ResponseType.LongPress)
             }, (item: ServerHistoryItem) => item.id)
             Button(this.historyEnd ? $r('app.string.server_history_end') :
@@ -4985,6 +5044,7 @@ struct Index {
               .width('100%')
               .padding({ top: 10, bottom: 10 })
               .border({ width: { bottom: 1 }, color: $r('app.color.divider') })
+              .clickEffect({ level: ClickEffectLevel.MIDDLE })
               .bindContextMenu(this.historyLocalContextMenu(item), ResponseType.LongPress)
             }, (item: ClipboardHistoryItem) => item.id)
           }
@@ -5031,6 +5091,7 @@ struct Index {
       width: this.appearanceMode === mode ? 2 : 1,
       color: this.appearanceMode === mode ? this.accentColor() : $r('app.color.divider')
     })
+    .clickEffect({ level: ClickEffectLevel.MIDDLE })
     .onClick((): void => {
       this.selectAppearanceMode(mode);
     })
@@ -5071,6 +5132,7 @@ struct Index {
       width: this.appearanceThemeId === option.id ? 2 : 1,
       color: this.appearanceThemeId === option.id ? this.accentColor() : $r('app.color.divider')
     })
+    .clickEffect({ level: ClickEffectLevel.MIDDLE })
     .onClick((): void => {
       this.selectAppearanceTheme(option.id);
     })
@@ -6030,6 +6092,13 @@ struct Index {
         .height(82)
         .borderRadius($r('app.float.corner_radius_level4'))
         .objectFit(ImageFit.Cover)
+        .draggable(false)
+        .gesture(
+          TapGesture({ count: 2 })
+            .onAction((): void => {
+              this.reopenOnboardingGuide();
+            })
+        )
       Text($r('app.string.app_title'))
         .fontSize(24)
         .fontWeight(FontWeight.Bold)
@@ -6352,7 +6421,7 @@ struct Index {
       backgroundColor: $r('app.color.page_background'),
       blurStyle: BlurStyle.Regular,
       onDisappear: (): void => {
-        this.showAboutSheet = false;
+        this.onAboutSheetDisappear();
       }
     })
   }
@@ -6375,6 +6444,7 @@ struct Index {
     .padding({ left: 16, right: 16 })
     .borderRadius($r('app.float.corner_radius_level8'))
     .backgroundColor(this.selectedTab === index ? this.accentSoftColor() : Color.Transparent)
+    .clickEffect({ level: ClickEffectLevel.MIDDLE })
     .onClick(() => {
       this.selectPage(index);
     })
@@ -6444,6 +6514,7 @@ struct Index {
     .justifyContent(FlexAlign.Center)
     .borderRadius($r('app.float.corner_radius_level10'))
     .backgroundColor(this.largeSection === index ? this.accentSoftColor() : Color.Transparent)
+    .clickEffect({ level: ClickEffectLevel.MIDDLE })
     .onClick((): void => {
       this.selectLargeSection(index);
     })
@@ -6466,6 +6537,7 @@ struct Index {
     .justifyContent(FlexAlign.Center)
     .borderRadius($r('app.float.corner_radius_level10'))
     .backgroundColor(Color.Transparent)
+    .clickEffect({ level: ClickEffectLevel.MIDDLE })
     .onClick((): void => {
       this.openFeedback();
     })
@@ -6480,11 +6552,18 @@ struct Index {
           .height(50)
           .borderRadius($r('app.float.corner_radius_level4'))
           .objectFit(ImageFit.Cover)
+          .draggable(false)
       }
       .width(64)
       .height(64)
       .justifyContent(FlexAlign.Center)
       .margin({ bottom: 6 })
+      .gesture(
+        TapGesture({ count: 2 })
+          .onAction((): void => {
+            this.reopenOnboardingGuide();
+          })
+      )
       this.desktopRailButton(0, $r('sys.symbol.rectangle_stack'), $r('app.string.desktop_clipboard'))
       this.desktopRailButton(1, $r('sys.symbol.desktop'), $r('app.string.desktop_devices'))
       Blank()
@@ -6518,6 +6597,7 @@ struct Index {
     .borderRadius($r('app.float.corner_radius_level10'))
     .backgroundColor(this.desktopFilterSelected(group, value) ? this.accentSoftColor() :
       Color.Transparent)
+    .clickEffect({ level: ClickEffectLevel.MIDDLE })
     .onClick((): void => {
       this.applyDesktopFilter(group, value);
     })
@@ -6553,6 +6633,7 @@ struct Index {
     .borderRadius($r('app.float.corner_radius_level10'))
     .backgroundColor(this.desktopExtensionFilter === extension ? this.accentSoftColor() :
       Color.Transparent)
+    .clickEffect({ level: ClickEffectLevel.MIDDLE })
     .onClick((): void => {
       this.applyDesktopExtensionFilter(extension);
     })
@@ -6676,6 +6757,7 @@ struct Index {
     .backgroundColor(this.desktopSelectedId === item.id ? this.accentSoftColor() :
       $r('app.color.surface'))
     .border({ width: { bottom: 1 }, color: $r('app.color.divider') })
+    .clickEffect({ level: ClickEffectLevel.MIDDLE })
     .bindContextMenu(this.historyServerContextMenu(item), ResponseType.LongPress)
     .onClick((): void => {
       this.selectDesktopServerItem(item);
@@ -6729,6 +6811,7 @@ struct Index {
     .backgroundColor(this.desktopSelectedId === item.id ? this.accentSoftColor() :
       $r('app.color.surface'))
     .border({ width: { bottom: 1 }, color: $r('app.color.divider') })
+    .clickEffect({ level: ClickEffectLevel.MIDDLE })
     .bindContextMenu(this.historyLocalContextMenu(item), ResponseType.LongPress)
     .onClick((): void => {
       this.selectDesktopSessionItem(item);
@@ -8512,6 +8595,7 @@ struct Index {
     .borderRadius($r('app.float.corner_radius_level10'))
     .backgroundColor(this.largeSettingsSection === index ? this.accentSoftColor() :
       Color.Transparent)
+    .clickEffect({ level: ClickEffectLevel.MIDDLE })
     .onClick((): void => {
       this.largeSettingsSection = index;
     })
@@ -8788,6 +8872,7 @@ struct Index {
         color: this.appearanceMode === APPEARANCE_MODE_LIGHT ? this.accentColor() :
           $r('app.color.divider')
       })
+      .clickEffect({ level: ClickEffectLevel.MIDDLE })
       .onClick((): void => {
         this.selectAppearanceMode(APPEARANCE_MODE_LIGHT);
       })
@@ -8817,6 +8902,7 @@ struct Index {
         color: this.appearanceMode === APPEARANCE_MODE_DARK ? this.accentColor() :
           $r('app.color.divider')
       })
+      .clickEffect({ level: ClickEffectLevel.MIDDLE })
       .onClick((): void => {
         this.selectAppearanceMode(APPEARANCE_MODE_DARK);
       })
@@ -8840,6 +8926,7 @@ struct Index {
         color: this.appearanceMode === APPEARANCE_MODE_SYSTEM ? this.accentColor() :
           $r('app.color.divider')
       })
+      .clickEffect({ level: ClickEffectLevel.MIDDLE })
       .onClick((): void => {
         this.selectAppearanceMode(APPEARANCE_MODE_SYSTEM);
       })
@@ -9034,7 +9121,10 @@ struct Index {
       dragBar: false,
       showClose: false,
       backgroundColor: $r('app.color.page_background'),
-      blurStyle: BlurStyle.Regular
+      blurStyle: BlurStyle.Regular,
+      onDisappear: (): void => {
+        this.onAboutSheetDisappear();
+      }
     })
   }
 
@@ -9069,19 +9159,36 @@ struct Index {
       dragBar: false,
       showClose: false,
       backgroundColor: $r('app.color.page_background'),
-      blurStyle: BlurStyle.Regular
+      blurStyle: BlurStyle.Regular,
+      onDisappear: (): void => {
+        this.onAboutSheetDisappear();
+      }
     })
   }
 
   build() {
     Stack() {
-      if (this.isLargeScreen) {
-        this.largeNavigation()
-      } else if (this.isWideScreen) {
-        this.mediumNavigation()
-      } else {
-        this.compactNavigation()
+      Stack() {
+        if (this.isLargeScreen) {
+          this.largeNavigation()
+        } else if (this.isWideScreen) {
+          this.mediumNavigation()
+        } else {
+          this.compactNavigation()
+        }
       }
+      .width('100%')
+      .height('100%')
+      .bindSheet($$this.showOnboardingGuide, this.OnboardingGuideBuilder(), {
+        preferType: SheetType.CENTER,
+        dragBar: false,
+        showClose: false,
+        backgroundColor: $r('app.color.page_background'),
+        blurStyle: BlurStyle.Regular,
+        onDisappear: (): void => {
+          this.showOnboardingGuide = false;
+        }
+      })
     }
     .width('100%')
     .height('100%')

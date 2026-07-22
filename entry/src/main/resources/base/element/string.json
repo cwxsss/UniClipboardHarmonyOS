@@ -1511,6 +1511,106 @@
     {
       "name": "notification_received_open",
       "value": "打开 UniClipboard 查看并使用"
+    },
+    {
+      "name": "onboarding_skip",
+      "value": "跳过"
+    },
+    {
+      "name": "onboarding_next",
+      "value": "继续"
+    },
+    {
+      "name": "onboarding_start",
+      "value": "开始使用"
+    },
+    {
+      "name": "onboarding_welcome_title",
+      "value": "欢迎使用 UniClipboard"
+    },
+    {
+      "name": "onboarding_welcome_description",
+      "value": "让文本、图片和文件在你的受信设备之间自然流动。"
+    },
+    {
+      "name": "onboarding_sync_title",
+      "value": "先创建或加入同步空间"
+    },
+    {
+      "name": "onboarding_sync_description",
+      "value": "前往“设置”，创建空间或扫描邀请二维码。设备加入同一空间后，即可发现彼此并开始同步。"
+    },
+    {
+      "name": "onboarding_device_phone",
+      "value": "本机"
+    },
+    {
+      "name": "onboarding_device_computer",
+      "value": "电脑"
+    },
+    {
+      "name": "onboarding_encrypted",
+      "value": "加密同步"
+    },
+    {
+      "name": "onboarding_trusted_devices",
+      "value": "内容只在你授权的设备间传输"
+    },
+    {
+      "name": "onboarding_history_title",
+      "value": "发送、查找，再次使用"
+    },
+    {
+      "name": "onboarding_history_description",
+      "value": "在“剪贴板”中发送内容，在桌面历史里搜索、收藏或置顶，常用内容不再反复翻找。"
+    },
+    {
+      "name": "onboarding_search_placeholder",
+      "value": "搜索桌面历史"
+    },
+    {
+      "name": "onboarding_history_text",
+      "value": "会议链接与文字"
+    },
+    {
+      "name": "onboarding_history_text_note",
+      "value": "点击即可写入本机剪贴板"
+    },
+    {
+      "name": "onboarding_history_image",
+      "value": "截图与图片"
+    },
+    {
+      "name": "onboarding_history_image_note",
+      "value": "在设备间快速取用"
+    },
+    {
+      "name": "onboarding_history_file",
+      "value": "文档与文件"
+    },
+    {
+      "name": "onboarding_history_file_note",
+      "value": "流式传输并保存到本机"
+    },
+    {
+      "name": "onboarding_privacy_title",
+      "value": "不止剪贴板，也重视隐私"
+    },
+    {
+      "name": "onboarding_privacy_description",
+      "value": "UniClipboard 支持文本、图片和文件。传输通过加密空间完成，敏感凭据保存在系统安全存储中。"
+    },
+    {
+      "name": "onboarding_feature_clipboard",
+      "value": "文本"
+    },
+    {
+      "name": "onboarding_feature_image",
+      "value": "图片"
+    },
+    {
+      "name": "onboarding_feature_file",
+      "value": "文件"
     }
   ]
 }

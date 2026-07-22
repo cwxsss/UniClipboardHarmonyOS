@@ -377,6 +377,106 @@
     { "name": "notification_received_text", "value": "Text received" },
     { "name": "notification_received_image", "value": "Image received" },
     { "name": "notification_received_file", "value": "File received" },
-    { "name": "notification_received_open", "value": "Open UniClipboard to view and use it" }
+    { "name": "notification_received_open", "value": "Open UniClipboard to view and use it" },
+    {
+      "name": "onboarding_skip",
+      "value": "Skip"
+    },
+    {
+      "name": "onboarding_next",
+      "value": "Continue"
+    },
+    {
+      "name": "onboarding_start",
+      "value": "Get started"
+    },
+    {
+      "name": "onboarding_welcome_title",
+      "value": "Welcome to UniClipboard"
+    },
+    {
+      "name": "onboarding_welcome_description",
+      "value": "Let text, images, and files flow naturally between your trusted devices."
+    },
+    {
+      "name": "onboarding_sync_title",
+      "value": "Create or join a sync space"
+    },
+    {
+      "name": "onboarding_sync_description",
+      "value": "Open Settings to create a space or scan an invitation. Devices in the same space can discover each other and start syncing."
+    },
+    {
+      "name": "onboarding_device_phone",
+      "value": "This device"
+    },
+    {
+      "name": "onboarding_device_computer",
+      "value": "Computer"
+    },
+    {
+      "name": "onboarding_encrypted",
+      "value": "Encrypted"
+    },
+    {
+      "name": "onboarding_trusted_devices",
+      "value": "Content only moves between devices you authorize"
+    },
+    {
+      "name": "onboarding_history_title",
+      "value": "Send, find, and reuse"
+    },
+    {
+      "name": "onboarding_history_description",
+      "value": "Send content from Clipboard, then search, star, or pin desktop history so useful items stay close."
+    },
+    {
+      "name": "onboarding_search_placeholder",
+      "value": "Search desktop history"
+    },
+    {
+      "name": "onboarding_history_text",
+      "value": "Links and text"
+    },
+    {
+      "name": "onboarding_history_text_note",
+      "value": "Write it to this device's clipboard"
+    },
+    {
+      "name": "onboarding_history_image",
+      "value": "Screenshots and images"
+    },
+    {
+      "name": "onboarding_history_image_note",
+      "value": "Pick them up on another device"
+    },
+    {
+      "name": "onboarding_history_file",
+      "value": "Documents and files"
+    },
+    {
+      "name": "onboarding_history_file_note",
+      "value": "Stream and save them locally"
+    },
+    {
+      "name": "onboarding_privacy_title",
+      "value": "More than a clipboard, with privacy built in"
+    },
+    {
+      "name": "onboarding_privacy_description",
+      "value": "UniClipboard supports text, images, and files. Transfers use an encrypted space, while sensitive credentials stay in system secure storage."
+    },
+    {
+      "name": "onboarding_feature_clipboard",
+      "value": "Text"
+    },
+    {
+      "name": "onboarding_feature_image",
+      "value": "Images"
+    },
+    {
+      "name": "onboarding_feature_file",
+      "value": "Files"
+    }
   ]
 }
