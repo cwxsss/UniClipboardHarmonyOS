@@ -7,6 +7,7 @@ import {
   NativeSpaceFileStatusEvent,
   NativeSpaceImageEvent,
   NativeSpaceInvitation,
+  NativeSpaceMemberSyncPreferences,
   NativeSpaceStatus,
   NativeSpaceTextEvent,
   connectSpaceDevice,
@@ -17,22 +18,36 @@ import {
   drainSpaceImageEvents,
   drainSpaceTextEvents,
   getSpaceDevices,
+  getSpaceMemberSyncPreferences,
   getSpaceStatus,
   issueSpaceInvitation,
   joinSpace,
   replaceSpace,
+  resetSpaceMemberSyncPreferences,
   sendSpaceFile,
   sendSpaceFileFromFd,
+  sendSpaceFileFromFdToDevice,
   sendSpaceImage,
+  sendSpaceImageToDevice,
   sendSpaceText,
+  sendSpaceTextToDevice,
   startSpaceNode,
   switchSpace,
+  updateSpaceMemberSendPreferences,
   wakeSpaceConnections,
   revokeSpaceMember
 } from 'uniclipboard_native';
 import { fileIo } from '@kit.CoreFileKit';
 
 export class SpaceNodeService {
+  private async reconnectTarget(deviceId: string): Promise<void> {
+    wakeSpaceConnections();
+    let online: boolean = await connectSpaceDevice(deviceId);
+    if (!online) {
+      throw new Error('target space device is offline');
+    }
+  }
+
   private async reconnectKnownPeers(): Promise<number> {
     wakeSpaceConnections();
     let devices: NativeSpaceDevice[] = await getSpaceDevices();
@@ -65,6 +80,21 @@ export class SpaceNodeService {
 
   async devices(): Promise<NativeSpaceDevice[]> {
     return await getSpaceDevices();
+  }
+
+  async memberSyncPreferences(deviceId: string): Promise<NativeSpaceMemberSyncPreferences> {
+    return await getSpaceMemberSyncPreferences(deviceId);
+  }
+
+  async updateMemberSendPreferences(deviceId: string, sendEnabled: boolean, text: boolean,
+    imageEnabled: boolean, file: boolean, link: boolean,
+    richText: boolean): Promise<NativeSpaceMemberSyncPreferences> {
+    return await updateSpaceMemberSendPreferences(
+      deviceId, sendEnabled, text, imageEnabled, file, link, richText);
+  }
+
+  async resetMemberSyncPreferences(deviceId: string): Promise<NativeSpaceMemberSyncPreferences> {
+    return await resetSpaceMemberSyncPreferences(deviceId);
   }
 
   async connect(deviceId: string): Promise<boolean> {
@@ -104,9 +134,19 @@ export class SpaceNodeService {
     return await sendSpaceText(text);
   }
 
+  async sendTextToDevice(text: string, deviceId: string): Promise<number> {
+    await this.reconnectTarget(deviceId);
+    return await sendSpaceTextToDevice(text, deviceId);
+  }
+
   async sendImage(data: Uint8Array): Promise<number> {
     await this.reconnectKnownPeers();
     return await sendSpaceImage(data, 'image/jpeg');
+  }
+
+  async sendImageToDevice(data: Uint8Array, deviceId: string): Promise<number> {
+    await this.reconnectTarget(deviceId);
+    return await sendSpaceImageToDevice(data, 'image/jpeg', deviceId);
   }
 
   async sendFile(data: Uint8Array, fileName: string): Promise<number> {
@@ -119,6 +159,17 @@ export class SpaceNodeService {
     try {
       await this.reconnectKnownPeers();
       return await sendSpaceFileFromFd(file.fd, fileSize, fileName);
+    } finally {
+      fileIo.closeSync(file.fd);
+    }
+  }
+
+  async sendFileFromUriToDevice(uri: string, fileSize: number, fileName: string,
+    deviceId: string): Promise<NativeSpaceFileSendResult> {
+    let file: fileIo.File = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY);
+    try {
+      await this.reconnectTarget(deviceId);
+      return await sendSpaceFileFromFdToDevice(file.fd, fileSize, fileName, deviceId);
     } finally {
       fileIo.closeSync(file.fd);
     }

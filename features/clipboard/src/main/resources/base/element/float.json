@@ -83,6 +83,14 @@
     {
       "name": "font_desktop_rail_label",
       "value": "11fp"
+    },
+    {
+      "name": "device_card_header_height",
+      "value": "260vp"
+    },
+    {
+      "name": "device_card_header_height_compact",
+      "value": "220vp"
     }
   ]
 }

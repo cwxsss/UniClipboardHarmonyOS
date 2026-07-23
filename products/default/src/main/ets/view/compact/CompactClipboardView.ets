@@ -63,14 +63,20 @@ import {
   APPEARANCE_THEME_OPTIONS,
   AppearanceThemeOption,
   ClipboardFeatureController,
+  ImageSmartAction,
   FEEDBACK_EMAIL
 } from 'clipboard_feature';
+import { ConnectionDiagnosticsSheet } from '../../components/ConnectionDiagnosticsSheet';
 
 @Component
 export struct CompactClipboardView {
   @State controller: ClipboardFeatureController = ClipboardFeatureController.getInstance();
   @State showAboutSheet: boolean = false;
   @State showFeedbackSheet: boolean = false;
+  @State showConnectionDiagnosticsSheet: boolean = false;
+  @State showHistoryTagSheet: boolean = false;
+  @State historyTagItemId: string = '';
+  @State historyTagDraft: string = '';
   @Prop avoidAreaRectHeight: number = 0;
   @Prop navigationRectHeight: number = 0;
 
@@ -88,6 +94,24 @@ export struct CompactClipboardView {
     this.showAboutSheet = true;
   }
 
+  private openConnectionDiagnostics(): void {
+    if (this.showConnectionDiagnosticsSheet) {
+      return;
+    }
+    this.showConnectionDiagnosticsSheet = true;
+    this.controller.refreshConnectionDiagnostics();
+  }
+
+  private titleBarConnectionIcon(connected: boolean): IconType {
+    if (connected) {
+      return $r('sys.symbol.connection');
+    }
+    let modifier: SymbolGlyphModifier =
+      new SymbolGlyphModifier($r('sys.symbol.unconnection'));
+    modifier.fontColor([$r('app.color.danger')]);
+    return modifier;
+  }
+
   private openFeedbackFromAbout(): void {
     this.showAboutSheet = false;
     setTimeout((): void => {
@@ -100,6 +124,65 @@ export struct CompactClipboardView {
     if (shouldClose) {
       this.showFeedbackSheet = false;
     }
+  }
+
+  @Builder
+  private connectionDiagnosticsSheet() {
+    ConnectionDiagnosticsSheet({
+      visible: this.showConnectionDiagnosticsSheet
+    })
+  }
+
+  private openHistoryTagEditor(item: ClipboardHistoryItem): void {
+    this.historyTagItemId = item.id;
+    this.historyTagDraft = this.controller.historyTagsText(item);
+    this.showHistoryTagSheet = true;
+  }
+
+  @Builder
+  private historyTagEditorSheet() {
+    Column({ space: 14 }) {
+      Text($r('app.string.history_tag_edit_title'))
+        .fontSize(22)
+        .fontWeight(FontWeight.Bold)
+        .fontColor($r('app.color.text_primary'))
+        .width('100%')
+      Text($r('app.string.history_tag_edit_note'))
+        .fontSize(13)
+        .lineHeight(19)
+        .fontColor($r('app.color.text_secondary'))
+        .width('100%')
+      TextInput({ placeholder: $r('app.string.history_tag_placeholder'), text: this.historyTagDraft })
+        .height(48)
+        .fontColor($r('app.color.text_primary'))
+        .backgroundColor($r('app.color.surface_muted'))
+        .borderRadius($r('app.float.corner_radius_level10'))
+        .onChange((value: string): void => {
+          this.historyTagDraft = value;
+        })
+      Row({ space: 10 }) {
+        Button($r('app.string.cancel_action'), { type: ButtonType.Normal })
+          .layoutWeight(1)
+          .height(44)
+          .fontColor($r('app.color.text_primary'))
+          .backgroundColor($r('app.color.surface_muted'))
+          .onClick((): void => {
+            this.showHistoryTagSheet = false;
+          })
+        Button($r('app.string.history_tag_save_action'), { type: ButtonType.Normal })
+          .layoutWeight(1)
+          .height(44)
+          .fontColor($r('app.color.on_accent'))
+          .backgroundColor(this.controller.accentColor())
+          .onClick((): void => {
+            this.controller.setHistoryTags(this.historyTagItemId, this.historyTagDraft);
+            this.showHistoryTagSheet = false;
+          })
+      }
+      .width('100%')
+    }
+    .width('100%')
+    .padding(24)
   }
 
   @Builder
@@ -549,6 +632,28 @@ export struct CompactClipboardView {
           this.controller.toggleLocalHistoryStarred(item);
       })
       MenuItem({
+        symbolStartIcon: this.controller.historyMenuSymbol($r('sys.symbol.bookmark')),
+        content: item.isSnippet ? $r('app.string.history_remove_snippet_action') :
+          $r('app.string.history_add_snippet_action')
+      }).onClick((): void => {
+          this.controller.toggleHistorySnippet(item);
+      })
+      MenuItem({
+        symbolStartIcon: this.controller.historyMenuSymbol($r('sys.symbol.label')),
+        content: $r('app.string.history_tag_edit_action')
+      }).onClick((): void => {
+          this.openHistoryTagEditor(item);
+      })
+      MenuItem({
+        symbolStartIcon: this.controller.historyMenuSymbol($r('sys.symbol.checkmark_circle')),
+        content: $r('app.string.history_select_action')
+      }).onClick((): void => {
+          if (!this.controller.historySelectionMode) {
+            this.controller.toggleHistorySelectionMode();
+          }
+          this.controller.toggleHistorySelection(item.id);
+      })
+      MenuItem({
         symbolStartIcon: this.controller.historyMenuSymbol($r('sys.symbol.link')),
         content: $r('app.string.history_send_to_action'),
         symbolEndIcon: this.controller.historyMenuSymbol($r('sys.symbol.chevron_forward')),
@@ -566,6 +671,126 @@ export struct CompactClipboardView {
       startMargin: LengthMetrics.vp(12),
       endMargin: LengthMetrics.vp(12)
     })
+  }
+
+
+  @Builder
+  private imageIntelligencePanel() {
+    Column({ space: 12 }) {
+      Row({ space: 10 }) {
+        Text($r('app.string.image_intelligence_title'))
+          .fontSize($r('app.float.font_subtitle_large'))
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.text_primary'))
+          .layoutWeight(1)
+        Button(this.controller.currentImageRecognitionState() === 1 ?
+          $r('app.string.image_intelligence_running') : $r('app.string.image_intelligence_action'),
+        { type: ButtonType.Normal })
+          .height(36)
+          .fontSize(13)
+          .fontColor($r('app.color.on_accent'))
+          .backgroundColor(this.controller.accentColor())
+          .borderRadius($r('app.float.corner_radius_level10'))
+          .enabled(this.controller.currentImageRecognitionState() !== 1)
+          .onClick((): void => {
+            this.controller.recognizeCurrentImage();
+          })
+      }
+      .width('100%')
+      if (this.controller.currentImageRecognitionState() === 2) {
+        if (this.controller.currentImageRecognizedText().length > 0) {
+          Row({ space: 8 }) {
+            Text($r('app.string.image_intelligence_text_title'))
+              .fontSize(13)
+              .fontWeight(FontWeight.Medium)
+              .fontColor($r('app.color.text_secondary'))
+              .layoutWeight(1)
+            Button($r('app.string.copy_action'), { type: ButtonType.Normal })
+              .height(32)
+              .fontSize(12)
+              .fontColor(this.controller.accentColor())
+              .backgroundColor($r('app.color.surface'))
+              .borderRadius($r('app.float.corner_radius_level10'))
+              .onClick((): void => {
+                this.controller.copyImageRecognizedText();
+              })
+          }
+          .width('100%')
+          Text(this.controller.currentImageRecognizedText())
+            .fontSize($r('app.float.font_body_medium'))
+            .lineHeight(21)
+            .fontColor($r('app.color.text_primary'))
+            .width('100%')
+            .maxLines(8)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .padding(12)
+            .borderRadius($r('app.float.corner_radius_level4'))
+            .backgroundColor($r('app.color.surface'))
+        }
+        if (this.controller.currentImageSmartActions().length > 0) {
+          Text($r('app.string.image_intelligence_actions_title'))
+            .fontSize(13)
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('app.color.text_secondary'))
+            .width('100%')
+          ForEach(this.controller.currentImageSmartActions(), (action: ImageSmartAction) => {
+            Row({ space: 8 }) {
+              Text(action.kind === 'link' ? $r('app.string.image_intelligence_link') :
+                (action.kind === 'phone' ? $r('app.string.image_intelligence_phone') :
+                  $r('app.string.image_intelligence_qr')))
+                .fontSize(12)
+                .fontWeight(FontWeight.Medium)
+                .fontColor(this.controller.accentColor())
+              Text(action.value)
+                .fontSize(13)
+                .fontColor($r('app.color.text_primary'))
+                .maxLines(2)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .layoutWeight(1)
+              Button($r('app.string.copy_action'), { type: ButtonType.Normal })
+                .height(32)
+                .fontSize(12)
+                .fontColor($r('app.color.text_primary'))
+                .backgroundColor($r('app.color.surface'))
+                .borderRadius($r('app.float.corner_radius_level10'))
+                .onClick((): void => {
+                  this.controller.copyImageSmartAction(action);
+                })
+              if (this.controller.imageSmartActionCanOpen(action)) {
+                Button(action.kind === 'phone' ? $r('app.string.image_intelligence_dial') :
+                  $r('app.string.image_intelligence_open'), { type: ButtonType.Normal })
+                  .height(32)
+                  .fontSize(12)
+                  .fontColor($r('app.color.on_accent'))
+                  .backgroundColor(this.controller.accentColor())
+                  .borderRadius($r('app.float.corner_radius_level10'))
+                  .onClick((): void => {
+                    this.controller.openImageSmartAction(action);
+                  })
+              }
+            }
+            .width('100%')
+            .padding(10)
+            .borderRadius($r('app.float.corner_radius_level4'))
+            .backgroundColor($r('app.color.surface_muted'))
+          }, (action: ImageSmartAction): string => action.kind + ':' + action.value)
+        }
+      } else if (this.controller.currentImageRecognitionState() === 3) {
+        Text($r('app.string.image_intelligence_empty'))
+          .fontSize(13)
+          .fontColor($r('app.color.text_secondary'))
+          .width('100%')
+      } else if (this.controller.currentImageRecognitionState() === 4) {
+        Text($r('app.string.image_intelligence_failed'))
+          .fontSize(13)
+          .fontColor($r('app.color.danger'))
+          .width('100%')
+      }
+    }
+    .width('100%')
+    .padding(14)
+    .borderRadius($r('app.float.corner_radius_level8'))
+    .backgroundColor($r('app.color.surface_muted'))
   }
 
 
@@ -598,6 +823,7 @@ export struct CompactClipboardView {
         .fontSize($r('app.float.font_body_medium'))
         .fontColor($r('app.color.text_secondary'))
         .width('100%')
+      this.imageIntelligencePanel()
     } else if (this.controller.latestKind === 'File' && this.controller.desktopShowsFile()) {
       if (this.controller.desktopFileIsVideo() && this.controller.desktopFilePreviewUri().length > 0) {
         Video({ src: this.controller.desktopFilePreviewUri() })
@@ -1056,12 +1282,129 @@ export struct CompactClipboardView {
         .backgroundColor($r('app.color.surface'))
 
         Column({ space: 10 }) {
-          Text($r('app.string.history_title'))
-            .fontSize($r('app.float.font_title_small'))
-            .fontWeight(FontWeight.Bold)
-            .fontColor($r('app.color.text_primary'))
+          Row() {
+            Text($r('app.string.history_title'))
+              .fontSize($r('app.float.font_title_small'))
+              .fontWeight(FontWeight.Bold)
+              .fontColor($r('app.color.text_primary'))
+            Blank()
+            Button(this.controller.historySelectionMode ? $r('app.string.cancel_action') :
+              $r('app.string.history_select_action'), { type: ButtonType.Normal })
+              .height(34)
+              .fontSize(12)
+              .fontColor(this.controller.accentColor())
+              .backgroundColor(this.controller.accentSoftColor())
+              .borderRadius($r('app.float.corner_radius_level10'))
+              .onClick((): void => {
+                this.controller.toggleHistorySelectionMode();
+              })
+          }
+          .width('100%')
+          Row({ space: 8 }) {
+            Button($r('app.string.desktop_all'), { type: ButtonType.Normal })
+              .layoutWeight(1)
+              .height(34)
+              .fontSize(12)
+              .fontColor(!this.controller.historySnippetOnly ? this.controller.accentColor() :
+                $r('app.color.text_primary'))
+              .backgroundColor(!this.controller.historySnippetOnly ? this.controller.accentSoftColor() :
+                $r('app.color.surface_muted'))
+              .borderRadius($r('app.float.corner_radius_level10'))
+              .onClick((): void => {
+                this.controller.clearHistoryLibraryFilters();
+              })
+            Button($r('app.string.history_snippets_title'), { type: ButtonType.Normal })
+              .layoutWeight(1)
+              .height(34)
+              .fontSize(12)
+              .fontColor(this.controller.historySnippetOnly ? this.controller.accentColor() :
+                $r('app.color.text_primary'))
+              .backgroundColor(this.controller.historySnippetOnly ? this.controller.accentSoftColor() :
+                $r('app.color.surface_muted'))
+              .borderRadius($r('app.float.corner_radius_level10'))
+              .onClick((): void => {
+                this.controller.historySnippetOnly = true;
+              })
+          }
+          .width('100%')
+          if (this.controller.historyDeviceOptions().length > 0) {
+            Text($r('app.string.history_devices_title'))
+              .fontSize(12)
+              .fontColor($r('app.color.text_secondary'))
+              .width('100%')
+            ForEach(this.controller.historyDeviceOptions(), (deviceName: string) => {
+              Button(deviceName, { type: ButtonType.Normal })
+                .height(34)
+                .width('100%')
+                .fontSize(12)
+                .fontColor(this.controller.historyDeviceFilter === deviceName ? this.controller.accentColor() :
+                  $r('app.color.text_primary'))
+                .backgroundColor(this.controller.historyDeviceFilter === deviceName ?
+                  this.controller.accentSoftColor() : $r('app.color.surface_muted'))
+                .borderRadius($r('app.float.corner_radius_level10'))
+                .onClick((): void => {
+                  this.controller.applyHistoryDeviceFilter(deviceName);
+                })
+            }, (deviceName: string): string => deviceName)
+          }
+          if (this.controller.historyTagOptions().length > 0) {
+            Text($r('app.string.history_custom_tags_title'))
+              .fontSize(12)
+              .fontColor($r('app.color.text_secondary'))
+              .width('100%')
+            ForEach(this.controller.historyTagOptions(), (tag: string) => {
+              Button(tag, { type: ButtonType.Normal })
+                .height(34)
+                .width('100%')
+                .fontSize(12)
+                .fontColor(this.controller.desktopCustomTagFilter === tag ? this.controller.accentColor() :
+                  $r('app.color.text_primary'))
+                .backgroundColor(this.controller.desktopCustomTagFilter === tag ?
+                  this.controller.accentSoftColor() : $r('app.color.surface_muted'))
+                .borderRadius($r('app.float.corner_radius_level10'))
+                .onClick((): void => {
+                  this.controller.applyHistoryTagFilter(tag);
+                })
+            }, (tag: string): string => tag)
+          }
+          if (this.controller.historySelectionMode) {
+            Row({ space: 8 }) {
+              Button($r('app.string.history_select_all_action'), { type: ButtonType.Normal })
+                .layoutWeight(1)
+                .height(34)
+                .fontSize(11)
+                .fontColor(this.controller.accentColor())
+                .backgroundColor(this.controller.accentSoftColor())
+                .borderRadius($r('app.float.corner_radius_level10'))
+                .onClick((): void => {
+                  this.controller.selectAllFilteredHistory();
+                })
+              Button($r('app.string.history_batch_star_action'), { type: ButtonType.Normal })
+                .layoutWeight(1)
+                .height(34)
+                .fontSize(11)
+                .fontColor(this.controller.accentColor())
+                .backgroundColor(this.controller.accentSoftColor())
+                .enabled(this.controller.historySelectedIds.length > 0)
+                .borderRadius($r('app.float.corner_radius_level10'))
+                .onClick((): void => {
+                  this.controller.batchToggleSelectedStarred();
+                })
+              Button($r('app.string.history_delete_action'), { type: ButtonType.Normal })
+                .layoutWeight(1)
+                .height(34)
+                .fontSize(11)
+                .fontColor($r('app.color.danger'))
+                .backgroundColor(this.controller.accentSoftColor())
+                .enabled(this.controller.historySelectedIds.length > 0)
+                .borderRadius($r('app.float.corner_radius_level10'))
+                .onClick((): void => {
+                  this.controller.batchDeleteSelectedHistory();
+                })
+            }
             .width('100%')
-          if (this.controller.history.length === 0) {
+          }
+          if (this.controller.compactFilteredHistory().length === 0) {
             Text($r('app.string.history_empty'))
               .fontSize(14)
               .lineHeight(21)
@@ -1069,12 +1412,14 @@ export struct CompactClipboardView {
               .width('100%')
               .padding({ top: 8, bottom: 8 })
           } else {
-            ForEach(this.controller.history, (item: ClipboardHistoryItem) => {
+            ForEach(this.controller.compactFilteredHistory(), (item: ClipboardHistoryItem) => {
               Row({ space: 12 }) {
                 Column() {
-                  SymbolGlyph(item.direction === 'sent' ?
-                    $r('sys.symbol.arrowshape_up_to_line_fill') :
-                    $r('sys.symbol.arrowshape_down_to_line_fill'))
+                  SymbolGlyph(this.controller.historySelectionMode ?
+                    (this.controller.historyItemSelected(item.id) ? $r('sys.symbol.checkmark_circle_fill') :
+                      $r('sys.symbol.circle')) :
+                    (item.direction === 'sent' ? $r('sys.symbol.arrowshape_up_to_line_fill') :
+                      $r('sys.symbol.arrowshape_down_to_line_fill')))
                     .fontSize(22)
                     .fontWeight(FontWeight.Medium)
                     .fontColor([item.direction === 'sent' ? this.controller.accentColor() :
@@ -1093,6 +1438,24 @@ export struct CompactClipboardView {
                     .textOverflow({ overflow: TextOverflow.Ellipsis })
                     .width('100%')
                   Row({ space: 8 }) {
+                    if (item.isSnippet) {
+                      SymbolGlyph($r('sys.symbol.bookmark_fill'))
+                        .fontSize(12)
+                        .fontColor([this.controller.accentColor()])
+                    }
+                    if (item.tags.length > 0) {
+                      Text(this.controller.historyTagsText(item))
+                        .fontSize(11)
+                        .maxLines(1)
+                        .fontColor($r('app.color.text_secondary'))
+                    }
+                    if (item.sourceDevice.length > 0) {
+                      Text(item.sourceDevice)
+                        .fontSize(11)
+                        .maxLines(1)
+                        .textOverflow({ overflow: TextOverflow.Ellipsis })
+                        .fontColor($r('app.color.text_secondary'))
+                    }
                     Blank()
                     Text(item.direction === 'sent' ? $r('app.string.direction_sent') :
                       $r('app.string.direction_received'))
@@ -1102,6 +1465,11 @@ export struct CompactClipboardView {
                     Text(item.time)
                       .fontSize(12)
                       .fontColor($r('app.color.text_secondary'))
+                    if (item.occurrenceCount > 1) {
+                      Text('×' + item.occurrenceCount.toString())
+                        .fontSize(11)
+                        .fontColor($r('app.color.text_secondary'))
+                    }
                   }
                   .width('100%')
                 }
@@ -1112,6 +1480,13 @@ export struct CompactClipboardView {
               .border({ width: { bottom: 1 }, color: $r('app.color.divider') })
               .clickEffect({ level: ClickEffectLevel.MIDDLE })
               .bindContextMenu(this.historyLocalContextMenu(item), ResponseType.LongPress)
+              .onClick((): void => {
+                if (this.controller.historySelectionMode) {
+                  this.controller.toggleHistorySelection(item.id);
+                } else {
+                  this.controller.copyLocalHistoryItem(item);
+                }
+              })
             }, (item: ClipboardHistoryItem) => item.id)
           }
         }
@@ -1906,7 +2281,12 @@ export struct CompactClipboardView {
             }
             ForEach(this.controller.spaceDevices, (device: NativeSpaceDevice) => {
               this.desktopPairedDeviceRow(device)
-            }, (device: NativeSpaceDevice): string => device.deviceId)
+            }, (device: NativeSpaceDevice): string => device.deviceId + ':' + device.online.toString() + ':' +
+              device.state)
+            if (this.controller.desktopSelectedSpaceDeviceId.length > 0 &&
+              !this.controller.desktopSelectedSpaceDeviceIsLocal) {
+              this.compactSelectedDeviceSyncCard()
+            }
           }
           Text($r('app.string.device_management_hint'))
             .fontSize($r('app.float.font_body_small'))
@@ -1967,6 +2347,74 @@ export struct CompactClipboardView {
 
 
   @Builder
+  private compactHistoryLibrarySettings() {
+    Column({ space: 12 }) {
+      Text($r('app.string.history_library_settings_title'))
+        .fontSize(18)
+        .fontWeight(FontWeight.Bold)
+        .fontColor($r('app.color.text_primary'))
+        .width('100%')
+      Text($r('app.string.history_retention_note'))
+        .fontSize(12)
+        .lineHeight(18)
+        .fontColor($r('app.color.text_secondary'))
+        .width('100%')
+      Row({ space: 8 }) {
+        this.compactHistoryRetentionButton(7, $r('app.string.history_retention_7_days'))
+        this.compactHistoryRetentionButton(30, $r('app.string.history_retention_30_days'))
+      }
+      .width('100%')
+      Row({ space: 8 }) {
+        this.compactHistoryRetentionButton(90, $r('app.string.history_retention_90_days'))
+        this.compactHistoryRetentionButton(0, $r('app.string.history_retention_forever'))
+      }
+      .width('100%')
+      Row({ space: 12 }) {
+        Column({ space: 4 }) {
+          Text($r('app.string.history_merge_duplicates_title'))
+            .fontSize(14)
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('app.color.text_primary'))
+          Text($r('app.string.history_merge_duplicates_note'))
+            .fontSize(12)
+            .lineHeight(18)
+            .fontColor($r('app.color.text_secondary'))
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+        Toggle({ type: ToggleType.Switch, isOn: this.controller.historyMergeDuplicates })
+          .selectedColor(this.controller.accentColor())
+          .onChange((enabled: boolean): void => {
+            this.controller.setHistoryMergeDuplicates(enabled);
+          })
+      }
+      .width('100%')
+    }
+    .width('100%')
+    .padding($r('app.float.padding_level8'))
+    .borderRadius($r('app.float.corner_radius_level8'))
+    .backgroundColor($r('app.color.surface'))
+  }
+
+
+  @Builder
+  private compactHistoryRetentionButton(days: number, label: Resource) {
+    Button(label, { type: ButtonType.Normal })
+      .layoutWeight(1)
+      .height(38)
+      .fontSize(12)
+      .fontColor(this.controller.historyRetentionDays === days ? this.controller.accentColor() :
+        $r('app.color.text_primary'))
+      .backgroundColor(this.controller.historyRetentionDays === days ? this.controller.accentSoftColor() :
+        $r('app.color.surface_muted'))
+      .borderRadius($r('app.float.corner_radius_level10'))
+      .onClick((): void => {
+        this.controller.setHistoryRetentionDays(days);
+      })
+  }
+
+
+  @Builder
   private settingsPage() {
     Scroll(this.controller.settingsScroller) {
       Column({ space: 12 }) {
@@ -1983,6 +2431,8 @@ export struct CompactClipboardView {
         .padding({ left: 18, right: 18 })
         .borderRadius($r('app.float.corner_radius_level8'))
         .backgroundColor($r('app.color.surface'))
+
+        this.compactHistoryLibrarySettings()
 
         this.mobileSyncManagementCard()
 
@@ -2312,11 +2762,11 @@ export struct CompactClipboardView {
         menu: {
           value: [{
             content: {
-              icon: this.controller.titleBarConnectionIcon(),
+              icon: this.titleBarConnectionIcon(this.controller.isConnectionAvailable()),
               label: this.controller.isConnectionAvailable() ?
                 $r('app.string.status_online') : $r('app.string.status_offline'),
               action: (): void => {
-                this.controller.selectPage(1);
+                this.openConnectionDiagnostics();
               }
             }
           }, {
@@ -2379,11 +2829,11 @@ export struct CompactClipboardView {
         menu: {
           value: [{
             content: {
-              icon: this.controller.titleBarConnectionIcon(),
+              icon: this.titleBarConnectionIcon(this.controller.isConnectionAvailable()),
               label: this.controller.isConnectionAvailable() ?
                 $r('app.string.status_online') : $r('app.string.status_offline'),
               action: (): void => {
-                this.controller.testConnection();
+                this.openConnectionDiagnostics();
               }
             }
           }, {
@@ -2400,6 +2850,20 @@ export struct CompactClipboardView {
       style: {
         scrollEffectOpts: {
           scrollEffectType: ScrollEffectType.GRADIENT_BLUR
+        },
+        originalStyle: {
+          contentStyle: {
+            menuStyle: {
+              iconColor: this.controller.accentColor()
+            }
+          }
+        },
+        scrollEffectStyle: {
+          contentStyle: {
+            menuStyle: {
+              iconColor: this.controller.accentColor()
+            }
+          }
         },
         systemMaterialEffect: {
           materialType: hdsMaterial.MaterialType.IMMERSIVE,
@@ -2431,11 +2895,11 @@ export struct CompactClipboardView {
         menu: {
           value: [{
             content: {
-              icon: this.controller.titleBarConnectionIcon(),
+              icon: this.titleBarConnectionIcon(this.controller.isConnectionAvailable()),
               label: this.controller.isConnectionAvailable() ?
                 $r('app.string.status_online') : $r('app.string.status_offline'),
               action: (): void => {
-                this.controller.testConnection();
+                this.openConnectionDiagnostics();
               }
             }
           }, {
@@ -3295,6 +3759,134 @@ export struct CompactClipboardView {
 
 
   @Builder
+  private compactDeviceContentTypeSwitch(title: Resource, contentType: string, checked: boolean) {
+    Row({ space: 12 }) {
+      Text(title)
+        .fontSize($r('app.float.font_body_medium'))
+        .fontColor($r('app.color.text_primary'))
+        .layoutWeight(1)
+      Toggle({ type: ToggleType.Switch, isOn: checked })
+        .selectedColor(this.controller.accentColor())
+        .enabled(this.controller.desktopDeviceSyncState === 2 && !this.controller.desktopDeviceSyncSaving)
+        .onChange((enabled: boolean): void => {
+          this.controller.updateDesktopDeviceSyncPreference(contentType, enabled);
+        })
+    }
+    .width('100%')
+    .height(52)
+    .padding({ left: 14, right: 12 })
+    .borderRadius($r('app.float.corner_radius_level8'))
+    .border({ width: 1, color: $r('app.color.divider') })
+    .backgroundColor($r('app.color.surface'))
+  }
+
+
+  @Builder
+  private compactSelectedDeviceSyncCard() {
+    Column({ space: 10 }) {
+      Row({ space: 12 }) {
+        Column() {
+          this.desktopDeviceTypeGlyph(this.controller.desktopSelectedSpaceDeviceType)
+        }
+        .width(44)
+        .height(44)
+        .justifyContent(FlexAlign.Center)
+        .borderRadius($r('app.float.corner_radius_level8'))
+        .backgroundColor(this.controller.accentSoftColor())
+        Column({ space: 3 }) {
+          Text(this.controller.desktopSelectedSpaceDeviceName)
+            .fontSize($r('app.float.font_body_large'))
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('app.color.text_primary'))
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          Text(this.controller.desktopSelectedSpaceDeviceOnline ? $r('app.string.device_status_online') :
+            (this.controller.desktopSelectedSpaceDeviceState === 'unknown' ?
+              $r('app.string.device_status_unknown') : $r('app.string.device_status_offline')))
+            .fontSize($r('app.float.font_body_small'))
+            .fontColor(this.controller.desktopSelectedSpaceDeviceOnline ? $r('app.color.success') :
+              $r('app.color.text_secondary'))
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+        Button($r('app.string.desktop_device_sync_restore'), { type: ButtonType.Normal })
+          .height(34)
+          .fontSize(11)
+          .fontColor(this.controller.accentColor())
+          .backgroundColor(Color.Transparent)
+          .enabled(this.controller.desktopDeviceSyncState === 2 && !this.controller.desktopDeviceSyncSaving)
+          .onClick((): void => {
+            this.controller.resetDesktopDeviceSyncPreferences();
+          })
+      }
+      .width('100%')
+      Text(this.controller.desktopSelectedSpaceDeviceId)
+        .fontSize(10)
+        .fontColor($r('app.color.text_secondary'))
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .width('100%')
+      Row({ space: 12 }) {
+        Column({ space: 3 }) {
+          Text($r('app.string.desktop_device_send_enabled'))
+            .fontSize($r('app.float.font_body_large'))
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('app.color.text_primary'))
+          Text($r('app.string.desktop_device_send_enabled_note'))
+            .fontSize(11)
+            .lineHeight(17)
+            .fontColor($r('app.color.text_secondary'))
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+        Toggle({ type: ToggleType.Switch, isOn: this.controller.desktopDeviceSendEnabled })
+          .selectedColor(this.controller.accentColor())
+          .enabled(this.controller.desktopDeviceSyncState === 2 && !this.controller.desktopDeviceSyncSaving)
+          .onChange((enabled: boolean): void => {
+            this.controller.updateDesktopDeviceSyncPreference('send', enabled);
+          })
+      }
+      .width('100%')
+      .padding({ top: 6, bottom: 6 })
+      if (this.controller.desktopDeviceSyncState === 1) {
+        Text($r('app.string.desktop_device_sync_loading'))
+          .fontSize(11)
+          .fontColor($r('app.color.text_secondary'))
+          .width('100%')
+      } else if (this.controller.desktopDeviceSyncState === 3) {
+        Text($r('app.string.desktop_device_sync_failed'))
+          .fontSize(11)
+          .fontColor($r('app.color.danger'))
+          .width('100%')
+          .onClick((): void => {
+            this.controller.loadDesktopDeviceSyncPreferences(
+              this.controller.desktopSelectedSpaceDeviceId);
+          })
+      }
+      Text($r('app.string.desktop_device_content_types'))
+        .fontSize(11)
+        .fontWeight(FontWeight.Medium)
+        .fontColor($r('app.color.text_secondary'))
+        .width('100%')
+      this.compactDeviceContentTypeSwitch($r('app.string.desktop_device_sync_text'), 'text',
+        this.controller.desktopDeviceSyncText)
+      this.compactDeviceContentTypeSwitch($r('app.string.desktop_device_sync_image'), 'image',
+        this.controller.desktopDeviceSyncImage)
+      this.compactDeviceContentTypeSwitch($r('app.string.desktop_device_sync_file'), 'file',
+        this.controller.desktopDeviceSyncFile)
+      this.compactDeviceContentTypeSwitch($r('app.string.desktop_device_sync_link'), 'link',
+        this.controller.desktopDeviceSyncLink)
+      this.compactDeviceContentTypeSwitch($r('app.string.desktop_device_sync_rich_text'), 'rich_text',
+        this.controller.desktopDeviceSyncRichText)
+    }
+    .width('100%')
+    .padding(14)
+    .borderRadius($r('app.float.corner_radius_level8'))
+    .backgroundColor($r('app.color.surface_muted'))
+  }
+
+
+  @Builder
   private desktopPairedDeviceRow(device: NativeSpaceDevice) {
     Row({ space: 11 }) {
       Stack({ alignContent: Alignment.BottomEnd }) {
@@ -3354,7 +3946,17 @@ export struct CompactClipboardView {
     .height(64)
     .padding({ left: 10, right: 12 })
     .borderRadius($r('app.float.corner_radius_level10'))
-    .backgroundColor($r('app.color.surface_muted'))
+    .backgroundColor(device.deviceId === this.controller.desktopSelectedSpaceDeviceId ?
+      this.controller.accentSoftColor() : $r('app.color.surface_muted'))
+    .border({
+      width: device.deviceId === this.controller.desktopSelectedSpaceDeviceId ? 1 : 0,
+      color: device.deviceId === this.controller.desktopSelectedSpaceDeviceId ?
+        this.controller.accentColor() : Color.Transparent
+    })
+    .clickEffect({ level: ClickEffectLevel.MIDDLE })
+    .onClick((): void => {
+      this.controller.selectDesktopSpaceDevice(device);
+    })
     .bindContextMenu(this.desktopPairedDeviceContextMenu(device), ResponseType.LongPress)
   }
 
@@ -3417,26 +4019,54 @@ export struct CompactClipboardView {
   build() {
     Stack() {
       Stack() {
-        this.compactNavigation()
+        Stack() {
+          Stack() {
+            this.compactNavigation()
+          }
+          .width('100%')
+          .height('100%')
+          .bindSheet($$this.showFeedbackSheet, this.feedbackSheet(), {
+            detents: [SheetSize.MEDIUM],
+            preferType: SheetType.CENTER,
+            dragBar: false,
+            showClose: false,
+            backgroundColor: $r('app.color.page_background'),
+            blurStyle: BlurStyle.Regular,
+            onWillDisappear: (): void => {
+              this.showFeedbackSheet = false;
+            }
+          })
+        }
+        .width('100%')
+        .height('100%')
+        .bindSheet($$this.showAboutSheet, this.aboutSheet(), {
+          detents: [SheetSize.MEDIUM],
+          preferType: SheetType.CENTER,
+          dragBar: false,
+          showClose: false,
+          backgroundColor: $r('app.color.page_background'),
+          blurStyle: BlurStyle.Regular,
+          onWillDisappear: (): void => {
+            this.showAboutSheet = false;
+          }
+        })
       }
       .width('100%')
       .height('100%')
-      .bindSheet($$this.showFeedbackSheet, this.feedbackSheet(), {
+      .bindSheet($$this.showHistoryTagSheet, this.historyTagEditorSheet(), {
         detents: [SheetSize.MEDIUM],
         preferType: SheetType.CENTER,
         dragBar: false,
-        showClose: false,
         backgroundColor: $r('app.color.page_background'),
-        blurStyle: BlurStyle.Regular,
         onWillDisappear: (): void => {
-          this.showFeedbackSheet = false;
+          this.showHistoryTagSheet = false;
         }
       })
     }
     .width('100%')
     .height('100%')
     .backgroundColor($r('app.color.page_background'))
-    .bindSheet($$this.showAboutSheet, this.aboutSheet(), {
+    .bindSheet($$this.showConnectionDiagnosticsSheet, this.connectionDiagnosticsSheet(), {
       detents: [SheetSize.MEDIUM],
       preferType: SheetType.CENTER,
       dragBar: false,
@@ -3444,7 +4074,7 @@ export struct CompactClipboardView {
       backgroundColor: $r('app.color.page_background'),
       blurStyle: BlurStyle.Regular,
       onWillDisappear: (): void => {
-        this.showAboutSheet = false;
+        this.showConnectionDiagnosticsSheet = false;
       }
     })
   }

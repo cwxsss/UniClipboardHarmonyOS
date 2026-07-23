@@ -111,6 +111,86 @@
     {
       "name": "onboarding_feature_file",
       "value": "文件"
+    },
+    {
+      "name": "share_target_label",
+      "value": "发送到 UniClipboard"
+    },
+    {
+      "name": "share_target_description",
+      "value": "将分享内容发送到受信设备"
+    },
+    {
+      "name": "share_target_title",
+      "value": "发送到设备"
+    },
+    {
+      "name": "share_target_loading",
+      "value": "正在读取分享内容和设备…"
+    },
+    {
+      "name": "share_target_content_text",
+      "value": "文本或链接"
+    },
+    {
+      "name": "share_target_content_image",
+      "value": "图片"
+    },
+    {
+      "name": "share_target_content_file",
+      "value": "文件"
+    },
+    {
+      "name": "share_target_all_devices",
+      "value": "发送到所有在线设备"
+    },
+    {
+      "name": "share_target_choose_device",
+      "value": "或选择指定设备"
+    },
+    {
+      "name": "share_target_online",
+      "value": "在线"
+    },
+    {
+      "name": "share_target_offline",
+      "value": "离线"
+    },
+    {
+      "name": "share_target_send_action",
+      "value": "发送"
+    },
+    {
+      "name": "share_target_customize_header",
+      "value": "自定义头图"
+    },
+    {
+      "name": "share_target_no_devices",
+      "value": "当前空间中还没有其他设备"
+    },
+    {
+      "name": "share_target_not_joined",
+      "value": "请先打开 UniClipboard，创建或加入同步空间。"
+    },
+    {
+      "name": "share_target_unsupported",
+      "value": "暂不支持这组分享内容，请一次分享一个文本、图片或文件。"
+    },
+    {
+      "name": "share_target_send_failed",
+      "value": "发送失败，请确认目标设备在线后重试。"
+    },
+    {
+      "name": "share_target_load_failed",
+      "value": "设备服务启动超时，请重试。"
+    },
+    {
+      "name": "share_target_retry",
+      "value": "重试"
+    },
+    {
+      "name": "share_target_back",
+      "value": "返回分享面板"
     }
   ]
 }

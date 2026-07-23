@@ -2,7 +2,15 @@
 
 UniClipboard 的 HarmonyOS 原生社区客户端，使用 ArkTS/ArkUI 构建，并通过 Rust Node-API 桥接复用上游空间核心和移动同步协议。
 
-> 当前为技术预览版，并非 UniClipboard 官方发行版。请勿将它用于唯一副本或关键数据；已知限制见下文。
+> 本项目是社区维护的 HarmonyOS 客户端，并非 UniClipboard 上游官方发行版。请勿将剪贴板历史作为关键数据的唯一副本；已知限制见下文。
+
+## 下载
+
+UniClipboard 已正式上架华为应用市场，可直接在 HarmonyOS 手机、平板和电脑上安装：
+
+**[前往华为应用市场下载 UniClipboard](https://appgallery.huawei.com/app/detail?id=com.uniclipboard.hmos&channelId=SHARE&source=appshare)**
+
+当前应用版本为 `1.0.3`。应用市场版本适合日常安装使用；开发者也可以按照下文说明自行构建最新源码。
 
 ![UniClipboard 在 HarmonyOS 多设备上的界面](./uniclipboard_devices_final.jpeg)
 
@@ -29,6 +37,11 @@ UniClipboard 的 HarmonyOS 原生社区客户端，使用 ArkTS/ArkUI 构建，�
 - SSE 前台通知、中文/英文资源、深色/浅色主题；
 - 手机、平板和二合一设备布局；
 - 首次启动引导，以及按屏幕宽度切换的 Compact/Expanded 产品视图；
+- 支持从系统分享面板接收文本、链接、图片和文件，并发送到全部在线设备或指定设备；
+- 支持按设备设置发送方向及文本、图片、文件、链接和富文本等内容类型；
+- 提供连接诊断，检查网络、权限、空间节点和直连/中继状态，并可导出脱敏诊断日志；
+- 历史库支持按设备、标签和常用片段筛选，自定义标签、批量收藏/删除、保留期限及重复记录合并；
+- 支持图片文字识别，并从识别结果中提取链接、电话号码和二维码等智能操作；
 - 连接配置使用 Preferences，用户名和密码使用 HarmonyOS Asset Store。
 
 ## 分层架构
@@ -125,9 +138,8 @@ devecocli run --module entry --product default
 - P2P 空间目前仅稳定支持内联文本；空间图片、大文本和文件传输仍在完善；
 - HTTP 兼容模式仍支持文本和 PNG 图片，但不会替代 P2P 空间传输；
 - 空间节点随应用进程运行，尚未注册 HarmonyOS 长时后台任务；
-- 桌面历史查询/管理目前主要处理文本记录；
 - 当前仓库只提供 arm64-v8a 原生库；
-- 这是开发预览版，没有应用市场发布签名或稳定版兼容性承诺。
+- 应用市场发布不代表 UniClipboard 上游官方背书；协议兼容性仍可能随上游预览版本变化。
 
 ## 参与贡献与安全问题
 

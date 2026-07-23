@@ -7,6 +7,7 @@ import {
   NativeSpaceFileStatusEvent,
   NativeSpaceImageEvent,
   NativeSpaceInvitation,
+  NativeSpaceMemberSyncPreferences,
   NativeSpaceStatus,
   NativeSpaceTextEvent,
   connectSpaceDevice,
@@ -17,16 +18,19 @@ import {
   drainSpaceImageEvents,
   drainSpaceTextEvents,
   getSpaceDevices,
+  getSpaceMemberSyncPreferences,
   getSpaceStatus,
   issueSpaceInvitation,
   joinSpace,
   replaceSpace,
+  resetSpaceMemberSyncPreferences,
   sendSpaceFile,
   sendSpaceFileFromFd,
   sendSpaceImage,
   sendSpaceText,
   startSpaceNode,
   switchSpace,
+  updateSpaceMemberSendPreferences,
   wakeSpaceConnections,
   revokeSpaceMember
 } from 'uniclipboard_native';
@@ -65,6 +69,21 @@ export class SpaceNodeService {
 
   async devices(): Promise<NativeSpaceDevice[]> {
     return await getSpaceDevices();
+  }
+
+  async memberSyncPreferences(deviceId: string): Promise<NativeSpaceMemberSyncPreferences> {
+    return await getSpaceMemberSyncPreferences(deviceId);
+  }
+
+  async updateMemberSendPreferences(deviceId: string, sendEnabled: boolean, text: boolean,
+    imageEnabled: boolean, file: boolean, link: boolean,
+    richText: boolean): Promise<NativeSpaceMemberSyncPreferences> {
+    return await updateSpaceMemberSendPreferences(
+      deviceId, sendEnabled, text, imageEnabled, file, link, richText);
+  }
+
+  async resetMemberSyncPreferences(deviceId: string): Promise<NativeSpaceMemberSyncPreferences> {
+    return await resetSpaceMemberSyncPreferences(deviceId);
   }
 
   async connect(deviceId: string): Promise<boolean> {

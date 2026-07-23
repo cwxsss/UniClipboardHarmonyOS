@@ -170,7 +170,7 @@
     },
     {
       "name": "history_empty",
-      "value": "同步记录仅保留在内存中，退出后自动清除。"
+      "value": "历史库中还没有记录。收藏和常用片段会长期保留。"
     },
     {
       "name": "direction_received",
@@ -1101,6 +1101,62 @@
       "value": "身份档案"
     },
     {
+      "name": "desktop_device_id",
+      "value": "设备 ID"
+    },
+    {
+      "name": "desktop_connection_state",
+      "value": "连接状态"
+    },
+    {
+      "name": "desktop_device_sync_settings",
+      "value": "同步设置"
+    },
+    {
+      "name": "desktop_device_sync_restore",
+      "value": "恢复默认"
+    },
+    {
+      "name": "desktop_device_send_enabled",
+      "value": "发送到此设备"
+    },
+    {
+      "name": "desktop_device_send_enabled_note",
+      "value": "开启后，本机的剪贴板内容会同步给此设备。接收方向的独立开关将在后续版本开放。"
+    },
+    {
+      "name": "desktop_device_sync_loading",
+      "value": "正在读取设备同步设置…"
+    },
+    {
+      "name": "desktop_device_sync_failed",
+      "value": "读取或保存失败，点击重试"
+    },
+    {
+      "name": "desktop_device_content_types",
+      "value": "内容类型"
+    },
+    {
+      "name": "desktop_device_sync_text",
+      "value": "同步文本"
+    },
+    {
+      "name": "desktop_device_sync_image",
+      "value": "同步图片"
+    },
+    {
+      "name": "desktop_device_sync_file",
+      "value": "同步文件"
+    },
+    {
+      "name": "desktop_device_sync_link",
+      "value": "同步链接"
+    },
+    {
+      "name": "desktop_device_sync_rich_text",
+      "value": "同步富文本"
+    },
+    {
       "name": "desktop_platform",
       "value": "平台"
     },
@@ -1499,6 +1555,125 @@
     {
       "name": "notification_received_open",
       "value": "打开 UniClipboard 查看并使用"
-    }
+    },
+    {
+      "name": "image_intelligence_title",
+      "value": "图片文字与智能操作"
+    },
+    {
+      "name": "image_intelligence_action",
+      "value": "识别图片"
+    },
+    {
+      "name": "image_intelligence_running",
+      "value": "正在识别…"
+    },
+    {
+      "name": "image_intelligence_text_title",
+      "value": "识别文字"
+    },
+    {
+      "name": "image_intelligence_actions_title",
+      "value": "智能操作"
+    },
+    {
+      "name": "image_intelligence_empty",
+      "value": "未识别到文字、链接、电话号码或二维码"
+    },
+    {
+      "name": "image_intelligence_failed",
+      "value": "图片识别失败，请稍后重试"
+    },
+    {
+      "name": "image_intelligence_link",
+      "value": "链接"
+    },
+    {
+      "name": "image_intelligence_phone",
+      "value": "电话号码"
+    },
+    {
+      "name": "image_intelligence_qr",
+      "value": "二维码"
+    },
+    {
+      "name": "image_intelligence_open",
+      "value": "打开"
+    },
+    {
+      "name": "image_intelligence_dial",
+      "value": "拨号"
+    },
+    { "name": "history_tag_edit_title", "value": "编辑自定义标签" },
+    { "name": "history_tag_edit_note", "value": "使用逗号分隔多个标签，最多保留 8 个。" },
+    { "name": "history_tag_placeholder", "value": "例如：工作, 地址, 回复模板" },
+    { "name": "history_tag_save_action", "value": "保存标签" },
+    { "name": "history_tag_edit_action", "value": "编辑标签" },
+    { "name": "history_add_snippet_action", "value": "设为常用片段" },
+    { "name": "history_remove_snippet_action", "value": "移出常用片段" },
+    { "name": "history_snippets_title", "value": "常用片段" },
+    { "name": "history_custom_tags_title", "value": "自定义标签" },
+    { "name": "history_devices_title", "value": "来源设备" },
+    { "name": "history_select_action", "value": "批量选择" },
+    { "name": "history_selected_suffix", "value": "项已选择" },
+    { "name": "history_select_all_action", "value": "全选当前结果" },
+    { "name": "history_batch_star_action", "value": "批量收藏" },
+    { "name": "history_batch_delete_title", "value": "删除所选历史？" },
+    { "name": "history_batch_delete_message", "value": "所选本地历史及其缓存内容将被永久删除。" },
+    { "name": "history_library_settings_title", "value": "历史库" },
+    { "name": "history_retention_title", "value": "保留时长" },
+    { "name": "history_retention_note", "value": "到期的普通记录会自动清理；收藏和常用片段始终保留。" },
+    { "name": "history_retention_7_days", "value": "7 天" },
+    { "name": "history_retention_30_days", "value": "30 天" },
+    { "name": "history_retention_90_days", "value": "90 天" },
+    { "name": "history_retention_forever", "value": "永久" },
+    { "name": "history_merge_duplicates_title", "value": "合并重复内容" },
+    { "name": "history_merge_duplicates_note", "value": "相同内容只保留一条，并累计出现次数。" },
+    { "name": "connection_diagnostics_title", "value": "连接诊断" },
+    { "name": "connection_diagnostics_subtitle", "value": "检查当前传输路径、网络环境与应用权限" },
+    { "name": "connection_diagnostics_refreshing", "value": "正在重新探测连接…" },
+    { "name": "connection_diagnostics_transport_label", "value": "连接方式" },
+    { "name": "connection_diagnostics_transport_direct", "value": "直连" },
+    { "name": "connection_diagnostics_transport_relay", "value": "中继" },
+    { "name": "connection_diagnostics_transport_mixed", "value": "直连与中继" },
+    { "name": "connection_diagnostics_transport_unknown", "value": "正在协商" },
+    { "name": "connection_diagnostics_transport_offline", "value": "未连接" },
+    { "name": "connection_diagnostics_latency_label", "value": "探测延迟" },
+    { "name": "connection_diagnostics_latency_unit", "value": "毫秒" },
+    { "name": "connection_diagnostics_latency_unavailable", "value": "暂无数据" },
+    { "name": "connection_diagnostics_network_label", "value": "网络类型" },
+    { "name": "connection_diagnostics_network_wifi", "value": "Wi-Fi" },
+    { "name": "connection_diagnostics_network_cellular", "value": "蜂窝网络" },
+    { "name": "connection_diagnostics_network_ethernet", "value": "以太网" },
+    { "name": "connection_diagnostics_network_vpn", "value": "VPN" },
+    { "name": "connection_diagnostics_network_bluetooth", "value": "蓝牙网络" },
+    { "name": "connection_diagnostics_network_other", "value": "其他网络" },
+    { "name": "connection_diagnostics_network_unavailable", "value": "网络不可用" },
+    { "name": "connection_diagnostics_path_direct", "value": "直连路径" },
+    { "name": "connection_diagnostics_path_relay", "value": "中继路径" },
+    { "name": "connection_diagnostics_path_offline", "value": "离线设备" },
+    { "name": "connection_diagnostics_failure_label", "value": "最近失败原因" },
+    { "name": "connection_diagnostics_failure_none", "value": "暂无失败记录" },
+    { "name": "connection_diagnostics_failure_network", "value": "当前没有可用网络" },
+    { "name": "connection_diagnostics_failure_permission", "value": "网络权限不可用" },
+    { "name": "connection_diagnostics_failure_node", "value": "本机连接节点未就绪" },
+    { "name": "connection_diagnostics_failure_space", "value": "尚未加入同步空间" },
+    { "name": "connection_diagnostics_failure_no_peer", "value": "同步空间内没有其他设备" },
+    { "name": "connection_diagnostics_failure_peer_offline", "value": "目标设备离线或暂时不可达" },
+    { "name": "connection_diagnostics_failure_relay", "value": "中继服务探测失败" },
+    { "name": "connection_diagnostics_failure_probe", "value": "设备连接探测失败" },
+    { "name": "connection_diagnostics_failure_not_configured", "value": "尚未配置可用连接" },
+    { "name": "connection_diagnostics_permissions_title", "value": "权限状态" },
+    { "name": "connection_diagnostics_permission_internet", "value": "网络访问" },
+    { "name": "connection_diagnostics_permission_background", "value": "后台连接" },
+    { "name": "connection_diagnostics_permission_granted", "value": "已授权" },
+    { "name": "connection_diagnostics_permission_denied", "value": "不可用" },
+    { "name": "connection_diagnostics_redaction_note", "value": "导出日志会移除设备标识、设备名、网络地址、连接链接、凭据和剪贴板内容。" },
+    { "name": "connection_diagnostics_refresh_action", "value": "重新诊断" },
+    { "name": "connection_diagnostics_export_action", "value": "导出脱敏日志" },
+    { "name": "connection_diagnostics_exporting", "value": "正在导出…" },
+    { "name": "connection_diagnostics_export_ready", "value": "脱敏诊断日志已交给系统分享面板" },
+    { "name": "connection_diagnostics_export_failed", "value": "日志导出失败，请稍后重试" },
+    { "name": "connection_diagnostics_log_title", "value": "UniClipboard 脱敏连接诊断日志" }
   ]
 }

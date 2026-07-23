@@ -20,9 +20,11 @@ use uc_application::facade::mobile_sync::{
     UpdateMobileSyncSettingsInput,
 };
 use uc_application::facade::{
-    decode_v3_bytes_to_snapshot, decode_v3_bytes_to_snapshot_and_blob_refs, BatchPosition,
-    ClipboardHostEvent, ClipboardOriginKind, EmitError, FetchBlobToPathCommand,
-    FetchTransferContext, HostEvent, HostEventEmitterPort, InboundAction, PublishBlobPathCommand,
+    connection_channel_to_wire, decode_v3_bytes_to_snapshot,
+    decode_v3_bytes_to_snapshot_and_blob_refs, BatchPosition, ClipboardHostEvent,
+    ClipboardOriginKind, ContentTypesPatch, EmitError,
+    FetchBlobToPathCommand, FetchTransferContext, HostEvent, HostEventEmitterPort, InboundAction,
+    MemberSyncPreferencesPatch, MemberSyncPreferencesView, PublishBlobPathCommand,
     TransferHostEvent, V3BlobRef,
 };
 use uc_bootstrap::CliAppRuntime;
@@ -337,6 +339,30 @@ pub struct NativeSpaceDevice {
     pub is_local: bool,
     pub online: bool,
     pub state: String,
+    pub channel: String,
+}
+
+#[napi(object)]
+pub struct NativeSpaceMemberSyncPreferences {
+    pub send_enabled: bool,
+    pub text: bool,
+    pub image: bool,
+    pub file: bool,
+    pub link: bool,
+    pub rich_text: bool,
+}
+
+impl From<MemberSyncPreferencesView> for NativeSpaceMemberSyncPreferences {
+    fn from(value: MemberSyncPreferencesView) -> Self {
+        Self {
+            send_enabled: value.send_enabled,
+            text: value.send_content_types.text,
+            image: value.send_content_types.image,
+            file: value.send_content_types.file,
+            link: value.send_content_types.link,
+            rich_text: value.send_content_types.rich_text,
+        }
+    }
 }
 
 #[napi(object)]
@@ -1239,6 +1265,7 @@ pub async fn get_space_devices() -> Result<Vec<NativeSpaceDevice>> {
     let local_type = current_local_device_type();
     let _ = set_known_device_type(local.peer_id.clone(), local_type.clone());
     let entries = app_facade.list_roster_entries().await.map_err(space_error)?;
+    let peer_snapshots = app_facade.list_peer_snapshots().await.map_err(space_error)?;
     let mut devices = Vec::with_capacity(entries.len() + 1);
     let mut has_local = false;
     let mut has_online_peer = false;
@@ -1248,6 +1275,15 @@ pub async fn get_space_devices() -> Result<Vec<NativeSpaceDevice>> {
         } else if entry.state == ReachabilityState::Online {
             has_online_peer = true;
         }
+        let channel = if entry.is_local {
+            "direct".to_string()
+        } else {
+            peer_snapshots
+                .iter()
+                .find(|snapshot| snapshot.peer_id == entry.device_id.as_str())
+                .map(|snapshot| connection_channel_to_wire(snapshot.channel).to_string())
+                .unwrap_or_else(|| "unknown".to_string())
+        };
         devices.push(NativeSpaceDevice {
             device_id: entry.device_id.to_string(),
             device_name: entry.device_name,
@@ -1259,6 +1295,7 @@ pub async fn get_space_devices() -> Result<Vec<NativeSpaceDevice>> {
             } else {
                 reachability_name(entry.state)
             },
+            channel,
         });
     }
     if !has_local {
@@ -1271,6 +1308,7 @@ pub async fn get_space_devices() -> Result<Vec<NativeSpaceDevice>> {
                 is_local: true,
                 online: true,
                 state: "online".to_string(),
+                channel: "direct".to_string(),
             },
         );
     }
@@ -1300,6 +1338,128 @@ pub async fn get_space_devices() -> Result<Vec<NativeSpaceDevice>> {
         }
     }
     Ok(devices)
+}
+
+/// Return the local device's outbound sync preferences for one paired member.
+#[napi]
+pub async fn get_space_member_sync_preferences(
+    device_id: String,
+) -> Result<NativeSpaceMemberSyncPreferences> {
+    let trimmed = device_id.trim();
+    if trimmed.is_empty() {
+        return Err(Error::new(Status::InvalidArg, "space device id is required"));
+    }
+    let member_roster = {
+        let guard = space_runtime().lock().await;
+        let app_facade = guard
+            .as_ref()
+            .map(|runtime| runtime.app_facade.clone())
+            .ok_or_else(|| Error::new(Status::GenericFailure, "space node has not been started"))?;
+        app_facade
+            .member_roster
+            .get()
+            .cloned()
+            .ok_or_else(|| Error::new(Status::GenericFailure, "space roster is unavailable"))?
+    };
+    let preferences = member_roster
+        .get_sync_preferences(trimmed)
+        .await
+        .map_err(space_error)?;
+    Ok(preferences.into())
+}
+
+/// Update all outbound controls shown by the HarmonyOS device details page.
+/// The unexposed code-snippet and all receive-side preferences are preserved.
+#[napi]
+pub async fn update_space_member_send_preferences(
+    device_id: String,
+    send_enabled: bool,
+    text: bool,
+    image: bool,
+    file: bool,
+    link: bool,
+    rich_text: bool,
+) -> Result<NativeSpaceMemberSyncPreferences> {
+    let trimmed = device_id.trim();
+    if trimmed.is_empty() {
+        return Err(Error::new(Status::InvalidArg, "space device id is required"));
+    }
+    let member_roster = {
+        let guard = space_runtime().lock().await;
+        let app_facade = guard
+            .as_ref()
+            .map(|runtime| runtime.app_facade.clone())
+            .ok_or_else(|| Error::new(Status::GenericFailure, "space node has not been started"))?;
+        app_facade
+            .member_roster
+            .get()
+            .cloned()
+            .ok_or_else(|| Error::new(Status::GenericFailure, "space roster is unavailable"))?
+    };
+    let preferences = member_roster
+        .update_sync_preferences(
+            trimmed,
+            MemberSyncPreferencesPatch {
+                send_enabled: Some(send_enabled),
+                receive_enabled: None,
+                send_content_types: Some(ContentTypesPatch {
+                    text: Some(text),
+                    image: Some(image),
+                    link: Some(link),
+                    file: Some(file),
+                    code_snippet: None,
+                    rich_text: Some(rich_text),
+                }),
+                receive_content_types: None,
+            },
+        )
+        .await
+        .map_err(space_error)?;
+    Ok(preferences.into())
+}
+
+/// Restore both outbound and inbound preferences for one member to defaults.
+#[napi]
+pub async fn reset_space_member_sync_preferences(
+    device_id: String,
+) -> Result<NativeSpaceMemberSyncPreferences> {
+    let trimmed = device_id.trim();
+    if trimmed.is_empty() {
+        return Err(Error::new(Status::InvalidArg, "space device id is required"));
+    }
+    let member_roster = {
+        let guard = space_runtime().lock().await;
+        let app_facade = guard
+            .as_ref()
+            .map(|runtime| runtime.app_facade.clone())
+            .ok_or_else(|| Error::new(Status::GenericFailure, "space node has not been started"))?;
+        app_facade
+            .member_roster
+            .get()
+            .cloned()
+            .ok_or_else(|| Error::new(Status::GenericFailure, "space roster is unavailable"))?
+    };
+    let enabled_types = ContentTypesPatch {
+        text: Some(true),
+        image: Some(true),
+        link: Some(true),
+        file: Some(true),
+        code_snippet: Some(true),
+        rich_text: Some(true),
+    };
+    let preferences = member_roster
+        .update_sync_preferences(
+            trimmed,
+            MemberSyncPreferencesPatch {
+                send_enabled: Some(true),
+                receive_enabled: Some(true),
+                send_content_types: Some(enabled_types.clone()),
+                receive_content_types: Some(enabled_types),
+            },
+        )
+        .await
+        .map_err(space_error)?;
+    Ok(preferences.into())
 }
 
 /// Remove a paired device from the current space. The target device will be
@@ -1529,8 +1689,10 @@ pub async fn replace_space(
 
 /// Dispatch UTF-8 text through the joined UniClipboard space. The return
 /// value is the number of online peers that accepted the encrypted frame.
-#[napi]
-pub async fn send_space_text(text: String) -> Result<u32> {
+async fn send_space_text_with_filter(
+    text: String,
+    target_filter: Option<Vec<DeviceId>>,
+) -> Result<u32> {
     if text.is_empty() {
         return Err(Error::new(Status::InvalidArg, "clipboard text is required"));
     }
@@ -1571,16 +1733,37 @@ pub async fn send_space_text(text: String) -> Result<u32> {
         file_set_v1_component: None,
     };
     let outcome = app_facade
-        .dispatch_clipboard_snapshot(snapshot, ClipboardChangeOrigin::LocalCapture, None)
+        .dispatch_clipboard_snapshot(
+            snapshot,
+            ClipboardChangeOrigin::LocalCapture,
+            target_filter,
+        )
         .await
         .map_err(space_error)?;
     Ok(outcome.total_accepted.min(u32::MAX as usize) as u32)
 }
 
+#[napi]
+pub async fn send_space_text(text: String) -> Result<u32> {
+    send_space_text_with_filter(text, None).await
+}
+
+#[napi]
+pub async fn send_space_text_to_device(text: String, device_id: String) -> Result<u32> {
+    let target = device_id.trim();
+    if target.is_empty() {
+        return Err(Error::new(Status::InvalidArg, "target device id is required"));
+    }
+    send_space_text_with_filter(text, Some(vec![DeviceId::new(target)])).await
+}
+
 /// Dispatch a compressed image through the joined UniClipboard space. The
 /// HarmonyOS layer keeps this payload below the encrypted wire inline limit.
-#[napi]
-pub async fn send_space_image(data: Uint8Array, mime_type: String) -> Result<u32> {
+async fn send_space_image_with_filter(
+    data: Uint8Array,
+    mime_type: String,
+    target_filter: Option<Vec<DeviceId>>,
+) -> Result<u32> {
     if data.is_empty() {
         return Err(Error::new(Status::InvalidArg, "clipboard image is required"));
     }
@@ -1622,10 +1805,32 @@ pub async fn send_space_image(data: Uint8Array, mime_type: String) -> Result<u32
         file_set_v1_component: None,
     };
     let outcome = app_facade
-        .dispatch_clipboard_snapshot(snapshot, ClipboardChangeOrigin::LocalCapture, None)
+        .dispatch_clipboard_snapshot(
+            snapshot,
+            ClipboardChangeOrigin::LocalCapture,
+            target_filter,
+        )
         .await
         .map_err(space_error)?;
     Ok(outcome.total_accepted.min(u32::MAX as usize) as u32)
+}
+
+#[napi]
+pub async fn send_space_image(data: Uint8Array, mime_type: String) -> Result<u32> {
+    send_space_image_with_filter(data, mime_type, None).await
+}
+
+#[napi]
+pub async fn send_space_image_to_device(
+    data: Uint8Array,
+    mime_type: String,
+    device_id: String,
+) -> Result<u32> {
+    let target = device_id.trim();
+    if target.is_empty() {
+        return Err(Error::new(Status::InvalidArg, "target device id is required"));
+    }
+    send_space_image_with_filter(data, mime_type, Some(vec![DeviceId::new(target)])).await
 }
 
 /// Dispatch one user-selected file through the joined encrypted space in bounded chunks.
@@ -1705,11 +1910,11 @@ pub async fn send_space_file(data: Uint8Array, file_name: String) -> Result<u32>
 /// file descriptor.  The descriptor remains owned by ArkTS and is never
 /// closed here; `/proc/self/fd/<n>` lets iroh stream/copy it without loading
 /// the full file into memory.
-#[napi]
-pub async fn send_space_file_from_fd(
+async fn send_space_file_from_fd_with_filter(
     fd: i32,
     file_size: f64,
     file_name: String,
+    target_filter: Option<Vec<DeviceId>>,
 ) -> Result<NativeSpaceFileSendResult> {
     if fd < 0 || !file_size.is_finite() || file_size <= 0.0 {
         return Err(Error::new(Status::InvalidArg, "valid non-empty file is required"));
@@ -1770,6 +1975,7 @@ pub async fn send_space_file_from_fd(
             snapshot,
             vec![blob_ref],
             ClipboardChangeOrigin::LocalCapture,
+            target_filter,
         )
         .await
         .map_err(space_error)?;
@@ -1777,6 +1983,35 @@ pub async fn send_space_file_from_fd(
         accepted_count: outcome.total_accepted.min(u32::MAX as usize) as u32,
         transfer_id,
     })
+}
+
+#[napi]
+pub async fn send_space_file_from_fd(
+    fd: i32,
+    file_size: f64,
+    file_name: String,
+) -> Result<NativeSpaceFileSendResult> {
+    send_space_file_from_fd_with_filter(fd, file_size, file_name, None).await
+}
+
+#[napi]
+pub async fn send_space_file_from_fd_to_device(
+    fd: i32,
+    file_size: f64,
+    file_name: String,
+    device_id: String,
+) -> Result<NativeSpaceFileSendResult> {
+    let target = device_id.trim();
+    if target.is_empty() {
+        return Err(Error::new(Status::InvalidArg, "target device id is required"));
+    }
+    send_space_file_from_fd_with_filter(
+        fd,
+        file_size,
+        file_name,
+        Some(vec![DeviceId::new(target)]),
+    )
+    .await
 }
 
 /// Stream a materialized received file into an open HarmonyOS save target.

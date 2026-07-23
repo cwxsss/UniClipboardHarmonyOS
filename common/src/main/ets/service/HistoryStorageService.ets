@@ -5,8 +5,11 @@ import { image } from '@kit.ImageKit';
 import { ClipboardHistoryItem } from '../model/ClipboardModels';
 
 const STORE_NAME: string = 'clipboard_history';
-const HISTORY_KEY: string = 'local_history_v1';
-const HISTORY_LIMIT: number = 200;
+const HISTORY_KEY: string = 'local_history_v2';
+const LEGACY_HISTORY_KEY: string = 'local_history_v1';
+const RETENTION_DAYS_KEY: string = 'retention_days';
+const MERGE_DUPLICATES_KEY: string = 'merge_duplicates';
+const DEFAULT_RETENTION_DAYS: number = 30;
 const IMAGE_PREFIX: string = '/clipboard_history_image_';
 const FILE_PREFIX: string = '/clipboard_history_file_';
 const SERVER_FILE_PREFIX: string = '/clipboard_server_file_';
@@ -20,9 +23,14 @@ class PersistedHistoryRecord {
   payloadPath: string = '';
   timestampMs: number = 0;
   starred: boolean = false;
+  tags: string[] = [];
+  isSnippet: boolean = false;
+  sourceDevice: string = '';
+  occurrenceCount: number = 1;
 
   constructor(id: string, text: string, direction: string, time: string, kind: string,
-    payloadPath: string, timestampMs: number, starred: boolean) {
+    payloadPath: string, timestampMs: number, starred: boolean, tags: string[], isSnippet: boolean,
+    sourceDevice: string, occurrenceCount: number) {
     this.id = id;
     this.text = text;
     this.direction = direction;
@@ -31,17 +39,48 @@ class PersistedHistoryRecord {
     this.payloadPath = payloadPath;
     this.timestampMs = timestampMs;
     this.starred = starred;
+    this.tags = tags;
+    this.isSnippet = isSnippet;
+    this.sourceDevice = sourceDevice;
+    this.occurrenceCount = occurrenceCount;
+  }
+}
+
+class LegacyPersistedHistoryRecord {
+  id: string = '';
+  text: string = '';
+  direction: string = '';
+  time: string = '';
+  kind: string = 'Text';
+  payloadPath: string = '';
+  timestampMs: number = 0;
+  starred: boolean = false;
+}
+
+export class HistoryLibrarySettings {
+  retentionDays: number = DEFAULT_RETENTION_DAYS;
+  mergeDuplicates: boolean = true;
+
+  constructor(retentionDays: number = DEFAULT_RETENTION_DAYS, mergeDuplicates: boolean = true) {
+    this.retentionDays = retentionDays;
+    this.mergeDuplicates = mergeDuplicates;
   }
 }
 
 export class HistoryStorageService {
-  async load(context: common.Context): Promise<ClipboardHistoryItem[]> {
+  async load(context: common.Context, retentionDays: number = DEFAULT_RETENTION_DAYS): Promise<ClipboardHistoryItem[]> {
     let records: PersistedHistoryRecord[] = this.readRecords(context);
     let items: ClipboardHistoryItem[] = [];
     let recordsChanged: boolean = false;
-    let count: number = Math.min(records.length, HISTORY_LIMIT);
-    for (let index: number = 0; index < count; index++) {
+    let retainedRecords: PersistedHistoryRecord[] = [];
+    let activePaths: Set<string> = new Set<string>();
+    let cutoffMs: number = retentionDays > 0 ? Date.now() - retentionDays * 24 * 60 * 60 * 1000 : 0;
+    for (let index: number = 0; index < records.length; index++) {
       let record: PersistedHistoryRecord = records[index];
+      if (cutoffMs > 0 && record.timestampMs < cutoffMs && !record.starred && !record.isSnippet) {
+        recordsChanged = true;
+        continue;
+      }
       let pixelMap: image.PixelMap | null = null;
       let filePath: string = '';
       if (record.kind === 'Image' && record.payloadPath.length > 0) {
@@ -54,10 +93,16 @@ export class HistoryStorageService {
         }
       }
       items.push(new ClipboardHistoryItem(record.id, record.text, record.direction, record.time,
-        record.kind, pixelMap, null, filePath, record.timestampMs, record.starred === true));
+        record.kind, pixelMap, null, filePath, record.timestampMs, record.starred === true,
+        record.tags, record.isSnippet === true, record.sourceDevice, Math.max(1, record.occurrenceCount)));
+      retainedRecords.push(record);
+      if (record.payloadPath.length > 0 && this.isManagedPath(context, record.payloadPath)) {
+        activePaths.add(record.payloadPath);
+      }
     }
     if (recordsChanged) {
-      this.writeRecords(context, records);
+      this.writeRecords(context, retainedRecords);
+      this.removeUnusedPayloads(context, records, activePaths);
     }
     return items;
   }
@@ -66,8 +111,7 @@ export class HistoryStorageService {
     let oldRecords: PersistedHistoryRecord[] = this.readRecords(context);
     let records: PersistedHistoryRecord[] = [];
     let activePaths: Set<string> = new Set<string>();
-    let count: number = Math.min(items.length, HISTORY_LIMIT);
-    for (let index: number = 0; index < count; index++) {
+    for (let index: number = 0; index < items.length; index++) {
       let item: ClipboardHistoryItem = items[index];
       let payloadPath: string = '';
       if (item.kind === 'Image' && item.imagePreview !== null) {
@@ -79,10 +123,28 @@ export class HistoryStorageService {
         activePaths.add(payloadPath);
       }
       records.push(new PersistedHistoryRecord(item.id, item.text, item.direction, item.time,
-        item.kind, payloadPath, item.timestampMs, item.starred));
+        item.kind, payloadPath, item.timestampMs, item.starred, item.tags, item.isSnippet,
+        item.sourceDevice, item.occurrenceCount));
     }
     this.writeRecords(context, records);
     this.removeUnusedPayloads(context, oldRecords, activePaths);
+  }
+
+  loadSettings(context: common.Context): HistoryLibrarySettings {
+    let store: preferences.Preferences = this.getStore(context);
+    let retentionDays: number = store.getSync(RETENTION_DAYS_KEY, DEFAULT_RETENTION_DAYS) as number;
+    let mergeDuplicates: boolean = store.getSync(MERGE_DUPLICATES_KEY, true) as boolean;
+    if (retentionDays < 0) {
+      retentionDays = DEFAULT_RETENTION_DAYS;
+    }
+    return new HistoryLibrarySettings(retentionDays, mergeDuplicates);
+  }
+
+  saveSettings(context: common.Context, settings: HistoryLibrarySettings): void {
+    let store: preferences.Preferences = this.getStore(context);
+    store.putSync(RETENTION_DAYS_KEY, settings.retentionDays);
+    store.putSync(MERGE_DUPLICATES_KEY, settings.mergeDuplicates);
+    store.flushSync();
   }
 
   stageFile(context: common.Context, sourceUri: string, id: string, fileName: string): string {
@@ -153,11 +215,27 @@ export class HistoryStorageService {
   private readRecords(context: common.Context): PersistedHistoryRecord[] {
     let store: preferences.Preferences = this.getStore(context);
     let serialized: string = store.getSync(HISTORY_KEY, '') as string;
-    if (serialized.length === 0) {
+    if (serialized.length > 0) {
+      try {
+        return JSON.parse(serialized) as PersistedHistoryRecord[];
+      } catch (error) {
+        return [];
+      }
+    }
+    let legacySerialized: string = store.getSync(LEGACY_HISTORY_KEY, '') as string;
+    if (legacySerialized.length === 0) {
       return [];
     }
     try {
-      return JSON.parse(serialized) as PersistedHistoryRecord[];
+      let legacyRecords: LegacyPersistedHistoryRecord[] = JSON.parse(legacySerialized) as LegacyPersistedHistoryRecord[];
+      let migratedRecords: PersistedHistoryRecord[] = [];
+      for (let index: number = 0; index < legacyRecords.length; index++) {
+        let record: LegacyPersistedHistoryRecord = legacyRecords[index];
+        migratedRecords.push(new PersistedHistoryRecord(record.id, record.text, record.direction, record.time,
+          record.kind, record.payloadPath, record.timestampMs, record.starred, [], false, '', 1));
+      }
+      this.writeRecords(context, migratedRecords);
+      return migratedRecords;
     } catch (error) {
       return [];
     }

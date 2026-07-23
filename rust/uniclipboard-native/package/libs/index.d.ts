@@ -93,6 +93,7 @@ export interface NativeSpaceDevice {
   isLocal: boolean
   online: boolean
   state: string
+  channel: string
 }
 
 export interface NativeSpaceFileEvent {
@@ -125,6 +126,15 @@ export interface NativeSpaceImageEvent {
 export interface NativeSpaceInvitation {
   code: string
   expiresAtMs: number
+}
+
+export interface NativeSpaceMemberSyncPreferences {
+  sendEnabled: boolean
+  text: boolean
+  image: boolean
+  file: boolean
+  link: boolean
+  richText: boolean
 }
 
 export interface NativeSpaceStatus {
@@ -196,6 +206,9 @@ export declare function getMobileSyncServerStatus(): Promise<NativeMobileSyncSta
   */
 export declare function getSpaceDevices(): Promise<Array<NativeSpaceDevice>>
 
+/** Return the local device's outbound sync preferences for one paired member. */
+export declare function getSpaceMemberSyncPreferences(deviceId: string): Promise<NativeSpaceMemberSyncPreferences>
+
 export declare function getSpaceStatus(): Promise<NativeSpaceStatus>
 
 /** Issue a fresh, short-lived invitation for the space owned by this device. */
@@ -240,6 +253,9 @@ export declare function registerMobileSyncDevice(label: string, customUsername: 
   */
 export declare function replaceSpace(passphrase: string, deviceName: string): Promise<NativeCreateSpaceResult>
 
+/** Restore both outbound and inbound preferences for one member to defaults. */
+export declare function resetSpaceMemberSyncPreferences(deviceId: string): Promise<NativeSpaceMemberSyncPreferences>
+
 export declare function revokeMobileSyncDevice(deviceId: string): Promise<void>
 
 /**
@@ -252,25 +268,17 @@ export declare function revokeSpaceMember(deviceId: string): Promise<void>
 /** Dispatch one user-selected file through the joined encrypted space in bounded chunks. */
 export declare function sendSpaceFile(data: Uint8Array, fileName: string): Promise<number>
 
-/**
-  * Publish a user-selected file through iroh-blobs using its open HarmonyOS
-  * file descriptor.  The descriptor remains owned by ArkTS and is never
-  * closed here; `/proc/self/fd/<n>` lets iroh stream/copy it without loading
-  * the full file into memory.
-  */
 export declare function sendSpaceFileFromFd(fd: number, fileSize: number, fileName: string): Promise<NativeSpaceFileSendResult>
 
-/**
-  * Dispatch a compressed image through the joined UniClipboard space. The
-  * HarmonyOS layer keeps this payload below the encrypted wire inline limit.
-  */
+export declare function sendSpaceFileFromFdToDevice(fd: number, fileSize: number, fileName: string, deviceId: string): Promise<NativeSpaceFileSendResult>
+
 export declare function sendSpaceImage(data: Uint8Array, mimeType: string): Promise<number>
 
-/**
-  * Dispatch UTF-8 text through the joined UniClipboard space. The return
-  * value is the number of online peers that accepted the encrypted frame.
-  */
+export declare function sendSpaceImageToDevice(data: Uint8Array, mimeType: string, deviceId: string): Promise<number>
+
 export declare function sendSpaceText(text: string): Promise<number>
+
+export declare function sendSpaceTextToDevice(text: string, deviceId: string): Promise<number>
 
 export declare function setHistoryPinned(config: NativeServerConfig, kind: string, hash: string, pinned: boolean, version: number): Promise<NativeHistoryItem>
 
@@ -312,6 +320,12 @@ export declare function stopSse(): void
   * target space.
   */
 export declare function switchSpace(invitationCode: string, newPassphrase: string): Promise<NativeJoinSpaceResult>
+
+/**
+  * Update all outbound controls shown by the HarmonyOS device details page.
+  * The unexposed code-snippet and all receive-side preferences are preserved.
+  */
+export declare function updateSpaceMemberSendPreferences(deviceId: string, sendEnabled: boolean, text: boolean, image: boolean, file: boolean, link: boolean, richText: boolean): Promise<NativeSpaceMemberSyncPreferences>
 
 /**
   * Wake the native peer scheduler and force-revalidate cached connections.

@@ -28,7 +28,7 @@ export {
 } from './src/main/ets/service/BackgroundSyncService';
 
 export { ConfigStorageService } from './src/main/ets/service/ConfigStorageService';
-export { HistoryStorageService } from './src/main/ets/service/HistoryStorageService';
+export { HistoryLibrarySettings, HistoryStorageService } from './src/main/ets/service/HistoryStorageService';
 export { LinkPreviewService } from './src/main/ets/service/LinkPreviewService';
 export { MobileSyncClient } from './src/main/ets/service/MobileSyncClient';
 export { MobileSyncServerService } from './src/main/ets/service/MobileSyncServerService';
@@ -49,6 +49,7 @@ export {
   NativeSpaceFileStatusEvent,
   NativeSpaceImageEvent,
   NativeSpaceInvitation,
+  NativeSpaceMemberSyncPreferences,
   NativeSpaceStatus,
   NativeSpaceTextEvent,
   setSpaceBackgroundMode,

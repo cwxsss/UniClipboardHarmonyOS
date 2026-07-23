@@ -1,16 +1,23 @@
 import { LengthMetrics, UIContext, mediaquery, SymbolGlyphModifier, window } from '@kit.ArkUI';
 import {
+  abilityAccessCtrl,
+  bundleManager,
   common,
-  ConfigurationConstant
+  ConfigurationConstant,
+  Permissions
 } from '@kit.AbilityKit';
 import { BusinessError, deviceInfo } from '@kit.BasicServicesKit';
-import { scanBarcode, scanCore } from '@kit.ScanKit';
+import { connection } from '@kit.NetworkKit';
+import { detectBarcode, scanBarcode, scanCore } from '@kit.ScanKit';
+import { textRecognition } from '@kit.CoreVisionKit';
 import { image } from '@kit.ImageKit';
 import { fileIo, fileUri, picker } from '@kit.CoreFileKit';
 import { media } from '@kit.MediaKit';
+import { call } from '@kit.TelephonyKit';
 import { filePreview } from '@kit.PreviewKit';
 import { harmonyShare, systemShare } from '@kit.ShareKit';
 import { uniformTypeDescriptor } from '@kit.ArkData';
+import { util } from '@kit.ArkTS';
 import {
   hdsMaterial,
   HdsNavDestination,
@@ -18,7 +25,6 @@ import {
   HdsNavigation,
   HdsNavigationTitleMode,
   HdsTabs,
-  IconType,
   IconStyleMode,
   ScrollEffectType
 } from '@kit.UIDesignKit';
@@ -38,6 +44,7 @@ import {
   ConfigStorageService,
   BackgroundSyncPreferenceService,
   HistoryStorageService,
+  HistoryLibrarySettings,
   MobileSyncClient,
   MobileSyncServerService,
   NativeProtocolService,
@@ -51,6 +58,7 @@ import {
   NativeSpaceFileStatusEvent,
   NativeSpaceImageEvent,
   NativeSpaceInvitation,
+  NativeSpaceMemberSyncPreferences,
   NativeSpaceStatus,
   NativeSpaceTextEvent,
   NativeMobileSyncCredential,
@@ -78,6 +86,16 @@ export class AppearanceThemeOption {
     this.id = id;
     this.primaryColor = primaryColor;
     this.secondaryColor = secondaryColor;
+  }
+}
+
+export class ImageSmartAction {
+  kind: string = '';
+  value: string = '';
+
+  constructor(kind: string, value: string) {
+    this.kind = kind;
+    this.value = value;
   }
 }
 
@@ -131,6 +149,12 @@ export class ClipboardFeatureController {
   public historySearchText: string = '';
   public historyStarredOnly: boolean = false;
   public historyMutationBusy: boolean = false;
+  public historyRetentionDays: number = 30;
+  public historyMergeDuplicates: boolean = true;
+  public historyDeviceFilter: string = '';
+  public historySnippetOnly: boolean = false;
+  public historySelectionMode: boolean = false;
+  public historySelectedIds: string[] = [];
   public desktopRefreshBusy: boolean = false;
   public realtimeActive: boolean = false;
   public feedbackText: string = '';
@@ -162,6 +186,18 @@ export class ClipboardFeatureController {
   public spaceConnectBusy: boolean = false;
   public spaceConnectingDeviceId: string = '';
   public spaceConnectState: number = 0;
+  public connectionDiagnosticBusy: boolean = false;
+  public connectionDiagnosticExportState: number = 0;
+  public connectionDiagnosticDirectCount: number = 0;
+  public connectionDiagnosticRelayCount: number = 0;
+  public connectionDiagnosticUnknownCount: number = 0;
+  public connectionDiagnosticOfflineCount: number = 0;
+  public connectionDiagnosticLatencyMs: number = -1;
+  public connectionDiagnosticNetworkType: string = 'unknown';
+  public connectionDiagnosticLastFailure: string = 'none';
+  public connectionDiagnosticLastFailureAtMs: number = 0;
+  public connectionDiagnosticInternetGranted: boolean = false;
+  public connectionDiagnosticBackgroundGranted: boolean = false;
   public largeSection: number = 0;
   public largeSettingsSection: number = 0;
   public desktopSelectedId: string = '';
@@ -170,6 +206,10 @@ export class ClipboardFeatureController {
   public desktopSelectedDirection: string = '';
   public desktopSelectedImage: image.PixelMap | null = null;
   public desktopSelectedImageRevision: number = 0;
+  public imageRecognitionState: number = 0;
+  public imageRecognitionSourceKey: string = '';
+  public imageRecognizedText: string = '';
+  public imageSmartActions: ImageSmartAction[] = [];
   public desktopFilePreviewState: number = 0;
   public desktopVideoAspectRatio: number = 16 / 9;
   public desktopAudioState: number = 0;
@@ -192,6 +232,7 @@ export class ClipboardFeatureController {
   public desktopSourceFilter: number = 0;
   public desktopTimeFilter: number = 0;
   public desktopExtensionFilter: string = '';
+  public desktopCustomTagFilter: string = '';
   public appearanceMode: string = APPEARANCE_MODE_SYSTEM;
   public appearanceThemeId: string = APPEARANCE_THEME_DEFAULT;
   public latestContentPulse: number = 1;
@@ -205,6 +246,20 @@ export class ClipboardFeatureController {
   public mobileSyncBusy: boolean = false;
   public mobileSyncState: number = 0;
   public desktopDeviceMutationBusy: boolean = false;
+  public desktopSelectedSpaceDeviceId: string = '';
+  public desktopSelectedSpaceDeviceName: string = '';
+  public desktopSelectedSpaceDeviceType: string = '';
+  public desktopSelectedSpaceDeviceOnline: boolean = false;
+  public desktopSelectedSpaceDeviceState: string = 'unknown';
+  public desktopSelectedSpaceDeviceIsLocal: boolean = true;
+  public desktopDeviceSyncState: number = 0;
+  public desktopDeviceSyncSaving: boolean = false;
+  public desktopDeviceSendEnabled: boolean = true;
+  public desktopDeviceSyncText: boolean = true;
+  public desktopDeviceSyncImage: boolean = true;
+  public desktopDeviceSyncFile: boolean = true;
+  public desktopDeviceSyncLink: boolean = true;
+  public desktopDeviceSyncRichText: boolean = true;
   public mobileSyncAddOpen: boolean = false;
   public mobileSyncAdvancedOpen: boolean = false;
   public mobileSyncDeviceName: string = '';
@@ -289,6 +344,11 @@ export class ClipboardFeatureController {
   public setSpaceJoined(joined: boolean): void {
     this.spaceJoined = joined;
     AppStorage.setOrCreate('spaceJoined', joined);
+  }
+
+  public prepareSharedHistory(uiContext: UIContext): void {
+    this.uiContextRef = uiContext;
+    this.restoreLocalHistory();
   }
 
   public start(uiContext: UIContext): void {
@@ -532,16 +592,6 @@ export class ClipboardFeatureController {
     return '#33' + this.getAppearanceTheme(this.appearanceThemeId).primaryColor.substring(1);
   }
 
-  public titleBarConnectionIcon(): IconType {
-    if (this.isConnectionAvailable()) {
-      return $r('sys.symbol.connection');
-    }
-    const modifier: SymbolGlyphModifier =
-      new SymbolGlyphModifier($r('sys.symbol.unconnection'));
-    modifier.fontColor([$r('app.color.danger')]);
-    return modifier;
-  }
-
   public async restoreLocalHistory(): Promise<void> {
     if (this.historyRestoreStarted) {
       return;
@@ -552,28 +602,35 @@ export class ClipboardFeatureController {
       if (context === undefined) {
         return;
       }
-      let storedItems: ClipboardHistoryItem[] = await this.historyStorageService.load(context);
+      let settings: HistoryLibrarySettings = this.historyStorageService.loadSettings(context);
+      this.historyRetentionDays = settings.retentionDays;
+      this.historyMergeDuplicates = settings.mergeDuplicates;
+      let storedItems: ClipboardHistoryItem[] = await this.historyStorageService.load(context,
+        this.historyRetentionDays);
       let mergedItems: ClipboardHistoryItem[] = [];
       let knownIds: Set<string> = new Set<string>();
-      for (let index: number = 0; index < this.history.length && mergedItems.length < 200; index++) {
+      for (let index: number = 0; index < this.history.length; index++) {
         let item: ClipboardHistoryItem = this.history[index];
         mergedItems.push(item);
         knownIds.add(item.id);
       }
-      for (let index: number = 0; index < storedItems.length && mergedItems.length < 200; index++) {
+      for (let index: number = 0; index < storedItems.length; index++) {
         let item: ClipboardHistoryItem = storedItems[index];
         if (!knownIds.has(item.id)) {
           mergedItems.push(item);
           knownIds.add(item.id);
         }
       }
-      this.history = mergedItems;
+      this.history = this.historyMergeDuplicates ? this.mergeHistoryDuplicates(mergedItems) : mergedItems;
+      this.pruneHistoryByRetention();
     } catch (error) {
       console.error('UniClipboard failed to restore local clipboard history.');
     } finally {
       this.historyRestored = true;
       if (this.historySavePending) {
         this.historySavePending = false;
+        this.scheduleHistorySave();
+      } else {
         this.scheduleHistorySave();
       }
     }
@@ -594,7 +651,7 @@ export class ClipboardFeatureController {
       return;
     }
     let items: ClipboardHistoryItem[] = [];
-    for (let index: number = 0; index < this.history.length && index < 200; index++) {
+    for (let index: number = 0; index < this.history.length; index++) {
       items.push(this.history[index]);
     }
     this.historySaveBusy = true;
@@ -621,11 +678,15 @@ export class ClipboardFeatureController {
       let context: common.Context | undefined = this.getUIContext().getHostContext();
       if (context === undefined) {
         this.spaceNodeState = 3;
+        this.recordConnectionDiagnosticFailure('node_unavailable');
         return;
       }
       let status: NativeSpaceStatus = await this.spaceNodeService.start(
         context.filesDir, context.cacheDir, deviceInfo.deviceType);
       this.spaceNodeState = status.running ? 2 : 3;
+      if (!status.running) {
+        this.recordConnectionDiagnosticFailure('node_unavailable');
+      }
       this.setSpaceJoined(status.joined);
       this.spaceDeviceName = status.deviceName;
       this.spaceCreatedId = status.spaceId;
@@ -635,6 +696,7 @@ export class ClipboardFeatureController {
       await this.initializeMobileSyncServer();
     } catch (error) {
       this.spaceNodeState = 3;
+      this.recordConnectionDiagnosticFailure('node_unavailable');
     }
   }
 
@@ -796,7 +858,7 @@ export class ClipboardFeatureController {
         this.latestText = event.text;
         this.latestKind = 'Text';
         this.latestImage = null;
-        this.addHistory(event.text, 'received');
+        this.addHistory(event.text, 'received', 'Text', null, null, '', event.contentId, event.sourceLabel);
         try {
           await this.clipboardService.writeText(event.text);
           this.notifyReceivedContent('Text', event.text, null, 0, event.sourceLabel);
@@ -810,7 +872,8 @@ export class ClipboardFeatureController {
           this.latestImageRevision += 1;
           this.latestKind = 'Image';
           this.latestText = event.dataName.length > 0 ? event.dataName : 'image.png';
-          this.addHistory(this.latestText, 'received', 'Image', pixelMap);
+          this.addHistory(this.latestText, 'received', 'Image', pixelMap, null, '', event.contentId,
+            event.sourceLabel);
           await this.clipboardService.writeImage(pixelMap);
           this.notifyReceivedContent('Image', this.latestText, pixelMap, event.data.length,
             event.sourceLabel);
@@ -833,7 +896,8 @@ export class ClipboardFeatureController {
         this.latestFileData = event.data;
         this.latestFilePath = '';
         this.latestFileRevision += 1;
-        this.addHistory(fileName, 'received', 'File', null, event.data);
+        this.addHistory(fileName, 'received', 'File', null, event.data, '', event.contentId,
+          event.sourceLabel);
         this.notifyReceivedContent('File', fileName, filePreview, event.data.length,
           event.sourceLabel);
       }
@@ -1255,6 +1319,413 @@ export class ClipboardFeatureController {
     });
   }
 
+  private recordConnectionDiagnosticFailure(reason: string): void {
+    this.connectionDiagnosticLastFailure = reason;
+    this.connectionDiagnosticLastFailureAtMs = Date.now();
+  }
+
+  private refreshConnectionDiagnosticNetworkType(): void {
+    this.connectionDiagnosticNetworkType = 'unavailable';
+    try {
+      let netHandle: connection.NetHandle = connection.getDefaultNetSync();
+      let capabilities: connection.NetCapabilities = connection.getNetCapabilitiesSync(netHandle);
+      let bearerTypes: connection.NetBearType[] = capabilities.bearerTypes;
+      if (bearerTypes.indexOf(connection.NetBearType.BEARER_VPN) >= 0) {
+        this.connectionDiagnosticNetworkType = 'vpn';
+      } else if (bearerTypes.indexOf(connection.NetBearType.BEARER_WIFI) >= 0) {
+        this.connectionDiagnosticNetworkType = 'wifi';
+      } else if (bearerTypes.indexOf(connection.NetBearType.BEARER_ETHERNET) >= 0) {
+        this.connectionDiagnosticNetworkType = 'ethernet';
+      } else if (bearerTypes.indexOf(connection.NetBearType.BEARER_CELLULAR) >= 0) {
+        this.connectionDiagnosticNetworkType = 'cellular';
+      } else if (bearerTypes.indexOf(connection.NetBearType.BEARER_BLUETOOTH) >= 0) {
+        this.connectionDiagnosticNetworkType = 'bluetooth';
+      } else {
+        this.connectionDiagnosticNetworkType = 'other';
+      }
+    } catch (error) {
+      this.connectionDiagnosticNetworkType = 'unavailable';
+    }
+  }
+
+  private refreshConnectionDiagnosticPermissions(): void {
+    this.connectionDiagnosticInternetGranted = false;
+    this.connectionDiagnosticBackgroundGranted = false;
+    try {
+      let bundleInfo: bundleManager.BundleInfo = bundleManager.getBundleInfoForSelfSync(
+        bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_APPLICATION);
+      let tokenId: number = bundleInfo.appInfo.accessTokenId;
+      let accessManager: abilityAccessCtrl.AtManager = abilityAccessCtrl.createAtManager();
+      let internetPermission: Permissions = 'ohos.permission.INTERNET';
+      let backgroundPermission: Permissions = 'ohos.permission.KEEP_BACKGROUND_RUNNING';
+      this.connectionDiagnosticInternetGranted = accessManager.checkAccessTokenSync(
+        tokenId, internetPermission) === abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED;
+      this.connectionDiagnosticBackgroundGranted = accessManager.checkAccessTokenSync(
+        tokenId, backgroundPermission) === abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED;
+    } catch (error) {
+      this.connectionDiagnosticInternetGranted = false;
+      this.connectionDiagnosticBackgroundGranted = false;
+    }
+  }
+
+  private applyConnectionDiagnosticDevices(devices: NativeSpaceDevice[]): NativeSpaceDevice | null {
+    this.spaceDevices = devices;
+    this.connectionDiagnosticDirectCount = 0;
+    this.connectionDiagnosticRelayCount = 0;
+    this.connectionDiagnosticUnknownCount = 0;
+    this.connectionDiagnosticOfflineCount = 0;
+    let target: NativeSpaceDevice | null = null;
+    let peerConnected: boolean = false;
+    for (let index: number = 0; index < devices.length; index++) {
+      let device: NativeSpaceDevice = devices[index];
+      if (device.isLocal) {
+        continue;
+      }
+      if (target === null || (!target.online && device.online)) {
+        target = device;
+      }
+      if (!device.online || device.channel === 'offline') {
+        this.connectionDiagnosticOfflineCount += 1;
+        continue;
+      }
+      peerConnected = true;
+      if (device.channel === 'direct') {
+        this.connectionDiagnosticDirectCount += 1;
+      } else if (device.channel === 'relay') {
+        this.connectionDiagnosticRelayCount += 1;
+      } else {
+        this.connectionDiagnosticUnknownCount += 1;
+      }
+    }
+    this.spacePeerConnected = peerConnected;
+    return target;
+  }
+
+  public async refreshConnectionDiagnostics(): Promise<void> {
+    if (this.connectionDiagnosticBusy) {
+      return;
+    }
+    this.connectionDiagnosticBusy = true;
+    this.connectionDiagnosticExportState = 0;
+    this.connectionDiagnosticLatencyMs = -1;
+    this.connectionDiagnosticDirectCount = 0;
+    this.connectionDiagnosticRelayCount = 0;
+    this.connectionDiagnosticUnknownCount = 0;
+    this.connectionDiagnosticOfflineCount = 0;
+    this.refreshConnectionDiagnosticNetworkType();
+    this.refreshConnectionDiagnosticPermissions();
+    let probeSucceeded: boolean = false;
+    let failureReason: string = 'none';
+    if (this.connectionDiagnosticNetworkType === 'unavailable') {
+      failureReason = 'network_unavailable';
+    }
+    if (this.spaceNodeState === 2 && this.spaceJoined) {
+      try {
+        this.spaceNodeService.wakeConnections();
+        let devices: NativeSpaceDevice[] = await this.spaceNodeService.devices();
+        let target: NativeSpaceDevice | null = this.applyConnectionDiagnosticDevices(devices);
+        if (target === null) {
+          failureReason = 'no_peer';
+        } else {
+          let startedAt: number = Date.now();
+          let online: boolean = await this.spaceNodeService.connect(target.deviceId);
+          let elapsedMs: number = Date.now() - startedAt;
+          let refreshedDevices: NativeSpaceDevice[] = await this.spaceNodeService.devices();
+          this.applyConnectionDiagnosticDevices(refreshedDevices);
+          if (online) {
+            this.connectionDiagnosticLatencyMs = Math.max(0, elapsedMs);
+            probeSucceeded = true;
+          } else {
+            failureReason = 'peer_offline';
+          }
+        }
+      } catch (error) {
+        failureReason = 'space_probe_failed';
+      }
+    } else if (this.spaceNodeState !== 2) {
+      failureReason = 'node_unavailable';
+    } else if (!this.spaceJoined) {
+      failureReason = 'space_not_joined';
+    }
+    if (!probeSucceeded && this.hasConfig()) {
+      try {
+        let startedAt: number = Date.now();
+        let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
+        await client.probe();
+        this.connectionDiagnosticLatencyMs = Math.max(0, Date.now() - startedAt);
+        this.connectionDiagnosticRelayCount += 1;
+        probeSucceeded = true;
+      } catch (error) {
+        failureReason = 'relay_probe_failed';
+      }
+    }
+    if (probeSucceeded) {
+      this.statusCode = 2;
+    } else {
+      this.statusCode = 3;
+      if (!this.connectionDiagnosticInternetGranted) {
+        failureReason = 'permission_unavailable';
+      }
+      if (failureReason === 'none') {
+        failureReason = 'not_configured';
+      }
+      this.recordConnectionDiagnosticFailure(failureReason);
+    }
+    this.connectionDiagnosticBusy = false;
+  }
+
+  private connectionDiagnosticTransportCode(): string {
+    if (this.connectionDiagnosticDirectCount > 0 && this.connectionDiagnosticRelayCount > 0) {
+      return 'mixed';
+    }
+    if (this.connectionDiagnosticDirectCount > 0) {
+      return 'direct';
+    }
+    if (this.connectionDiagnosticRelayCount > 0) {
+      return 'relay';
+    }
+    if (this.connectionDiagnosticUnknownCount > 0) {
+      return 'unknown';
+    }
+    return 'offline';
+  }
+
+  private connectionDiagnosticPermissionCode(granted: boolean): string {
+    return granted ? 'granted' : 'denied';
+  }
+
+  private buildRedactedConnectionDiagnosticLog(): string {
+    let generatedAt: string = new Date().toISOString();
+    return 'UniClipboard connection diagnostics\n' +
+      'redaction=enabled\n' +
+      'generated_at=' + generatedAt + '\n' +
+      'device_type=' + deviceInfo.deviceType + '\n' +
+      'network_type=' + this.connectionDiagnosticNetworkType + '\n' +
+      'transport=' + this.connectionDiagnosticTransportCode() + '\n' +
+      'latency_ms=' + this.connectionDiagnosticLatencyMs.toString() + '\n' +
+      'direct_paths=' + this.connectionDiagnosticDirectCount.toString() + '\n' +
+      'relay_paths=' + this.connectionDiagnosticRelayCount.toString() + '\n' +
+      'unknown_paths=' + this.connectionDiagnosticUnknownCount.toString() + '\n' +
+      'offline_peers=' + this.connectionDiagnosticOfflineCount.toString() + '\n' +
+      'internet_permission=' + this.connectionDiagnosticPermissionCode(
+        this.connectionDiagnosticInternetGranted) + '\n' +
+      'background_permission=' + this.connectionDiagnosticPermissionCode(
+        this.connectionDiagnosticBackgroundGranted) + '\n' +
+      'background_sync=' + (this.backgroundSyncEnabled ? 'enabled' : 'disabled') + '\n' +
+      'last_failure=' + this.connectionDiagnosticLastFailure + '\n' +
+      'last_failure_at_ms=' + this.connectionDiagnosticLastFailureAtMs.toString() + '\n' +
+      'redacted_fields=device_ids,device_names,addresses,urls,credentials,clipboard_content\n';
+  }
+
+  public async exportRedactedConnectionDiagnostics(): Promise<void> {
+    if (this.connectionDiagnosticExportState === 1) {
+      return;
+    }
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context === undefined) {
+      this.connectionDiagnosticExportState = 3;
+      return;
+    }
+    this.connectionDiagnosticExportState = 1;
+    let targetFile: fileIo.File | null = null;
+    try {
+      let targetPath: string = context.cacheDir + '/uniclipboard-connection-diagnostics.txt';
+      targetFile = fileIo.openSync(targetPath,
+        fileIo.OpenMode.CREATE | fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.TRUNC);
+      let encoder: util.TextEncoder = new util.TextEncoder();
+      let data: Uint8Array = encoder.encodeInto(this.buildRedactedConnectionDiagnosticLog());
+      fileIo.writeSync(targetFile.fd, data.buffer);
+      fileIo.closeSync(targetFile.fd);
+      targetFile = null;
+      let title: string = await context.resourceManager.getStringByName('connection_diagnostics_log_title');
+      let targetUri: string = fileUri.getUriFromPath(targetPath);
+      let record: systemShare.SharedRecord = {
+        utd: uniformTypeDescriptor.UniformDataType.PLAIN_TEXT,
+        uri: targetUri,
+        title: title,
+        description: title
+      };
+      let sharedData: systemShare.SharedData = new systemShare.SharedData(record);
+      let shareController: systemShare.ShareController = new systemShare.ShareController(sharedData);
+      let options: systemShare.ShareControllerOptions = {
+        selectionMode: systemShare.SelectionMode.SINGLE
+      };
+      await shareController.show(context as common.UIAbilityContext, options);
+      this.connectionDiagnosticExportState = 2;
+    } catch (error) {
+      this.connectionDiagnosticExportState = 3;
+    } finally {
+      if (targetFile !== null) {
+        try {
+          fileIo.closeSync(targetFile.fd);
+        } catch (error) {
+        }
+      }
+    }
+  }
+
+  private applyDesktopDeviceSyncPreferences(preferences: NativeSpaceMemberSyncPreferences): void {
+    this.desktopDeviceSendEnabled = preferences.sendEnabled;
+    this.desktopDeviceSyncText = preferences.text;
+    this.desktopDeviceSyncImage = preferences.image;
+    this.desktopDeviceSyncFile = preferences.file;
+    this.desktopDeviceSyncLink = preferences.link;
+    this.desktopDeviceSyncRichText = preferences.richText;
+  }
+
+  private assignDesktopSelectedSpaceDevice(device: NativeSpaceDevice): void {
+    this.desktopSelectedSpaceDeviceId = device.deviceId;
+    this.desktopSelectedSpaceDeviceName = device.deviceName;
+    this.desktopSelectedSpaceDeviceType = device.deviceType;
+    this.desktopSelectedSpaceDeviceOnline = device.online;
+    this.desktopSelectedSpaceDeviceState = device.state;
+    this.desktopSelectedSpaceDeviceIsLocal = device.isLocal;
+  }
+
+  public selectDesktopSpaceDevice(device: NativeSpaceDevice): void {
+    this.assignDesktopSelectedSpaceDevice(device);
+    if (device.isLocal) {
+      this.desktopDeviceSyncState = 0;
+      return;
+    }
+    this.loadDesktopDeviceSyncPreferences(device.deviceId);
+  }
+
+  private synchronizeDesktopSpaceDeviceSelection(devices: NativeSpaceDevice[]): void {
+    let selected: NativeSpaceDevice | null = null;
+    let local: NativeSpaceDevice | null = null;
+    for (let index: number = 0; index < devices.length; index++) {
+      let device: NativeSpaceDevice = devices[index];
+      if (device.isLocal) {
+        local = device;
+      }
+      if (device.deviceId === this.desktopSelectedSpaceDeviceId) {
+        selected = device;
+      }
+    }
+    if (selected !== null) {
+      this.assignDesktopSelectedSpaceDevice(selected);
+      return;
+    }
+    if (local !== null) {
+      this.assignDesktopSelectedSpaceDevice(local);
+    } else if (devices.length > 0) {
+      this.assignDesktopSelectedSpaceDevice(devices[0]);
+    } else {
+      this.desktopSelectedSpaceDeviceId = '';
+      this.desktopSelectedSpaceDeviceName = '';
+      this.desktopSelectedSpaceDeviceType = '';
+      this.desktopSelectedSpaceDeviceOnline = false;
+      this.desktopSelectedSpaceDeviceState = 'unknown';
+      this.desktopSelectedSpaceDeviceIsLocal = true;
+      this.desktopDeviceSyncState = 0;
+    }
+  }
+
+  public async loadDesktopDeviceSyncPreferences(deviceId: string): Promise<void> {
+    if (deviceId.length === 0) {
+      return;
+    }
+    this.desktopDeviceSyncState = 1;
+    try {
+      let preferences: NativeSpaceMemberSyncPreferences =
+        await this.spaceNodeService.memberSyncPreferences(deviceId);
+      if (this.desktopSelectedSpaceDeviceId !== deviceId || this.desktopSelectedSpaceDeviceIsLocal) {
+        return;
+      }
+      this.applyDesktopDeviceSyncPreferences(preferences);
+      this.desktopDeviceSyncState = 2;
+    } catch (error) {
+      if (this.desktopSelectedSpaceDeviceId === deviceId) {
+        this.desktopDeviceSyncState = 3;
+      }
+    }
+  }
+
+  public async updateDesktopDeviceSyncPreference(contentType: string, enabled: boolean): Promise<void> {
+    if (this.desktopSelectedSpaceDeviceIsLocal || this.desktopSelectedSpaceDeviceId.length === 0 ||
+      this.desktopDeviceSyncSaving || this.desktopDeviceSyncState !== 2) {
+      return;
+    }
+    let previousSendEnabled: boolean = this.desktopDeviceSendEnabled;
+    let previousText: boolean = this.desktopDeviceSyncText;
+    let previousImage: boolean = this.desktopDeviceSyncImage;
+    let previousFile: boolean = this.desktopDeviceSyncFile;
+    let previousLink: boolean = this.desktopDeviceSyncLink;
+    let previousRichText: boolean = this.desktopDeviceSyncRichText;
+    if (contentType === 'send') {
+      this.desktopDeviceSendEnabled = enabled;
+    } else if (contentType === 'text') {
+      this.desktopDeviceSyncText = enabled;
+    } else if (contentType === 'image') {
+      this.desktopDeviceSyncImage = enabled;
+    } else if (contentType === 'file') {
+      this.desktopDeviceSyncFile = enabled;
+    } else if (contentType === 'link') {
+      this.desktopDeviceSyncLink = enabled;
+    } else if (contentType === 'rich_text') {
+      this.desktopDeviceSyncRichText = enabled;
+    } else {
+      return;
+    }
+    this.desktopDeviceSyncSaving = true;
+    let deviceId: string = this.desktopSelectedSpaceDeviceId;
+    try {
+      let preferences: NativeSpaceMemberSyncPreferences =
+        await this.spaceNodeService.updateMemberSendPreferences(
+          deviceId,
+          this.desktopDeviceSendEnabled,
+          this.desktopDeviceSyncText,
+          this.desktopDeviceSyncImage,
+          this.desktopDeviceSyncFile,
+          this.desktopDeviceSyncLink,
+          this.desktopDeviceSyncRichText);
+      if (this.desktopSelectedSpaceDeviceId === deviceId) {
+        this.applyDesktopDeviceSyncPreferences(preferences);
+        this.desktopDeviceSyncState = 2;
+      }
+      this.statusCode = 2;
+    } catch (error) {
+      if (this.desktopSelectedSpaceDeviceId === deviceId) {
+        this.desktopDeviceSendEnabled = previousSendEnabled;
+        this.desktopDeviceSyncText = previousText;
+        this.desktopDeviceSyncImage = previousImage;
+        this.desktopDeviceSyncFile = previousFile;
+        this.desktopDeviceSyncLink = previousLink;
+        this.desktopDeviceSyncRichText = previousRichText;
+        this.desktopDeviceSyncState = 3;
+      }
+      this.statusCode = 3;
+    } finally {
+      this.desktopDeviceSyncSaving = false;
+    }
+  }
+
+  public async resetDesktopDeviceSyncPreferences(): Promise<void> {
+    if (this.desktopSelectedSpaceDeviceIsLocal || this.desktopSelectedSpaceDeviceId.length === 0 ||
+      this.desktopDeviceSyncSaving) {
+      return;
+    }
+    this.desktopDeviceSyncSaving = true;
+    let deviceId: string = this.desktopSelectedSpaceDeviceId;
+    try {
+      let preferences: NativeSpaceMemberSyncPreferences =
+        await this.spaceNodeService.resetMemberSyncPreferences(deviceId);
+      if (this.desktopSelectedSpaceDeviceId === deviceId) {
+        this.applyDesktopDeviceSyncPreferences(preferences);
+        this.desktopDeviceSyncState = 2;
+      }
+      this.statusCode = 2;
+    } catch (error) {
+      if (this.desktopSelectedSpaceDeviceId === deviceId) {
+        this.desktopDeviceSyncState = 3;
+      }
+      this.statusCode = 3;
+    } finally {
+      this.desktopDeviceSyncSaving = false;
+    }
+  }
+
   public async refreshSpaceDevices(): Promise<void> {
     if (!this.spaceJoined || this.spaceNodeState !== 2 || this.spaceDeviceRefreshBusy) {
       return;
@@ -1263,11 +1734,13 @@ export class ClipboardFeatureController {
     try {
       let devices: NativeSpaceDevice[] = await this.spaceNodeService.devices();
       this.spaceDevices = devices;
+      this.synchronizeDesktopSpaceDeviceSelection(devices);
       this.spacePeerConnected = devices.some((device: NativeSpaceDevice): boolean => {
         return !device.isLocal && device.online;
       });
     } catch (error) {
       console.error('UniClipboard refresh space devices failed');
+      this.recordConnectionDiagnosticFailure('space_probe_failed');
     } finally {
       this.spaceDeviceRefreshBusy = false;
     }
@@ -1288,10 +1761,13 @@ export class ClipboardFeatureController {
       if (online) {
         this.spacePeerConnected = true;
         this.statusCode = 2;
+      } else {
+        this.recordConnectionDiagnosticFailure('peer_offline');
       }
     } catch (error) {
       this.spaceConnectState = 3;
       this.statusCode = 3;
+      this.recordConnectionDiagnosticFailure('space_probe_failed');
     } finally {
       this.spaceConnectingDeviceId = '';
       this.spaceConnectBusy = false;
@@ -1322,9 +1798,13 @@ export class ClipboardFeatureController {
       this.spacePeerConnected = anyOnline || this.spacePeerConnected;
       this.spaceConnectState = this.spacePeerConnected ? 2 : 3;
       this.statusCode = this.spacePeerConnected ? 2 : 3;
+      if (!this.spacePeerConnected) {
+        this.recordConnectionDiagnosticFailure('peer_offline');
+      }
     } catch (error) {
       this.spaceConnectState = 3;
       this.statusCode = 3;
+      this.recordConnectionDiagnosticFailure('space_probe_failed');
     } finally {
       this.spaceConnectingDeviceId = '';
       this.spaceConnectBusy = false;
@@ -1354,7 +1834,8 @@ export class ClipboardFeatureController {
 
   public desktopAllFiltersClear(): boolean {
     return !this.desktopStarredOnly && this.desktopTypeFilter === 0 && this.desktopTagFilter === 0 &&
-      this.desktopSourceFilter === 0 && this.desktopTimeFilter === 0 && this.desktopExtensionFilter.length === 0;
+      this.desktopSourceFilter === 0 && this.desktopTimeFilter === 0 && this.desktopExtensionFilter.length === 0 &&
+      this.desktopCustomTagFilter.length === 0 && this.historyDeviceFilter.length === 0 && !this.historySnippetOnly;
   }
 
   public desktopSearchMatches(text: string): boolean {
@@ -1400,6 +1881,9 @@ export class ClipboardFeatureController {
     if (group === 3) {
       return this.desktopSourceFilter === value;
     }
+    if (group === 5) {
+      return this.historySnippetOnly;
+    }
     return this.desktopTimeFilter === value;
   }
 
@@ -1412,6 +1896,9 @@ export class ClipboardFeatureController {
       this.desktopSourceFilter = 0;
       this.desktopTimeFilter = 0;
       this.desktopExtensionFilter = '';
+      this.desktopCustomTagFilter = '';
+      this.historyDeviceFilter = '';
+      this.historySnippetOnly = false;
     } else if (group === 0) {
       this.desktopStarredOnly = !this.desktopStarredOnly;
     } else if (group === 1) {
@@ -1420,6 +1907,8 @@ export class ClipboardFeatureController {
       this.desktopTagFilter = this.desktopTagFilter === value ? 0 : value;
     } else if (group === 3) {
       this.desktopSourceFilter = value;
+    } else if (group === 5) {
+      this.historySnippetOnly = !this.historySnippetOnly;
     } else {
       this.desktopTimeFilter = value;
     }
@@ -1432,6 +1921,24 @@ export class ClipboardFeatureController {
 
   public applyDesktopExtensionFilter(extension: string): void {
     this.desktopExtensionFilter = this.desktopExtensionFilter === extension ? '' : extension;
+  }
+
+  public applyHistoryDeviceFilter(deviceName: string): void {
+    this.historyDeviceFilter = this.historyDeviceFilter === deviceName ? '' : deviceName;
+  }
+
+  public applyHistoryTagFilter(tag: string): void {
+    this.desktopCustomTagFilter = this.desktopCustomTagFilter === tag ? '' : tag;
+  }
+
+  public toggleHistorySnippetFilter(): void {
+    this.historySnippetOnly = !this.historySnippetOnly;
+  }
+
+  public clearHistoryLibraryFilters(): void {
+    this.historySnippetOnly = false;
+    this.historyDeviceFilter = '';
+    this.desktopCustomTagFilter = '';
   }
 
   public desktopTextLooksRich(text: string): boolean {
@@ -1666,6 +2173,10 @@ export class ClipboardFeatureController {
 
   public desktopFilteredServerHistory(): ServerHistoryItem[] {
     let items: ServerHistoryItem[] = [];
+    if (this.historyDeviceFilter.length > 0 || this.desktopCustomTagFilter.length > 0 ||
+      this.historySnippetOnly) {
+      return items;
+    }
     for (let index: number = 0; index < this.serverHistory.length; index++) {
       let item: ServerHistoryItem = this.serverHistory[index];
       let starredMatches: boolean = !this.desktopStarredOnly || item.starred;
@@ -1685,11 +2196,70 @@ export class ClipboardFeatureController {
       let starredMatches: boolean = !this.desktopStarredOnly || item.starred;
       if (starredMatches && this.desktopSearchMatches(item.text) && this.desktopSourceMatchesFilter(false) &&
         this.desktopTypeMatchesFilter(item.kind, item.text) && this.desktopTagMatchesFilter(item.kind, item.text) &&
-        this.desktopTimeMatchesFilter(item.timestampMs) && this.desktopExtensionMatchesFilter(item.text)) {
+        this.desktopTimeMatchesFilter(item.timestampMs) && this.desktopExtensionMatchesFilter(item.text) &&
+        this.historyItemMatchesLibraryFilters(item)) {
         items.push(item);
       }
     }
     return items;
+  }
+
+  public historyItemMatchesLibraryFilters(item: ClipboardHistoryItem): boolean {
+    if (this.historySnippetOnly && !item.isSnippet) {
+      return false;
+    }
+    if (this.historyDeviceFilter.length > 0 && item.sourceDevice !== this.historyDeviceFilter) {
+      return false;
+    }
+    if (this.desktopCustomTagFilter.length > 0 && !this.historyItemHasTag(item, this.desktopCustomTagFilter)) {
+      return false;
+    }
+    return true;
+  }
+
+  public compactFilteredHistory(): ClipboardHistoryItem[] {
+    let items: ClipboardHistoryItem[] = [];
+    for (let index: number = 0; index < this.history.length; index++) {
+      let item: ClipboardHistoryItem = this.history[index];
+      if (this.desktopSearchMatches(item.text) && this.historyItemMatchesLibraryFilters(item)) {
+        items.push(item);
+      }
+    }
+    return items;
+  }
+
+  public historyDeviceOptions(): string[] {
+    let devices: string[] = [];
+    for (let index: number = 0; index < this.history.length; index++) {
+      let name: string = this.history[index].sourceDevice.trim();
+      if (name.length > 0 && devices.indexOf(name) < 0) {
+        devices.push(name);
+      }
+    }
+    return devices;
+  }
+
+  public historyTagOptions(): string[] {
+    let tags: string[] = [];
+    for (let itemIndex: number = 0; itemIndex < this.history.length; itemIndex++) {
+      let item: ClipboardHistoryItem = this.history[itemIndex];
+      for (let tagIndex: number = 0; tagIndex < item.tags.length; tagIndex++) {
+        let tag: string = item.tags[tagIndex];
+        if (tag.length > 0 && tags.indexOf(tag) < 0) {
+          tags.push(tag);
+        }
+      }
+    }
+    return tags;
+  }
+
+  public historyItemHasTag(item: ClipboardHistoryItem, tag: string): boolean {
+    for (let index: number = 0; index < item.tags.length; index++) {
+      if (item.tags[index] === tag) {
+        return true;
+      }
+    }
+    return false;
   }
 
   public async selectDesktopServerItem(item: ServerHistoryItem): Promise<void> {
@@ -2566,6 +3136,275 @@ export class ClipboardFeatureController {
     return this.latestFileRevision.toString();
   }
 
+  public currentImageRecognitionKey(): string {
+    if (this.desktopSelectedId.length > 0 && this.desktopSelectedImage !== null) {
+      return 'selected:' + this.desktopSelectedId + ':' + this.desktopSelectedImageRevision.toString();
+    }
+    if (this.latestKind === 'Image' && this.latestImage !== null) {
+      return 'latest:' + this.latestImageRevision.toString();
+    }
+    return '';
+  }
+
+  public currentImageRecognitionState(): number {
+    return this.imageRecognitionSourceKey === this.currentImageRecognitionKey() ? this.imageRecognitionState : 0;
+  }
+
+  public currentImageRecognizedText(): string {
+    return this.imageRecognitionSourceKey === this.currentImageRecognitionKey() ? this.imageRecognizedText : '';
+  }
+
+  public currentImageSmartActions(): ImageSmartAction[] {
+    if (this.imageRecognitionSourceKey === this.currentImageRecognitionKey()) {
+      return this.imageSmartActions;
+    }
+    return [];
+  }
+
+  private async packImageForRecognition(pixelMap: image.PixelMap): Promise<ArrayBuffer> {
+    let packer: image.ImagePacker = image.createImagePacker();
+    let options: image.PackingOption = {
+      format: 'image/png',
+      quality: 100
+    };
+    try {
+      return await packer.packToData(pixelMap, options);
+    } finally {
+      await packer.release();
+    }
+  }
+
+  private async createOcrPixelMap(packedImage: ArrayBuffer): Promise<image.PixelMap> {
+    let source: image.ImageSource = image.createImageSource(packedImage);
+    let options: image.DecodingOptions = {
+      desiredPixelFormat: image.PixelMapFormat.RGBA_8888
+    };
+    try {
+      return await source.createPixelMap(options);
+    } finally {
+      await source.release();
+    }
+  }
+
+  private imageSmartActionExists(actions: ImageSmartAction[], kind: string, value: string): boolean {
+    for (let index: number = 0; index < actions.length; index++) {
+      let action: ImageSmartAction = actions[index];
+      if (action.kind === kind && action.value === value) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private appendImageSmartAction(actions: ImageSmartAction[], kind: string, value: string): void {
+    let normalizedValue: string = value.trim();
+    if (normalizedValue.length === 0 || this.imageSmartActionExists(actions, kind, normalizedValue)) {
+      return;
+    }
+    actions.push(new ImageSmartAction(kind, normalizedValue));
+  }
+
+  private trimDetectedLink(value: string): string {
+    let result: string = value.trim();
+    let trailingMarks: string = '.,;:!?)]}，。；：！？）】》';
+    while (result.length > 0 && trailingMarks.indexOf(result.charAt(result.length - 1)) >= 0) {
+      result = result.substring(0, result.length - 1);
+    }
+    return result;
+  }
+
+  private extractImageTextActions(text: string, actions: ImageSmartAction[]): void {
+    let linkPattern: RegExp = /(https?:\/\/[^\s<>"']+|www\.[^\s<>"']+)/gi;
+    let linkMatch: RegExpExecArray | null = linkPattern.exec(text);
+    while (linkMatch !== null) {
+      let link: string = this.trimDetectedLink(linkMatch[0]);
+      if (link.length > 0) {
+        this.appendImageSmartAction(actions, 'link', link);
+      }
+      linkMatch = linkPattern.exec(text);
+    }
+
+    let phonePattern: RegExp = /(?:\+?\d[\d\s\-()]{5,}\d)/g;
+    let phoneMatch: RegExpExecArray | null = phonePattern.exec(text);
+    while (phoneMatch !== null) {
+      let candidate: string = phoneMatch[0].trim();
+      let digits: string = candidate.replace(/\D/g, '');
+      if (digits.length >= 7 && digits.length <= 15) {
+        let normalizedPhone: string = candidate.charAt(0) === '+' ? '+' + digits : digits;
+        this.appendImageSmartAction(actions, 'phone', normalizedPhone);
+      }
+      phoneMatch = phonePattern.exec(text);
+    }
+  }
+
+  private async detectImageQrCodes(packedImage: ArrayBuffer, actions: ImageSmartAction[]): Promise<boolean> {
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context === undefined) {
+      return false;
+    }
+    let imagePath: string = context.cacheDir + '/uniclipboard-image-recognition.png';
+    let targetFile: fileIo.File | null = null;
+    try {
+      targetFile = fileIo.openSync(imagePath,
+        fileIo.OpenMode.CREATE | fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.TRUNC);
+      fileIo.writeSync(targetFile.fd, packedImage);
+      fileIo.closeSync(targetFile.fd);
+      targetFile = null;
+      let inputImage: detectBarcode.InputImage = {
+        uri: fileUri.getUriFromPath(imagePath)
+      };
+      let options: scanBarcode.ScanOptions = {
+        scanTypes: [scanCore.ScanType.QR_CODE],
+        enableMultiMode: true
+      };
+      let results: scanBarcode.ScanResult[] = await detectBarcode.decode(inputImage, options);
+      for (let index: number = 0; index < results.length; index++) {
+        this.appendImageSmartAction(actions, 'qr', results[index].originalValue);
+      }
+      return true;
+    } catch (error) {
+      console.error('UniClipboard failed to detect QR codes in the current image.');
+      return false;
+    } finally {
+      if (targetFile !== null) {
+        try {
+          fileIo.closeSync(targetFile.fd);
+        } catch (error) {
+        }
+      }
+    }
+  }
+
+  public async recognizeCurrentImage(): Promise<void> {
+    let pixelMap: image.PixelMap | null = this.desktopDisplayImage();
+    let sourceKey: string = this.currentImageRecognitionKey();
+    if (pixelMap === null || sourceKey.length === 0 || this.currentImageRecognitionState() === 1) {
+      return;
+    }
+    this.imageRecognitionSourceKey = sourceKey;
+    this.imageRecognitionState = 1;
+    this.imageRecognizedText = '';
+    this.imageSmartActions = [];
+
+    let packedImage: ArrayBuffer;
+    try {
+      packedImage = await this.packImageForRecognition(pixelMap);
+    } catch (error) {
+      if (this.currentImageRecognitionKey() === sourceKey) {
+        this.imageRecognitionState = 4;
+      }
+      return;
+    }
+
+    let recognizedText: string = '';
+    let actions: ImageSmartAction[] = [];
+    let ocrCompleted: boolean = false;
+    let ocrInitialized: boolean = false;
+    let ocrPixelMap: image.PixelMap | null = null;
+    try {
+      ocrInitialized = await textRecognition.init();
+      if (ocrInitialized) {
+        ocrPixelMap = await this.createOcrPixelMap(packedImage);
+        let visionInfo: textRecognition.VisionInfo = {
+          pixelMap: ocrPixelMap
+        };
+        let result: textRecognition.TextRecognitionResult = await textRecognition.recognizeText(visionInfo);
+        recognizedText = result.value.trim();
+        this.extractImageTextActions(recognizedText, actions);
+        ocrCompleted = true;
+      }
+    } catch (error) {
+      console.error('UniClipboard failed to recognize text in the current image.');
+    } finally {
+      if (ocrPixelMap !== null) {
+        try {
+          await ocrPixelMap.release();
+        } catch (error) {
+        }
+      }
+      if (ocrInitialized) {
+        try {
+          await textRecognition.release();
+        } catch (error) {
+        }
+      }
+    }
+
+    let qrCompleted: boolean = await this.detectImageQrCodes(packedImage, actions);
+    if (this.currentImageRecognitionKey() !== sourceKey) {
+      return;
+    }
+    this.imageRecognizedText = recognizedText;
+    this.imageSmartActions = actions;
+    if (recognizedText.length > 0 || actions.length > 0) {
+      this.imageRecognitionState = 2;
+    } else if (ocrCompleted || qrCompleted) {
+      this.imageRecognitionState = 3;
+    } else {
+      this.imageRecognitionState = 4;
+    }
+  }
+
+  public async copyImageRecognizedText(): Promise<void> {
+    let text: string = this.currentImageRecognizedText();
+    if (text.length === 0) {
+      return;
+    }
+    try {
+      await this.clipboardService.writeText(text);
+      this.statusCode = 2;
+    } catch (error) {
+      this.statusCode = 3;
+    }
+  }
+
+  public async copyImageSmartAction(action: ImageSmartAction): Promise<void> {
+    try {
+      await this.clipboardService.writeText(action.value);
+      this.statusCode = 2;
+    } catch (error) {
+      this.statusCode = 3;
+    }
+  }
+
+  public imageSmartActionCanOpen(action: ImageSmartAction): boolean {
+    let lowerValue: string = action.value.toLowerCase();
+    return action.kind === 'phone' || action.kind === 'link' ||
+      (action.kind === 'qr' && (lowerValue.startsWith('http://') || lowerValue.startsWith('https://') ||
+        lowerValue.startsWith('www.')));
+  }
+
+  public async openImageSmartAction(action: ImageSmartAction): Promise<void> {
+    try {
+      if (action.kind === 'phone') {
+        let context: common.Context | undefined = this.getUIContext().getHostContext();
+        if (context === undefined) {
+          throw new Error('UIAbility context is unavailable.');
+        }
+        await call.makeCall(context, action.value);
+        return;
+      }
+      let targetUrl: string = action.value;
+      if (targetUrl.toLowerCase().startsWith('www.')) {
+        targetUrl = 'https://' + targetUrl;
+      }
+      if (!targetUrl.toLowerCase().startsWith('http://') && !targetUrl.toLowerCase().startsWith('https://')) {
+        return;
+      }
+      let context: common.Context | undefined = this.getUIContext().getHostContext();
+      if (context === undefined) {
+        throw new Error('UIAbility context is unavailable.');
+      }
+      let abilityContext: common.UIAbilityContext = context as common.UIAbilityContext;
+      await abilityContext.startAbility({
+        action: 'ohos.want.action.viewData',
+        uri: targetUrl
+      });
+    } catch (error) {
+      this.statusCode = 3;
+    }
+  }
+
   public desktopImageAspectRatio(): number {
     let pixelMap: image.PixelMap | null = this.desktopDisplayImage();
     if (pixelMap === null) {
@@ -2733,6 +3572,235 @@ export class ClipboardFeatureController {
     this.history = items;
     this.animateHistoryUpdate();
     this.scheduleHistorySave();
+  }
+
+  public toggleHistorySnippet(item: ClipboardHistoryItem): void {
+    let items: ClipboardHistoryItem[] = [];
+    for (let index: number = 0; index < this.history.length; index++) {
+      let current: ClipboardHistoryItem = this.history[index];
+      if (current.id === item.id) {
+        current.isSnippet = !current.isSnippet;
+      }
+      items.push(current);
+    }
+    this.history = items;
+    this.animateHistoryUpdate();
+    this.scheduleHistorySave();
+  }
+
+  public historyTagsText(item: ClipboardHistoryItem): string {
+    return item.tags.join(', ');
+  }
+
+  public setHistoryTags(itemId: string, tagText: string): void {
+    let normalizedText: string = tagText.replace(/，/g, ',');
+    let parts: string[] = normalizedText.split(',');
+    let tags: string[] = [];
+    for (let index: number = 0; index < parts.length && tags.length < 8; index++) {
+      let tag: string = parts[index].trim();
+      if (tag.length > 20) {
+        tag = tag.substring(0, 20);
+      }
+      if (tag.length > 0 && tags.indexOf(tag) < 0) {
+        tags.push(tag);
+      }
+    }
+    let items: ClipboardHistoryItem[] = [];
+    for (let index: number = 0; index < this.history.length; index++) {
+      let item: ClipboardHistoryItem = this.history[index];
+      if (item.id === itemId) {
+        item.tags = tags;
+      }
+      items.push(item);
+    }
+    this.history = items;
+    this.animateHistoryUpdate();
+    this.scheduleHistorySave();
+  }
+
+  public historyItemSelected(itemId: string): boolean {
+    return this.historySelectedIds.indexOf(itemId) >= 0;
+  }
+
+  public toggleHistorySelectionMode(): void {
+    this.historySelectionMode = !this.historySelectionMode;
+    if (!this.historySelectionMode) {
+      this.historySelectedIds = [];
+    }
+  }
+
+  public toggleHistorySelection(itemId: string): void {
+    let selectedIds: string[] = [];
+    let alreadySelected: boolean = false;
+    for (let index: number = 0; index < this.historySelectedIds.length; index++) {
+      let selectedId: string = this.historySelectedIds[index];
+      if (selectedId === itemId) {
+        alreadySelected = true;
+      } else {
+        selectedIds.push(selectedId);
+      }
+    }
+    if (!alreadySelected) {
+      selectedIds.push(itemId);
+    }
+    this.historySelectedIds = selectedIds;
+  }
+
+  public selectAllFilteredHistory(): void {
+    let selectedIds: string[] = [];
+    let items: ClipboardHistoryItem[] = this.compactFilteredHistory();
+    for (let index: number = 0; index < items.length; index++) {
+      selectedIds.push(items[index].id);
+    }
+    this.historySelectedIds = selectedIds;
+  }
+
+  public batchToggleSelectedStarred(): void {
+    if (this.historySelectedIds.length === 0) {
+      return;
+    }
+    let allStarred: boolean = true;
+    for (let index: number = 0; index < this.history.length; index++) {
+      let item: ClipboardHistoryItem = this.history[index];
+      if (this.historyItemSelected(item.id) && !item.starred) {
+        allStarred = false;
+      }
+    }
+    let items: ClipboardHistoryItem[] = [];
+    for (let index: number = 0; index < this.history.length; index++) {
+      let item: ClipboardHistoryItem = this.history[index];
+      if (this.historyItemSelected(item.id)) {
+        item.starred = !allStarred;
+      }
+      items.push(item);
+    }
+    this.history = items;
+    this.animateHistoryUpdate();
+    this.scheduleHistorySave();
+  }
+
+  public async batchDeleteSelectedHistory(): Promise<void> {
+    if (this.historySelectedIds.length === 0 || this.historyMutationBusy) {
+      return;
+    }
+    try {
+      let result = await this.getUIContext().getPromptAction().showDialog({
+        title: $r('app.string.history_batch_delete_title'),
+        message: $r('app.string.history_batch_delete_message'),
+        buttons: [
+          { text: $r('app.string.cancel_action'), color: $r('app.color.text_secondary') },
+          { text: $r('app.string.history_delete_action'), color: $r('app.color.danger') }
+        ]
+      });
+      if (result.index !== 1) {
+        return;
+      }
+    } catch (error) {
+      return;
+    }
+    this.historyMutationBusy = true;
+    try {
+      let retainedItems: ClipboardHistoryItem[] = [];
+      let context: common.Context | undefined = this.getUIContext().getHostContext();
+      for (let index: number = 0; index < this.history.length; index++) {
+        let item: ClipboardHistoryItem = this.history[index];
+        if (this.historyItemSelected(item.id)) {
+          if (context !== undefined) {
+            this.historyStorageService.removePayload(context, item);
+          }
+        } else {
+          retainedItems.push(item);
+        }
+      }
+      this.history = retainedItems;
+      this.historySelectedIds = [];
+      this.historySelectionMode = false;
+      this.scheduleHistorySave();
+    } finally {
+      this.historyMutationBusy = false;
+    }
+  }
+
+  public setHistoryRetentionDays(retentionDays: number): void {
+    if (retentionDays < 0) {
+      return;
+    }
+    this.historyRetentionDays = retentionDays;
+    this.saveHistoryLibrarySettings();
+    this.pruneHistoryByRetention();
+    this.scheduleHistorySave();
+  }
+
+  public setHistoryMergeDuplicates(enabled: boolean): void {
+    this.historyMergeDuplicates = enabled;
+    if (enabled) {
+      this.history = this.mergeHistoryDuplicates(this.history);
+    }
+    this.saveHistoryLibrarySettings();
+    this.scheduleHistorySave();
+  }
+
+  public saveHistoryLibrarySettings(): void {
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context === undefined) {
+      return;
+    }
+    this.historyStorageService.saveSettings(context,
+      new HistoryLibrarySettings(this.historyRetentionDays, this.historyMergeDuplicates));
+  }
+
+  public pruneHistoryByRetention(): void {
+    if (this.historyRetentionDays === 0) {
+      return;
+    }
+    let cutoffMs: number = Date.now() - this.historyRetentionDays * 24 * 60 * 60 * 1000;
+    let retainedItems: ClipboardHistoryItem[] = [];
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    for (let index: number = 0; index < this.history.length; index++) {
+      let item: ClipboardHistoryItem = this.history[index];
+      if (item.timestampMs >= cutoffMs || item.starred || item.isSnippet) {
+        retainedItems.push(item);
+      } else if (context !== undefined) {
+        this.historyStorageService.removePayload(context, item);
+      }
+    }
+    this.history = retainedItems;
+  }
+
+  public mergeHistoryDuplicates(items: ClipboardHistoryItem[]): ClipboardHistoryItem[] {
+    let mergedItems: ClipboardHistoryItem[] = [];
+    for (let sourceIndex: number = 0; sourceIndex < items.length; sourceIndex++) {
+      let source: ClipboardHistoryItem = items[sourceIndex];
+      let duplicateIndex: number = -1;
+      for (let targetIndex: number = 0; targetIndex < mergedItems.length; targetIndex++) {
+        let target: ClipboardHistoryItem = mergedItems[targetIndex];
+        let sameTextContent: boolean = source.kind === 'Text' && target.kind === 'Text' &&
+          source.text.trim() === target.text.trim();
+        let sameContentId: boolean = source.id.length > 0 && source.id === target.id;
+        if (sameTextContent || sameContentId) {
+          duplicateIndex = targetIndex;
+          break;
+        }
+      }
+      if (duplicateIndex < 0) {
+        mergedItems.push(source);
+        continue;
+      }
+      let duplicate: ClipboardHistoryItem = mergedItems[duplicateIndex];
+      duplicate.starred = duplicate.starred || source.starred;
+      duplicate.isSnippet = duplicate.isSnippet || source.isSnippet;
+      duplicate.occurrenceCount += Math.max(1, source.occurrenceCount);
+      if (duplicate.sourceDevice.length === 0) {
+        duplicate.sourceDevice = source.sourceDevice;
+      }
+      for (let tagIndex: number = 0; tagIndex < source.tags.length; tagIndex++) {
+        let tag: string = source.tags[tagIndex];
+        if (duplicate.tags.indexOf(tag) < 0) {
+          duplicate.tags.push(tag);
+        }
+      }
+    }
+    return mergedItems;
   }
 
   public async sendLocalHistoryItem(item: ClipboardHistoryItem): Promise<void> {
@@ -2909,16 +3977,49 @@ export class ClipboardFeatureController {
 
   public addHistory(text: string, direction: string, kind: string = 'Text',
     imagePreview: image.PixelMap | null = null, fileData: Uint8Array | null = null,
-    filePath: string = '', historyId: string = ''): void {
+    filePath: string = '', historyId: string = '', sourceDevice: string = ''): void {
     let timestampMs: number = Date.now();
     let itemId: string = historyId.length > 0 ? historyId : timestampMs.toString();
+    let resolvedSource: string = sourceDevice;
+    if (resolvedSource.length === 0 && direction === 'sent') {
+      resolvedSource = this.spaceDeviceName.length > 0 ? this.spaceDeviceName : deviceInfo.marketName;
+      if (resolvedSource.length === 0) {
+        resolvedSource = deviceInfo.deviceType;
+      }
+    }
     let item: ClipboardHistoryItem = new ClipboardHistoryItem(
-      itemId, text, direction, this.currentTime(), kind, imagePreview, fileData, filePath, timestampMs);
+      itemId, text, direction, this.currentTime(), kind, imagePreview, fileData, filePath, timestampMs,
+      false, [], false, resolvedSource, 1);
     let items: ClipboardHistoryItem[] = [item];
-    for (let index: number = 0; index < this.history.length && items.length < 200; index++) {
-      items.push(this.history[index]);
+    let merged: boolean = false;
+    for (let index: number = 0; index < this.history.length; index++) {
+      let current: ClipboardHistoryItem = this.history[index];
+      let sameTextContent: boolean = kind === 'Text' && current.kind === 'Text' &&
+        current.text.trim() === text.trim();
+      let sameContentId: boolean = historyId.length > 0 && current.id === historyId;
+      if (this.historyMergeDuplicates && !merged && (sameTextContent || sameContentId)) {
+        current.direction = direction;
+        current.time = item.time;
+        current.timestampMs = timestampMs;
+        current.sourceDevice = resolvedSource;
+        current.occurrenceCount += 1;
+        if (imagePreview !== null) {
+          current.imagePreview = imagePreview;
+        }
+        if (fileData !== null) {
+          current.fileData = fileData;
+        }
+        if (filePath.length > 0) {
+          current.filePath = filePath;
+        }
+        items[0] = current;
+        merged = true;
+      } else {
+        items.push(current);
+      }
     }
     this.history = items;
+    this.pruneHistoryByRetention();
     this.animateHistoryUpdate();
     this.scheduleHistorySave();
   }
@@ -2941,6 +4042,7 @@ export class ClipboardFeatureController {
   public async testConnection(): Promise<void> {
     if (!this.hasConfig()) {
       this.statusCode = 3;
+      this.recordConnectionDiagnosticFailure('not_configured');
       return;
     }
     this.busy = true;
@@ -2953,6 +4055,7 @@ export class ClipboardFeatureController {
       this.statusCode = 2;
     } catch (error) {
       this.statusCode = 3;
+      this.recordConnectionDiagnosticFailure('relay_probe_failed');
     } finally {
       this.busy = false;
     }
@@ -3080,7 +4183,7 @@ export class ClipboardFeatureController {
     this.latestContentId = result.contentId;
     this.animateLatestContent();
     if (recordHistory) {
-      this.addHistory(displayText, 'received', result.kind, pixelMap, fileData, filePath);
+      this.addHistory(displayText, 'received', result.kind, pixelMap, fileData, filePath, result.contentId);
     }
   }
 
@@ -3631,7 +4734,8 @@ export class ClipboardFeatureController {
         this.releaseDesktopAudio();
       }
       this.latestContentId = event.snapshotHash;
-      this.addHistory(event.text, 'received');
+      this.addHistory(event.text, 'received', 'Text', null, null, '', event.snapshotHash,
+        this.sourceLabelForDevice(event.fromDeviceId));
       try {
         await this.clipboardService.writeText(event.text);
         this.notifyReceivedContent('Text', event.text, null, 0,
@@ -3657,7 +4761,8 @@ export class ClipboardFeatureController {
           this.releaseDesktopAudio();
         }
         this.latestContentId = event.snapshotHash;
-        this.addHistory('image.jpg', 'received', 'Image', pixelMap);
+        this.addHistory('image.jpg', 'received', 'Image', pixelMap, null, '', event.snapshotHash,
+          this.sourceLabelForDevice(event.fromDeviceId));
         await this.clipboardService.writeImage(pixelMap);
         this.notifyReceivedContent('Image', 'image.jpg', pixelMap, 0,
           this.sourceLabelForDevice(event.fromDeviceId));
@@ -3694,7 +4799,8 @@ export class ClipboardFeatureController {
       this.latestImage = null;
       this.latestContentId = event.snapshotHash;
       this.addHistory(event.fileName, 'received', 'File', null,
-        event.data.length > 0 ? event.data : null, event.localPath);
+        event.data.length > 0 ? event.data : null, event.localPath, event.snapshotHash,
+        this.sourceLabelForDevice(event.fromDeviceId));
       this.notifyReceivedContent('File', event.fileName, filePreview, event.data.length,
         this.sourceLabelForDevice(event.fromDeviceId));
     }

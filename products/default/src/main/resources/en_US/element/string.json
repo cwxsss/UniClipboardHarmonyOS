@@ -111,6 +111,86 @@
     {
       "name": "onboarding_feature_file",
       "value": "Files"
+    },
+    {
+      "name": "share_target_label",
+      "value": "Send to UniClipboard"
+    },
+    {
+      "name": "share_target_description",
+      "value": "Send shared content to a trusted device"
+    },
+    {
+      "name": "share_target_title",
+      "value": "Send to device"
+    },
+    {
+      "name": "share_target_loading",
+      "value": "Loading shared content and devices…"
+    },
+    {
+      "name": "share_target_content_text",
+      "value": "Text or link"
+    },
+    {
+      "name": "share_target_content_image",
+      "value": "Image"
+    },
+    {
+      "name": "share_target_content_file",
+      "value": "File"
+    },
+    {
+      "name": "share_target_all_devices",
+      "value": "Send to all online devices"
+    },
+    {
+      "name": "share_target_choose_device",
+      "value": "Or choose a device"
+    },
+    {
+      "name": "share_target_online",
+      "value": "Online"
+    },
+    {
+      "name": "share_target_offline",
+      "value": "Offline"
+    },
+    {
+      "name": "share_target_send_action",
+      "value": "Send"
+    },
+    {
+      "name": "share_target_customize_header",
+      "value": "Customize header"
+    },
+    {
+      "name": "share_target_no_devices",
+      "value": "There are no other devices in this space yet"
+    },
+    {
+      "name": "share_target_not_joined",
+      "value": "Open UniClipboard first and create or join a sync space."
+    },
+    {
+      "name": "share_target_unsupported",
+      "value": "This selection is not supported. Share one text item, image, or file at a time."
+    },
+    {
+      "name": "share_target_send_failed",
+      "value": "Could not send. Make sure the target device is online and try again."
+    },
+    {
+      "name": "share_target_load_failed",
+      "value": "The device service took too long to start. Try again."
+    },
+    {
+      "name": "share_target_retry",
+      "value": "Retry"
+    },
+    {
+      "name": "share_target_back",
+      "value": "Back to share panel"
     }
   ]
 }

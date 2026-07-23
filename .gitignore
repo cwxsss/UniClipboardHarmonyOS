@@ -8,6 +8,11 @@
 /entry/build/
 /entry/oh_modules/
 /build/
+/output/
+/recovery/
+/device-screenshot-*.jpeg
+/uniclipboard_device.jpeg
+/uniclipboard_screen.jpeg
 **/build/
 **/BuildProfile.ets
 local.properties

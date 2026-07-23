@@ -76,7 +76,7 @@ export class ClipboardService {
     return null;
   }
 
-  private async decodeImageUri(uri: string): Promise<image.PixelMap> {
+  async decodeImageUri(uri: string): Promise<image.PixelMap> {
     let file: fileIo.File = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY);
     try {
       let source: image.ImageSource = image.createImageSource(file.fd);

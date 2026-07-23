@@ -17,6 +17,7 @@ import { AbilityConstant, ConfigurationConstant, UIAbility, Want } from '@kit.Ab
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
+import { systemShare } from '@kit.ShareKit';
 import {
   AppearanceStorageService,
   BackgroundSyncPreferenceService,
@@ -27,9 +28,11 @@ import {
 } from 'common';
 
 const DOMAIN = 0x0000;
+const SHARE_ACTION: string = 'ohos.want.action.sendData';
 
 export default class EntryAbility extends UIAbility {
   private mainWindow: window.Window | null = null;
+  private pendingShareWant: Want | null = null;
   private appearanceStorageService: AppearanceStorageService = new AppearanceStorageService();
   private backgroundSyncPreferenceService: BackgroundSyncPreferenceService =
     new BackgroundSyncPreferenceService();
@@ -48,6 +51,9 @@ export default class EntryAbility extends UIAbility {
   };
 
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
+    if (this.isShareWant(want)) {
+      this.pendingShareWant = want;
+    }
     let backgroundSyncEnabled: boolean = this.backgroundSyncPreferenceService.load(this.context);
     AppStorage.setOrCreate('backgroundSyncEnabled', backgroundSyncEnabled);
     AppStorage.setOrCreate('spaceJoined', false);
@@ -94,7 +100,45 @@ export default class EntryAbility extends UIAbility {
       AppStorage.setOrCreate('navigationRectHeight', uiContext.px2vp(navigationArea.bottomRect.height));
       mainWindow.on('avoidAreaChange', this.avoidAreaChangeCallback);
       hilog.info(DOMAIN, 'testTag', 'Succeeded in loading the content.');
+      let pendingShareWant: Want | null = this.pendingShareWant;
+      this.pendingShareWant = null;
+      if (pendingShareWant !== null) {
+        this.openShareTarget(pendingShareWant);
+      }
     });
+  }
+
+  onNewWant(want: Want, launchParam: AbilityConstant.LaunchParam): void {
+    if (!this.isShareWant(want)) {
+      return;
+    }
+    if (this.mainWindow === null) {
+      this.pendingShareWant = want;
+      return;
+    }
+    this.openShareTarget(want);
+  }
+
+  private isShareWant(want: Want): boolean {
+    return want.action === SHARE_ACTION;
+  }
+
+  private async openShareTarget(want: Want): Promise<void> {
+    let mainWindow: window.Window | null = this.mainWindow;
+    if (mainWindow === null) {
+      this.pendingShareWant = want;
+      return;
+    }
+    try {
+      let data: systemShare.SharedData = await systemShare.getSharedData(want);
+      let storage: LocalStorage = new LocalStorage();
+      storage.setOrCreate('shareData', data);
+      storage.setOrCreate('shareHostWindow', mainWindow);
+      await mainWindow.loadContent('pages/ShareTarget', storage);
+      hilog.info(DOMAIN, 'testTag', 'Loaded the share target in the main ability.');
+    } catch (error) {
+      hilog.error(DOMAIN, 'testTag', 'Failed to open the share target in the main ability.');
+    }
   }
 
   onWindowStageDestroy(): void {

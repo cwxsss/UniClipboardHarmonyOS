@@ -33,10 +33,15 @@ export class ClipboardHistoryItem {
   filePath: string = '';
   timestampMs: number = 0;
   starred: boolean = false;
+  tags: string[] = [];
+  isSnippet: boolean = false;
+  sourceDevice: string = '';
+  occurrenceCount: number = 1;
 
   constructor(id: string, text: string, direction: string, time: string, kind: string = 'Text',
     imagePreview: image.PixelMap | null = null, fileData: Uint8Array | null = null, filePath: string = '',
-    timestampMs: number = 0, starred: boolean = false) {
+    timestampMs: number = 0, starred: boolean = false, tags: string[] = [], isSnippet: boolean = false,
+    sourceDevice: string = '', occurrenceCount: number = 1) {
     this.id = id;
     this.text = text;
     this.direction = direction;
@@ -47,6 +52,10 @@ export class ClipboardHistoryItem {
     this.filePath = filePath;
     this.timestampMs = timestampMs;
     this.starred = starred;
+    this.tags = tags;
+    this.isSnippet = isSnippet;
+    this.sourceDevice = sourceDevice;
+    this.occurrenceCount = occurrenceCount;
   }
 }
 

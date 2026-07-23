@@ -1113,6 +1113,62 @@
       "value": "身份档案"
     },
     {
+      "name": "desktop_device_id",
+      "value": "设备 ID"
+    },
+    {
+      "name": "desktop_connection_state",
+      "value": "连接状态"
+    },
+    {
+      "name": "desktop_device_sync_settings",
+      "value": "同步设置"
+    },
+    {
+      "name": "desktop_device_sync_restore",
+      "value": "恢复默认"
+    },
+    {
+      "name": "desktop_device_send_enabled",
+      "value": "发送到此设备"
+    },
+    {
+      "name": "desktop_device_send_enabled_note",
+      "value": "开启后，本机的剪贴板内容会同步给此设备。接收方向的独立开关将在后续版本开放。"
+    },
+    {
+      "name": "desktop_device_sync_loading",
+      "value": "正在读取设备同步设置…"
+    },
+    {
+      "name": "desktop_device_sync_failed",
+      "value": "读取或保存失败，点击重试"
+    },
+    {
+      "name": "desktop_device_content_types",
+      "value": "内容类型"
+    },
+    {
+      "name": "desktop_device_sync_text",
+      "value": "同步文本"
+    },
+    {
+      "name": "desktop_device_sync_image",
+      "value": "同步图片"
+    },
+    {
+      "name": "desktop_device_sync_file",
+      "value": "同步文件"
+    },
+    {
+      "name": "desktop_device_sync_link",
+      "value": "同步链接"
+    },
+    {
+      "name": "desktop_device_sync_rich_text",
+      "value": "同步富文本"
+    },
+    {
       "name": "desktop_platform",
       "value": "平台"
     },

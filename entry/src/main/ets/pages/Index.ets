@@ -55,6 +55,7 @@ import {
   NativeSpaceFileStatusEvent,
   NativeSpaceImageEvent,
   NativeSpaceInvitation,
+  NativeSpaceMemberSyncPreferences,
   NativeSpaceStatus,
   NativeSpaceTextEvent,
   NativeMobileSyncCredential,
@@ -213,6 +214,20 @@ struct Index {
   @State mobileSyncBusy: boolean = false;
   @State mobileSyncState: number = 0;
   @State desktopDeviceMutationBusy: boolean = false;
+  @State desktopSelectedSpaceDeviceId: string = '';
+  @State desktopSelectedSpaceDeviceName: string = '';
+  @State desktopSelectedSpaceDeviceType: string = '';
+  @State desktopSelectedSpaceDeviceOnline: boolean = false;
+  @State desktopSelectedSpaceDeviceState: string = 'unknown';
+  @State desktopSelectedSpaceDeviceIsLocal: boolean = true;
+  @State desktopDeviceSyncState: number = 0;
+  @State desktopDeviceSyncSaving: boolean = false;
+  @State desktopDeviceSendEnabled: boolean = true;
+  @State desktopDeviceSyncText: boolean = true;
+  @State desktopDeviceSyncImage: boolean = true;
+  @State desktopDeviceSyncFile: boolean = true;
+  @State desktopDeviceSyncLink: boolean = true;
+  @State desktopDeviceSyncRichText: boolean = true;
   @State mobileSyncAddOpen: boolean = false;
   @State mobileSyncAdvancedOpen: boolean = false;
   @State mobileSyncDeviceName: string = '';
@@ -1648,6 +1663,168 @@ struct Index {
     });
   }
 
+  private applyDesktopDeviceSyncPreferences(preferences: NativeSpaceMemberSyncPreferences): void {
+    this.desktopDeviceSendEnabled = preferences.sendEnabled;
+    this.desktopDeviceSyncText = preferences.text;
+    this.desktopDeviceSyncImage = preferences.image;
+    this.desktopDeviceSyncFile = preferences.file;
+    this.desktopDeviceSyncLink = preferences.link;
+    this.desktopDeviceSyncRichText = preferences.richText;
+  }
+
+  private assignDesktopSelectedSpaceDevice(device: NativeSpaceDevice): void {
+    this.desktopSelectedSpaceDeviceId = device.deviceId;
+    this.desktopSelectedSpaceDeviceName = device.deviceName;
+    this.desktopSelectedSpaceDeviceType = device.deviceType;
+    this.desktopSelectedSpaceDeviceOnline = device.online;
+    this.desktopSelectedSpaceDeviceState = device.state;
+    this.desktopSelectedSpaceDeviceIsLocal = device.isLocal;
+  }
+
+  private selectDesktopSpaceDevice(device: NativeSpaceDevice): void {
+    this.assignDesktopSelectedSpaceDevice(device);
+    if (device.isLocal) {
+      this.desktopDeviceSyncState = 0;
+      return;
+    }
+    this.loadDesktopDeviceSyncPreferences(device.deviceId);
+  }
+
+  private synchronizeDesktopSpaceDeviceSelection(devices: NativeSpaceDevice[]): void {
+    let selected: NativeSpaceDevice | null = null;
+    let local: NativeSpaceDevice | null = null;
+    for (let index: number = 0; index < devices.length; index++) {
+      let device: NativeSpaceDevice = devices[index];
+      if (device.isLocal) {
+        local = device;
+      }
+      if (device.deviceId === this.desktopSelectedSpaceDeviceId) {
+        selected = device;
+      }
+    }
+    if (selected !== null) {
+      this.assignDesktopSelectedSpaceDevice(selected);
+      return;
+    }
+    if (local !== null) {
+      this.assignDesktopSelectedSpaceDevice(local);
+    } else if (devices.length > 0) {
+      this.assignDesktopSelectedSpaceDevice(devices[0]);
+    } else {
+      this.desktopSelectedSpaceDeviceId = '';
+      this.desktopSelectedSpaceDeviceName = '';
+      this.desktopSelectedSpaceDeviceType = '';
+      this.desktopSelectedSpaceDeviceOnline = false;
+      this.desktopSelectedSpaceDeviceState = 'unknown';
+      this.desktopSelectedSpaceDeviceIsLocal = true;
+      this.desktopDeviceSyncState = 0;
+    }
+  }
+
+  private async loadDesktopDeviceSyncPreferences(deviceId: string): Promise<void> {
+    if (deviceId.length === 0) {
+      return;
+    }
+    this.desktopDeviceSyncState = 1;
+    try {
+      let preferences: NativeSpaceMemberSyncPreferences =
+        await this.spaceNodeService.memberSyncPreferences(deviceId);
+      if (this.desktopSelectedSpaceDeviceId !== deviceId || this.desktopSelectedSpaceDeviceIsLocal) {
+        return;
+      }
+      this.applyDesktopDeviceSyncPreferences(preferences);
+      this.desktopDeviceSyncState = 2;
+    } catch (error) {
+      if (this.desktopSelectedSpaceDeviceId === deviceId) {
+        this.desktopDeviceSyncState = 3;
+      }
+    }
+  }
+
+  private async updateDesktopDeviceSyncPreference(contentType: string, enabled: boolean): Promise<void> {
+    if (this.desktopSelectedSpaceDeviceIsLocal || this.desktopSelectedSpaceDeviceId.length === 0 ||
+      this.desktopDeviceSyncSaving || this.desktopDeviceSyncState !== 2) {
+      return;
+    }
+    let previousSendEnabled: boolean = this.desktopDeviceSendEnabled;
+    let previousText: boolean = this.desktopDeviceSyncText;
+    let previousImage: boolean = this.desktopDeviceSyncImage;
+    let previousFile: boolean = this.desktopDeviceSyncFile;
+    let previousLink: boolean = this.desktopDeviceSyncLink;
+    let previousRichText: boolean = this.desktopDeviceSyncRichText;
+    if (contentType === 'send') {
+      this.desktopDeviceSendEnabled = enabled;
+    } else if (contentType === 'text') {
+      this.desktopDeviceSyncText = enabled;
+    } else if (contentType === 'image') {
+      this.desktopDeviceSyncImage = enabled;
+    } else if (contentType === 'file') {
+      this.desktopDeviceSyncFile = enabled;
+    } else if (contentType === 'link') {
+      this.desktopDeviceSyncLink = enabled;
+    } else if (contentType === 'rich_text') {
+      this.desktopDeviceSyncRichText = enabled;
+    } else {
+      return;
+    }
+    this.desktopDeviceSyncSaving = true;
+    let deviceId: string = this.desktopSelectedSpaceDeviceId;
+    try {
+      let preferences: NativeSpaceMemberSyncPreferences =
+        await this.spaceNodeService.updateMemberSendPreferences(
+          deviceId,
+          this.desktopDeviceSendEnabled,
+          this.desktopDeviceSyncText,
+          this.desktopDeviceSyncImage,
+          this.desktopDeviceSyncFile,
+          this.desktopDeviceSyncLink,
+          this.desktopDeviceSyncRichText);
+      if (this.desktopSelectedSpaceDeviceId === deviceId) {
+        this.applyDesktopDeviceSyncPreferences(preferences);
+        this.desktopDeviceSyncState = 2;
+      }
+      this.statusCode = 2;
+    } catch (error) {
+      if (this.desktopSelectedSpaceDeviceId === deviceId) {
+        this.desktopDeviceSendEnabled = previousSendEnabled;
+        this.desktopDeviceSyncText = previousText;
+        this.desktopDeviceSyncImage = previousImage;
+        this.desktopDeviceSyncFile = previousFile;
+        this.desktopDeviceSyncLink = previousLink;
+        this.desktopDeviceSyncRichText = previousRichText;
+        this.desktopDeviceSyncState = 3;
+      }
+      this.statusCode = 3;
+    } finally {
+      this.desktopDeviceSyncSaving = false;
+    }
+  }
+
+  private async resetDesktopDeviceSyncPreferences(): Promise<void> {
+    if (this.desktopSelectedSpaceDeviceIsLocal || this.desktopSelectedSpaceDeviceId.length === 0 ||
+      this.desktopDeviceSyncSaving) {
+      return;
+    }
+    this.desktopDeviceSyncSaving = true;
+    let deviceId: string = this.desktopSelectedSpaceDeviceId;
+    try {
+      let preferences: NativeSpaceMemberSyncPreferences =
+        await this.spaceNodeService.resetMemberSyncPreferences(deviceId);
+      if (this.desktopSelectedSpaceDeviceId === deviceId) {
+        this.applyDesktopDeviceSyncPreferences(preferences);
+        this.desktopDeviceSyncState = 2;
+      }
+      this.statusCode = 2;
+    } catch (error) {
+      if (this.desktopSelectedSpaceDeviceId === deviceId) {
+        this.desktopDeviceSyncState = 3;
+      }
+      this.statusCode = 3;
+    } finally {
+      this.desktopDeviceSyncSaving = false;
+    }
+  }
+
   private async refreshSpaceDevices(): Promise<void> {
     if (!this.spaceJoined || this.spaceNodeState !== 2 || this.spaceDeviceRefreshBusy) {
       return;
@@ -1656,6 +1833,7 @@ struct Index {
     try {
       let devices: NativeSpaceDevice[] = await this.spaceNodeService.devices();
       this.spaceDevices = devices;
+      this.synchronizeDesktopSpaceDeviceSelection(devices);
       this.spacePeerConnected = devices.some((device: NativeSpaceDevice): boolean => {
         return !device.isLocal && device.online;
       });
@@ -5820,7 +5998,8 @@ struct Index {
             }
             ForEach(this.spaceDevices, (device: NativeSpaceDevice) => {
               this.desktopPairedDeviceRow(device)
-            }, (device: NativeSpaceDevice): string => device.deviceId)
+            }, (device: NativeSpaceDevice): string => device.deviceId + ':' + device.online.toString() + ':' +
+              device.state)
           }
           Text($r('app.string.device_management_hint'))
             .fontSize($r('app.float.font_body_small'))
@@ -8200,7 +8379,16 @@ struct Index {
     .height(64)
     .padding({ left: 10, right: 12 })
     .borderRadius($r('app.float.corner_radius_level10'))
-    .backgroundColor($r('app.color.surface_muted'))
+    .backgroundColor(device.deviceId === this.desktopSelectedSpaceDeviceId ?
+      this.accentSoftColor() : $r('app.color.surface_muted'))
+    .border({
+      width: device.deviceId === this.desktopSelectedSpaceDeviceId ? 1 : 0,
+      color: device.deviceId === this.desktopSelectedSpaceDeviceId ? this.accentColor() : Color.Transparent
+    })
+    .clickEffect({ level: ClickEffectLevel.MIDDLE })
+    .onClick((): void => {
+      this.selectDesktopSpaceDevice(device);
+    })
     .bindContextMenu(this.desktopPairedDeviceContextMenu(device), ResponseType.LongPress)
   }
 
@@ -8256,6 +8444,155 @@ struct Index {
     .borderRadius($r('app.float.corner_radius_level10'))
     .backgroundColor($r('app.color.surface_muted'))
     .bindContextMenu(this.desktopMobileDeviceContextMenu(device), ResponseType.LongPress)
+  }
+
+  @Builder
+  private desktopDeviceContentTypeSwitch(title: Resource, contentType: string, checked: boolean) {
+    Row({ space: 12 }) {
+      Text(title)
+        .fontSize(15)
+        .fontColor($r('app.color.text_primary'))
+        .layoutWeight(1)
+        .maxLines(1)
+      Toggle({ type: ToggleType.Switch, isOn: checked })
+        .selectedColor(this.accentColor())
+        .enabled(this.desktopDeviceSyncState === 2 && !this.desktopDeviceSyncSaving)
+        .onChange((enabled: boolean): void => {
+          this.updateDesktopDeviceSyncPreference(contentType, enabled);
+        })
+    }
+    .layoutWeight(1)
+    .height(52)
+    .padding({ left: 16, right: 14 })
+    .borderRadius($r('app.float.corner_radius_level8'))
+    .border({ width: 1, color: $r('app.color.divider') })
+    .backgroundColor($r('app.color.surface_muted'))
+  }
+
+  @Builder
+  private desktopRemoteDeviceDetail() {
+    Row({ space: 18 }) {
+      Column() {
+        this.desktopDeviceTypeGlyph(this.desktopSelectedSpaceDeviceType)
+      }
+      .width(72)
+      .height(72)
+      .justifyContent(FlexAlign.Center)
+      .borderRadius($r('app.float.corner_radius_level8'))
+      .backgroundColor(this.accentSoftColor())
+      Column({ space: 7 }) {
+        Text(this.desktopSelectedSpaceDeviceName)
+          .fontSize(28)
+          .fontWeight(FontWeight.Bold)
+          .fontColor($r('app.color.text_primary'))
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        Text(this.desktopSelectedSpaceDeviceOnline ? $r('app.string.device_status_online') :
+          (this.desktopSelectedSpaceDeviceState === 'unknown' ?
+            $r('app.string.device_status_unknown') : $r('app.string.device_status_offline')))
+          .fontSize(14)
+          .fontColor(this.desktopSelectedSpaceDeviceOnline ? $r('app.color.success') :
+            $r('app.color.text_secondary'))
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+    }
+    .width('100%')
+    .padding({ bottom: 36 })
+    Text($r('app.string.desktop_identity'))
+      .fontSize($r('app.float.font_body_medium'))
+      .fontWeight(FontWeight.Medium)
+      .fontColor($r('app.color.text_secondary'))
+      .width('100%')
+      .padding({ bottom: 10 })
+    this.desktopInfoRow($r('app.string.desktop_device_id'), this.desktopSelectedSpaceDeviceId)
+    this.desktopInfoRow($r('app.string.desktop_connection_state'),
+      this.desktopSelectedSpaceDeviceOnline ? $r('app.string.device_status_online') :
+        (this.desktopSelectedSpaceDeviceState === 'unknown' ?
+          $r('app.string.device_status_unknown') : $r('app.string.device_status_offline')))
+    Row() {
+      Text($r('app.string.desktop_device_sync_settings'))
+        .fontSize($r('app.float.font_body_medium'))
+        .fontWeight(FontWeight.Medium)
+        .fontColor($r('app.color.text_secondary'))
+      Blank()
+      Button($r('app.string.desktop_device_sync_restore'), { type: ButtonType.Normal })
+        .height(34)
+        .fontSize(12)
+        .fontColor(this.accentColor())
+        .backgroundColor(Color.Transparent)
+        .enabled(this.desktopDeviceSyncState === 2 && !this.desktopDeviceSyncSaving)
+        .onClick((): void => {
+          this.resetDesktopDeviceSyncPreferences();
+        })
+    }
+    .width('100%')
+    .padding({ top: 30, bottom: 6 })
+    Row({ space: 18 }) {
+      Column({ space: 5 }) {
+        Text($r('app.string.desktop_device_send_enabled'))
+          .fontSize(17)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.text_primary'))
+        Text($r('app.string.desktop_device_send_enabled_note'))
+          .fontSize(12)
+          .lineHeight(18)
+          .fontColor($r('app.color.text_secondary'))
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+      Toggle({ type: ToggleType.Switch, isOn: this.desktopDeviceSendEnabled })
+        .selectedColor(this.accentColor())
+        .enabled(this.desktopDeviceSyncState === 2 && !this.desktopDeviceSyncSaving)
+        .onChange((enabled: boolean): void => {
+          this.updateDesktopDeviceSyncPreference('send', enabled);
+        })
+    }
+    .width('100%')
+    .minHeight(88)
+    .border({ width: { top: 1, bottom: 1 }, color: $r('app.color.divider') })
+    if (this.desktopDeviceSyncState === 1) {
+      Text($r('app.string.desktop_device_sync_loading'))
+        .fontSize(12)
+        .fontColor($r('app.color.text_secondary'))
+        .width('100%')
+        .padding({ top: 14 })
+    } else if (this.desktopDeviceSyncState === 3) {
+      Text($r('app.string.desktop_device_sync_failed'))
+        .fontSize(12)
+        .fontColor($r('app.color.danger'))
+        .width('100%')
+        .padding({ top: 14 })
+        .onClick((): void => {
+          this.loadDesktopDeviceSyncPreferences(this.desktopSelectedSpaceDeviceId);
+        })
+    }
+    Text($r('app.string.desktop_device_content_types'))
+      .fontSize(12)
+      .fontWeight(FontWeight.Medium)
+      .fontColor($r('app.color.text_secondary'))
+      .width('100%')
+      .padding({ top: 26, bottom: 10 })
+    Row({ space: 12 }) {
+      this.desktopDeviceContentTypeSwitch($r('app.string.desktop_device_sync_text'), 'text',
+        this.desktopDeviceSyncText)
+      this.desktopDeviceContentTypeSwitch($r('app.string.desktop_device_sync_image'), 'image',
+        this.desktopDeviceSyncImage)
+    }
+    .width('100%')
+    Row({ space: 12 }) {
+      this.desktopDeviceContentTypeSwitch($r('app.string.desktop_device_sync_file'), 'file',
+        this.desktopDeviceSyncFile)
+      this.desktopDeviceContentTypeSwitch($r('app.string.desktop_device_sync_link'), 'link',
+        this.desktopDeviceSyncLink)
+    }
+    .width('100%')
+    Row({ space: 12 }) {
+      this.desktopDeviceContentTypeSwitch($r('app.string.desktop_device_sync_rich_text'), 'rich_text',
+        this.desktopDeviceSyncRichText)
+      Blank().layoutWeight(1)
+    }
+    .width('100%')
   }
 
   @Builder
@@ -8398,7 +8735,8 @@ struct Index {
         if (this.spaceJoined) {
           ForEach(this.spaceDevices, (device: NativeSpaceDevice) => {
             this.desktopPairedDeviceRow(device)
-          }, (device: NativeSpaceDevice): string => device.deviceId)
+          }, (device: NativeSpaceDevice): string => device.deviceId + ':' + device.online.toString() + ':' +
+            device.state)
         }
         Row() {
           Text($r('app.string.desktop_mobile_devices'))
@@ -8452,6 +8790,10 @@ struct Index {
       .scrollBar(BarState.Auto)
       Scroll() {
         Column({ space: 0 }) {
+          if (this.desktopSelectedSpaceDeviceId.length > 0 &&
+            !this.desktopSelectedSpaceDeviceIsLocal) {
+            this.desktopRemoteDeviceDetail()
+          } else {
           Row({ space: 18 }) {
           Column() {
             this.desktopDeviceTypeGlyph(deviceInfo.deviceType)
@@ -8520,6 +8862,7 @@ struct Index {
           $r('app.string.desktop_auto_clipboard_note'), this.spaceJoined)
           this.desktopSwitchRow($r('app.string.desktop_file_sync'),
             $r('app.string.desktop_file_sync_note'), this.spaceJoined)
+          }
         }
         .width('100%')
         .padding({

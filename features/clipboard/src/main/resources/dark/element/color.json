@@ -41,6 +41,10 @@
       "value": "#33317AF7"
     },
     {
+      "name": "card_image_overlay",
+      "value": "#99000000"
+    },
+    {
       "name": "on_accent",
       "value": "#FFFFFFFF"
     },

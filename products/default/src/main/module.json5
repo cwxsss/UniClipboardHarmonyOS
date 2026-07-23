@@ -47,6 +47,39 @@
     ],
     "extensionAbilities": [
       {
+        "name": "UniClipboardShareAbility",
+        "srcEntry": "./ets/abilities/UniClipboardShareAbility.ets",
+        "type": "share",
+        "description": "$string:share_target_description",
+        "icon": "$media:uniclipboard_layered_image",
+        "label": "$string:share_target_label",
+        "exported": true,
+        "skills": [
+          {
+            "actions": [
+              "ohos.want.action.sendData"
+            ],
+            "uris": [
+              {
+                "scheme": "file",
+                "utd": "general.text",
+                "maxFileSupported": 1
+              },
+              {
+                "scheme": "file",
+                "utd": "general.image",
+                "maxFileSupported": 1
+              },
+              {
+                "scheme": "file",
+                "utd": "general.file",
+                "maxFileSupported": 1
+              }
+            ]
+          }
+        ]
+      },
+      {
         "name": "EntryBackupAbility",
         "srcEntry": "./ets/entrybackupability/EntryBackupAbility.ets",
         "type": "backup",

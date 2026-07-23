@@ -593,6 +593,7 @@ impl AppFacade {
         snapshot: SystemClipboardSnapshot,
         blob_refs: Vec<V3BlobRef>,
         origin: ClipboardChangeOrigin,
+        target_filter: Option<Vec<uc_core::ids::DeviceId>>,
     ) -> Result<DispatchEntryOutcome, ClipboardSyncError> {
         self.clipboard_sync
             .get()
@@ -600,7 +601,7 @@ impl AppFacade {
             .ok_or_else(|| {
                 ClipboardSyncError::Repository("clipboard sync facade unavailable".to_string())
             })?
-            .dispatch_snapshot_with_blob_refs(snapshot, blob_refs, origin, None, None)
+            .dispatch_snapshot_with_blob_refs(snapshot, blob_refs, origin, None, target_filter)
             .await
     }
 
