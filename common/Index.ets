@@ -37,6 +37,20 @@ export {
 export { EngineClipboardObserver } from './src/main/ets/engine/EngineClipboardHost';
 export { EngineHostError, EngineHostErrorCategory } from './src/main/ets/engine/EngineHostError';
 export { EngineVersionService } from './src/main/ets/service/EngineVersionService';
+export {
+  EngineRuntimeBackend,
+  EngineRuntimeError,
+  EngineRuntimeEvent,
+  EngineRuntimeEventObserver,
+  EngineRuntimeHandle,
+  EngineRuntimeHost,
+  EngineRuntimeObserver,
+  EngineRuntimeService,
+  EngineRuntimeSnapshot,
+  EngineRuntimeStartConfig,
+  EngineRuntimeState,
+  engineRuntimeService
+} from './src/main/ets/service/EngineRuntimeService';
 export { Logger } from './src/main/ets/util/Logger';
 export { HistoryLibrarySettings, HistoryStorageService } from './src/main/ets/service/HistoryStorageService';
 export { LinkPreviewService } from './src/main/ets/service/LinkPreviewService';

@@ -22,6 +22,7 @@ import {
   AppearanceStorageService,
   BackgroundSyncPreferenceService,
   BackgroundSyncTaskService,
+  engineRuntimeService,
   setSpaceBackgroundMode,
   stopSpaceNode,
   wakeSpaceConnections
@@ -74,6 +75,9 @@ export default class EntryAbility extends UIAbility {
     });
     stopSpaceNode().catch((): void => {
       hilog.warn(DOMAIN, 'testTag', 'Space node shutdown did not complete cleanly.');
+    });
+    engineRuntimeService.shutdown().catch((): void => {
+      hilog.warn(DOMAIN, 'testTag', 'Engine runtime shutdown did not complete cleanly.');
     });
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onDestroy');
   }
@@ -165,6 +169,9 @@ export default class EntryAbility extends UIAbility {
     // HarmonyOS may suspend timers and network work while the ability is in
     // background. Wake the native peer scheduler as soon as the app returns.
     wakeSpaceConnections();
+    engineRuntimeService.resume().catch((): void => {
+      hilog.warn(DOMAIN, 'testTag', 'Engine runtime resume did not complete cleanly.');
+    });
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onForeground');
   }
 
@@ -182,6 +189,9 @@ export default class EntryAbility extends UIAbility {
         hilog.warn(DOMAIN, 'testTag', 'Background sync task cleanup did not complete cleanly.');
       });
     }
+    engineRuntimeService.suspend().catch((): void => {
+      hilog.warn(DOMAIN, 'testTag', 'Engine runtime suspend did not complete cleanly.');
+    });
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onBackground');
   }
 }
