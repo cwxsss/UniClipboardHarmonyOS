@@ -88,41 +88,34 @@ class EngineHostCallbacksImpl implements EngineHostCallbacks {
     this.clipboard = clipboard;
   }
 
-  secureStorageGet(key: string): EngineHostResult<Uint8Array | null> {
-    return this.execute((): Uint8Array | null => this.storage.get(key));
-  }
+  // N-API invokes host functions without a receiver, so these callbacks must
+  // retain the adapter instance instead of relying on prototype-method this.
+  secureStorageGet = (key: string): EngineHostResult<Uint8Array | null> =>
+    this.execute((): Uint8Array | null => this.storage.get(key));
 
-  secureStorageSet(key: string, value: Uint8Array): EngineHostResult<void> {
-    return this.execute((): void => this.storage.set(key, value));
-  }
+  secureStorageSet = (key: string, value: Uint8Array): EngineHostResult<void> =>
+    this.execute((): void => this.storage.set(key, value));
 
-  secureStorageDelete(key: string): EngineHostResult<void> {
-    return this.execute((): void => this.storage.delete(key));
-  }
+  secureStorageDelete = (key: string): EngineHostResult<void> =>
+    this.execute((): void => this.storage.delete(key));
 
-  fileMetadata(handle: string): EngineHostResult<EngineFileMetadata> {
-    return this.execute((): EngineFileMetadata => this.files.fileMetadata(handle));
-  }
+  fileMetadata = (handle: string): EngineHostResult<EngineFileMetadata> =>
+    this.execute((): EngineFileMetadata => this.files.fileMetadata(handle));
 
-  fileReadChunk(handle: string, offset: string, maxBytes: number): EngineHostResult<Uint8Array> {
-    return this.execute((): Uint8Array => this.files.fileReadChunk(handle, offset, maxBytes));
-  }
+  fileReadChunk = (handle: string, offset: string, maxBytes: number): EngineHostResult<Uint8Array> =>
+    this.execute((): Uint8Array => this.files.fileReadChunk(handle, offset, maxBytes));
 
-  fileWriteChunk(handle: string, offset: string, bytes: Uint8Array): EngineHostResult<void> {
-    return this.execute((): void => this.files.fileWriteChunk(handle, offset, bytes));
-  }
+  fileWriteChunk = (handle: string, offset: string, bytes: Uint8Array): EngineHostResult<void> =>
+    this.execute((): void => this.files.fileWriteChunk(handle, offset, bytes));
 
-  fileFinishWrite(handle: string): EngineHostResult<void> {
-    return this.execute((): void => this.files.fileFinishWrite(handle));
-  }
+  fileFinishWrite = (handle: string): EngineHostResult<void> =>
+    this.execute((): void => this.files.fileFinishWrite(handle));
 
-  clipboardRead(): EngineHostResult<EngineClipboardSnapshot> {
-    return this.execute((): EngineClipboardSnapshot => this.clipboard.read());
-  }
+  clipboardRead = (): EngineHostResult<EngineClipboardSnapshot> =>
+    this.execute((): EngineClipboardSnapshot => this.clipboard.read());
 
-  clipboardWrite(snapshot: EngineClipboardSnapshot): EngineHostResult<void> {
-    return this.execute((): void => this.clipboard.write(snapshot));
-  }
+  clipboardWrite = (snapshot: EngineClipboardSnapshot): EngineHostResult<void> =>
+    this.execute((): void => this.clipboard.write(snapshot));
 
   private execute<T>(operation: () => T): EngineHostResult<T> {
     try {

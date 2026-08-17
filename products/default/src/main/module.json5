@@ -41,16 +41,18 @@
           "when": "inuse"
         }
       },
-      {
-        "name": "ohos.permission.READ_PASTEBOARD",
-        "reason": "$string:entry_pasteboard_permission_reason",
-        "usedScene": {
-          "abilities": [
-            "EntryAbility"
-          ],
-          "when": "inuse"
-        }
-      }
+      // Temporarily disabled while the current signing profile lacks the
+      // restricted permission ACL. Engine host clipboard access fails closed.
+      // {
+      //   "name": "ohos.permission.READ_PASTEBOARD",
+      //   "reason": "$string:entry_pasteboard_permission_reason",
+      //   "usedScene": {
+      //     "abilities": [
+      //       "EntryAbility"
+      //     ],
+      //     "when": "inuse"
+      //   }
+      // }
     ],
     "abilities": [
       {

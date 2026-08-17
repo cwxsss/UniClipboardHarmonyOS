@@ -38,6 +38,7 @@ export default class EntryAbility extends UIAbility {
   private backgroundSyncPreferenceService: BackgroundSyncPreferenceService =
     new BackgroundSyncPreferenceService();
   private backgroundSyncTaskService: BackgroundSyncTaskService = new BackgroundSyncTaskService();
+  private engineStartupTask: Promise<void> | null = null;
 
   private avoidAreaChangeCallback = (data: window.AvoidAreaOptions): void => {
     if (this.mainWindow === null) {
@@ -58,6 +59,10 @@ export default class EntryAbility extends UIAbility {
     let backgroundSyncEnabled: boolean = this.backgroundSyncPreferenceService.load(this.context);
     AppStorage.setOrCreate('backgroundSyncEnabled', backgroundSyncEnabled);
     AppStorage.setOrCreate('spaceJoined', false);
+    AppStorage.setOrCreate('officialEngineSessionResumed', false);
+    this.startEngineRuntime().catch((): void => {
+      hilog.warn(DOMAIN, 'testTag', 'Official Engine startup did not complete cleanly.');
+    });
     try {
       let appearanceMode: string = this.appearanceStorageService.load(this.context);
       this.context.getApplicationContext().setColorMode(
@@ -66,6 +71,35 @@ export default class EntryAbility extends UIAbility {
       hilog.error(DOMAIN, 'testTag', 'Failed to set colorMode. Cause: %{public}s', JSON.stringify(err));
     }
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onCreate');
+  }
+
+  private async startEngineRuntime(): Promise<void> {
+    let pending: Promise<void> | null = this.engineStartupTask;
+    if (pending !== null) {
+      await pending;
+      return;
+    }
+    pending = this.performEngineRuntimeStart();
+    this.engineStartupTask = pending;
+    try {
+      await pending;
+    } finally {
+      if (this.engineStartupTask === pending) {
+        this.engineStartupTask = null;
+      }
+    }
+  }
+
+  private async performEngineRuntimeStart(): Promise<void> {
+    await engineRuntimeService.prepare(this.context);
+    await engineRuntimeService.start();
+    let recovery = await engineRuntimeService.recoverSession(true);
+    AppStorage.setOrCreate('officialEngineSessionResumed', recovery.resumed);
+    if (recovery.resumed) {
+      AppStorage.setOrCreate('spaceJoined', true);
+    }
+    hilog.info(DOMAIN, 'testTag', 'Official Engine started. resumed=%{public}d',
+      recovery.resumed ? 1 : 0);
   }
 
   onDestroy(): void {
@@ -169,8 +203,8 @@ export default class EntryAbility extends UIAbility {
     // HarmonyOS may suspend timers and network work while the ability is in
     // background. Wake the native peer scheduler as soon as the app returns.
     wakeSpaceConnections();
-    engineRuntimeService.resume().catch((): void => {
-      hilog.warn(DOMAIN, 'testTag', 'Engine runtime resume did not complete cleanly.');
+    this.startEngineRuntime().catch((): void => {
+      hilog.warn(DOMAIN, 'testTag', 'Official Engine resume did not complete cleanly.');
     });
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onForeground');
   }

@@ -4,6 +4,7 @@ import {
   EngineHostAdapter,
   EngineHostCallbacks
 } from '../engine/EngineHostAdapter';
+import { EngineClipboardObserver } from '../engine/EngineClipboardHost';
 import { EngineHostError } from '../engine/EngineHostError';
 
 const ENGINE_EVENT_TIMEOUT_MS: number = 1000;
@@ -77,12 +78,171 @@ export class EngineRuntimeStartConfig {
   }
 }
 
+// These result classes isolate the rc.3 native surface from pages and view models.
+export class EngineSpaceCreated {
+  spaceId: string;
+  selfDeviceId: string;
+  identityFingerprint: string;
+
+  constructor(spaceId: string, selfDeviceId: string, identityFingerprint: string) {
+    this.spaceId = spaceId;
+    this.selfDeviceId = selfDeviceId;
+    this.identityFingerprint = identityFingerprint;
+  }
+}
+
+export class EngineSessionRecovery {
+  unlocked: boolean;
+  resumed: boolean;
+
+  constructor(unlocked: boolean, resumed: boolean) {
+    this.unlocked = unlocked;
+    this.resumed = resumed;
+  }
+}
+
+export class EngineInvitationIssued {
+  invitationCode: string;
+  expiresAtMs: number;
+  availability: string;
+
+  constructor(invitationCode: string, expiresAtMs: number, availability: string) {
+    this.invitationCode = invitationCode;
+    this.expiresAtMs = expiresAtMs;
+    this.availability = availability;
+  }
+}
+
+export class EngineSpaceJoined {
+  sponsorDeviceId: string;
+  sponsorIdentityFingerprint: string;
+  spaceId: string;
+  selfDeviceId: string;
+  selfIdentityFingerprint: string;
+  migratedRecords: string | undefined;
+  preservedUnreadableRecords: string | undefined;
+
+  constructor(sponsorDeviceId: string, sponsorIdentityFingerprint: string, spaceId: string,
+    selfDeviceId: string, selfIdentityFingerprint: string, migratedRecords: string | undefined,
+    preservedUnreadableRecords: string | undefined) {
+    this.sponsorDeviceId = sponsorDeviceId;
+    this.sponsorIdentityFingerprint = sponsorIdentityFingerprint;
+    this.spaceId = spaceId;
+    this.selfDeviceId = selfDeviceId;
+    this.selfIdentityFingerprint = selfIdentityFingerprint;
+    this.migratedRecords = migratedRecords;
+    this.preservedUnreadableRecords = preservedUnreadableRecords;
+  }
+}
+
+export class EngineSendReport {
+  entryId: string;
+  atMs: number;
+  totalAccepted: number;
+  totalDuplicate: number;
+  totalOffline: number;
+  totalErrored: number;
+  totalPending: number;
+
+  constructor(entryId: string, atMs: number, totalAccepted: number, totalDuplicate: number,
+    totalOffline: number, totalErrored: number, totalPending: number) {
+    this.entryId = entryId;
+    this.atMs = atMs;
+    this.totalAccepted = totalAccepted;
+    this.totalDuplicate = totalDuplicate;
+    this.totalOffline = totalOffline;
+    this.totalErrored = totalErrored;
+    this.totalPending = totalPending;
+  }
+}
+
+export class EngineActiveClipboard {
+  entryId: string;
+  activatedBy: string;
+
+  constructor(entryId: string, activatedBy: string) {
+    this.entryId = entryId;
+    this.activatedBy = activatedBy;
+  }
+}
+
+export class EngineWorkspaceConvergence {
+  phase: string;
+  effectiveMemberCount: number;
+  updatedAtMs: number;
+
+  constructor(phase: string, effectiveMemberCount: number, updatedAtMs: number) {
+    this.phase = phase;
+    this.effectiveMemberCount = effectiveMemberCount;
+    this.updatedAtMs = updatedAtMs;
+  }
+}
+
+// rc.3 exports these methods from libuc_ohos_napi.so, but omits them from
+// OhEngine in Index.d.ets. Keep the compatibility contract private to this
+// adapter so the rest of the product never touches the native object.
+interface EngineCompatibilityNativeInvitation {
+  invitationCode: string;
+  expiresAtMs: number;
+  availability: string;
+}
+
+interface EngineCompatibilityNativeSpaceJoined {
+  sponsorDeviceId: string;
+  sponsorIdentityFingerprint: string;
+  spaceId: string;
+  selfDeviceId: string;
+  selfIdentityFingerprint: string;
+  migratedRecords: string | undefined;
+  preservedUnreadableRecords: string | undefined;
+}
+
+interface EngineCompatibilityNativeSendReport {
+  entryId: string;
+  atMs: number;
+  totalAccepted: number;
+  totalDuplicate: number;
+  totalOffline: number;
+  totalErrored: number;
+  totalPending: number;
+}
+
+interface EngineCompatibilityNativeHandle {
+  issueInvitation(): Promise<EngineCompatibilityNativeInvitation>;
+  joinSpace(invitationCode: string, deviceName: string | null, passphrase: string,
+    preserveUnreadableHistory: boolean): Promise<EngineCompatibilityNativeSpaceJoined>;
+  sendImage(bytes: Uint8Array, mimeType: string, targetDevices: string[]):
+    Promise<EngineCompatibilityNativeSendReport>;
+  sendFiles(fileHandles: string[], targetDevices: string[]): Promise<EngineCompatibilityNativeSendReport>;
+  captureCurrentClipboard(): Promise<string | null>;
+  restoreClipboard(entryId: string, mode: string): Promise<string>;
+  queryDeviceTrust(): Promise<string>;
+  decideDeviceTrustChange(changeId: string, choice: string,
+    confirmLocalRemoval: boolean): Promise<string>;
+}
+
 export interface EngineRuntimeHandle {
   lifecycleState(): Promise<string>;
   suspend(): Promise<void>;
   resume(): Promise<void>;
   nextEvent(timeoutMs: number): Promise<EngineRuntimeEvent | null>;
   shutdown(deadlineMs: number): Promise<void>;
+  createSpace(deviceName: string | null, passphrase: string): Promise<EngineSpaceCreated>;
+  recoverSession(allowSecureStorageUnlock: boolean): Promise<EngineSessionRecovery>;
+  issueInvitation(): Promise<EngineInvitationIssued>;
+  joinSpace(invitationCode: string, deviceName: string | null, passphrase: string,
+    preserveUnreadableHistory: boolean): Promise<EngineSpaceJoined>;
+  sendText(text: string, targetDevices: string[]): Promise<EngineSendReport>;
+  sendImage(bytes: Uint8Array, mimeType: string, targetDevices: string[]): Promise<EngineSendReport>;
+  sendFiles(fileHandles: string[], targetDevices: string[]): Promise<EngineSendReport>;
+  captureCurrentClipboard(): Promise<string | null>;
+  queryActiveClipboard(): Promise<EngineActiveClipboard | null>;
+  restoreClipboard(entryId: string, mode: string): Promise<string>;
+  exportEntry(entryId: string, destinationHandle: string): Promise<void>;
+  removeMember(deviceId: string): Promise<EngineWorkspaceConvergence>;
+  queryDeviceTrust(): Promise<string>;
+  decideDeviceTrustChange(changeId: string, choice: string,
+    confirmLocalRemoval: boolean): Promise<string>;
 }
 
 export interface EngineRuntimeBackend {
@@ -92,6 +252,7 @@ export interface EngineRuntimeBackend {
 
 export interface EngineRuntimeHost {
   prepare(context: common.UIAbilityContext): EngineHostCallbacks;
+  listenClipboard(observer: EngineClipboardObserver): void;
   shutdown(): void;
 }
 
@@ -102,6 +263,8 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
 
   async startEngine(config: EngineRuntimeStartConfig, preparedHost: Object): Promise<EngineRuntimeHandle> {
     let rawHandle = await engine.startEngine(config, preparedHost);
+    let nativeObject: Object = rawHandle as Object;
+    let compatibilityHandle: EngineCompatibilityNativeHandle = nativeObject as EngineCompatibilityNativeHandle;
     return new CallbackEngineRuntimeHandle(
       (): Promise<string> => rawHandle.lifecycleState(),
       (): Promise<void> => rawHandle.suspend(),
@@ -124,7 +287,61 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
         event.nextRetryInMs = rawEvent.nextRetryInMs;
         return event;
       },
-      (deadlineMs: number): Promise<void> => rawHandle.shutdown(deadlineMs));
+      (deadlineMs: number): Promise<void> => rawHandle.shutdown(deadlineMs),
+      async (deviceName: string | null, passphrase: string): Promise<EngineSpaceCreated> => {
+        let result = await rawHandle.createSpace(deviceName, passphrase);
+        return new EngineSpaceCreated(result.spaceId, result.selfDeviceId, result.identityFingerprint);
+      },
+      async (allowSecureStorageUnlock: boolean): Promise<EngineSessionRecovery> => {
+        let result = await rawHandle.recoverSession(allowSecureStorageUnlock);
+        return new EngineSessionRecovery(result.unlocked, result.resumed);
+      },
+      async (): Promise<EngineInvitationIssued> => {
+        let result: EngineCompatibilityNativeInvitation = await compatibilityHandle.issueInvitation();
+        return new EngineInvitationIssued(result.invitationCode, result.expiresAtMs, result.availability);
+      },
+      async (invitationCode: string, deviceName: string | null, passphrase: string,
+        preserveUnreadableHistory: boolean): Promise<EngineSpaceJoined> => {
+        let result: EngineCompatibilityNativeSpaceJoined = await compatibilityHandle.joinSpace(invitationCode, deviceName, passphrase,
+          preserveUnreadableHistory);
+        return new EngineSpaceJoined(result.sponsorDeviceId, result.sponsorIdentityFingerprint,
+          result.spaceId, result.selfDeviceId, result.selfIdentityFingerprint,
+          result.migratedRecords, result.preservedUnreadableRecords);
+      },
+      async (text: string, targetDevices: string[]): Promise<EngineSendReport> => {
+        let result = await rawHandle.sendText(text, targetDevices);
+        return new EngineSendReport(result.entryId, result.atMs, result.totalAccepted,
+          result.totalDuplicate, result.totalOffline, result.totalErrored, result.totalPending);
+      },
+      async (bytes: Uint8Array, mimeType: string, targetDevices: string[]): Promise<EngineSendReport> => {
+        let result: EngineCompatibilityNativeSendReport = await compatibilityHandle.sendImage(bytes, mimeType, targetDevices);
+        return new EngineSendReport(result.entryId, result.atMs, result.totalAccepted,
+          result.totalDuplicate, result.totalOffline, result.totalErrored, result.totalPending);
+      },
+      async (fileHandles: string[], targetDevices: string[]): Promise<EngineSendReport> => {
+        let result: EngineCompatibilityNativeSendReport = await compatibilityHandle.sendFiles(fileHandles, targetDevices);
+        return new EngineSendReport(result.entryId, result.atMs, result.totalAccepted,
+          result.totalDuplicate, result.totalOffline, result.totalErrored, result.totalPending);
+      },
+      (): Promise<string | null> => compatibilityHandle.captureCurrentClipboard(),
+      async (): Promise<EngineActiveClipboard | null> => {
+        let result = await rawHandle.queryActiveClipboard();
+        if (result === null) {
+          return null;
+        }
+        return new EngineActiveClipboard(result.entryId, result.activatedBy);
+      },
+      (entryId: string, mode: string): Promise<string> => compatibilityHandle.restoreClipboard(entryId, mode),
+      (entryId: string, destinationHandle: string): Promise<void> => rawHandle.exportEntry(entryId,
+        destinationHandle),
+      async (deviceId: string): Promise<EngineWorkspaceConvergence> => {
+        let result = await rawHandle.removeMember(deviceId);
+        return new EngineWorkspaceConvergence(result.phase, result.effectiveMemberCount,
+          result.updatedAtMs);
+      },
+      (): Promise<string> => compatibilityHandle.queryDeviceTrust(),
+      (changeId: string, choice: string, confirmLocalRemoval: boolean): Promise<string> =>
+        compatibilityHandle.decideDeviceTrustChange(changeId, choice, confirmLocalRemoval));
   }
 }
 
@@ -134,16 +351,63 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
   private resumeCallback: () => Promise<void>;
   private nextEventCallback: (timeoutMs: number) => Promise<EngineRuntimeEvent | null>;
   private shutdownCallback: (deadlineMs: number) => Promise<void>;
+  private createSpaceCallback: (deviceName: string | null, passphrase: string) => Promise<EngineSpaceCreated>;
+  private recoverSessionCallback: (allowSecureStorageUnlock: boolean) => Promise<EngineSessionRecovery>;
+  private issueInvitationCallback: () => Promise<EngineInvitationIssued>;
+  private joinSpaceCallback: (invitationCode: string, deviceName: string | null, passphrase: string,
+    preserveUnreadableHistory: boolean) => Promise<EngineSpaceJoined>;
+  private sendTextCallback: (text: string, targetDevices: string[]) => Promise<EngineSendReport>;
+  private sendImageCallback: (bytes: Uint8Array, mimeType: string, targetDevices: string[]) =>
+    Promise<EngineSendReport>;
+  private sendFilesCallback: (fileHandles: string[], targetDevices: string[]) => Promise<EngineSendReport>;
+  private captureCurrentClipboardCallback: () => Promise<string | null>;
+  private queryActiveClipboardCallback: () => Promise<EngineActiveClipboard | null>;
+  private restoreClipboardCallback: (entryId: string, mode: string) => Promise<string>;
+  private exportEntryCallback: (entryId: string, destinationHandle: string) => Promise<void>;
+  private removeMemberCallback: (deviceId: string) => Promise<EngineWorkspaceConvergence>;
+  private queryDeviceTrustCallback: () => Promise<string>;
+  private decideDeviceTrustChangeCallback: (changeId: string, choice: string,
+    confirmLocalRemoval: boolean) => Promise<string>;
 
   constructor(lifecycleStateCallback: () => Promise<string>, suspendCallback: () => Promise<void>,
     resumeCallback: () => Promise<void>,
     nextEventCallback: (timeoutMs: number) => Promise<EngineRuntimeEvent | null>,
-    shutdownCallback: (deadlineMs: number) => Promise<void>) {
+    shutdownCallback: (deadlineMs: number) => Promise<void>,
+    createSpaceCallback: (deviceName: string | null, passphrase: string) => Promise<EngineSpaceCreated>,
+    recoverSessionCallback: (allowSecureStorageUnlock: boolean) => Promise<EngineSessionRecovery>,
+    issueInvitationCallback: () => Promise<EngineInvitationIssued>,
+    joinSpaceCallback: (invitationCode: string, deviceName: string | null, passphrase: string,
+      preserveUnreadableHistory: boolean) => Promise<EngineSpaceJoined>,
+    sendTextCallback: (text: string, targetDevices: string[]) => Promise<EngineSendReport>,
+    sendImageCallback: (bytes: Uint8Array, mimeType: string, targetDevices: string[]) => Promise<EngineSendReport>,
+    sendFilesCallback: (fileHandles: string[], targetDevices: string[]) => Promise<EngineSendReport>,
+    captureCurrentClipboardCallback: () => Promise<string | null>,
+    queryActiveClipboardCallback: () => Promise<EngineActiveClipboard | null>,
+    restoreClipboardCallback: (entryId: string, mode: string) => Promise<string>,
+    exportEntryCallback: (entryId: string, destinationHandle: string) => Promise<void>,
+    removeMemberCallback: (deviceId: string) => Promise<EngineWorkspaceConvergence>,
+    queryDeviceTrustCallback: () => Promise<string>,
+    decideDeviceTrustChangeCallback: (changeId: string, choice: string,
+      confirmLocalRemoval: boolean) => Promise<string>) {
     this.lifecycleStateCallback = lifecycleStateCallback;
     this.suspendCallback = suspendCallback;
     this.resumeCallback = resumeCallback;
     this.nextEventCallback = nextEventCallback;
     this.shutdownCallback = shutdownCallback;
+    this.createSpaceCallback = createSpaceCallback;
+    this.recoverSessionCallback = recoverSessionCallback;
+    this.issueInvitationCallback = issueInvitationCallback;
+    this.joinSpaceCallback = joinSpaceCallback;
+    this.sendTextCallback = sendTextCallback;
+    this.sendImageCallback = sendImageCallback;
+    this.sendFilesCallback = sendFilesCallback;
+    this.captureCurrentClipboardCallback = captureCurrentClipboardCallback;
+    this.queryActiveClipboardCallback = queryActiveClipboardCallback;
+    this.restoreClipboardCallback = restoreClipboardCallback;
+    this.exportEntryCallback = exportEntryCallback;
+    this.removeMemberCallback = removeMemberCallback;
+    this.queryDeviceTrustCallback = queryDeviceTrustCallback;
+    this.decideDeviceTrustChangeCallback = decideDeviceTrustChangeCallback;
   }
 
   async lifecycleState(): Promise<string> {
@@ -165,6 +429,64 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
   async shutdown(deadlineMs: number): Promise<void> {
     await this.shutdownCallback(deadlineMs);
   }
+
+  async createSpace(deviceName: string | null, passphrase: string): Promise<EngineSpaceCreated> {
+    return await this.createSpaceCallback(deviceName, passphrase);
+  }
+
+  async recoverSession(allowSecureStorageUnlock: boolean): Promise<EngineSessionRecovery> {
+    return await this.recoverSessionCallback(allowSecureStorageUnlock);
+  }
+
+  async issueInvitation(): Promise<EngineInvitationIssued> {
+    return await this.issueInvitationCallback();
+  }
+
+  async joinSpace(invitationCode: string, deviceName: string | null, passphrase: string,
+    preserveUnreadableHistory: boolean): Promise<EngineSpaceJoined> {
+    return await this.joinSpaceCallback(invitationCode, deviceName, passphrase, preserveUnreadableHistory);
+  }
+
+  async sendText(text: string, targetDevices: string[]): Promise<EngineSendReport> {
+    return await this.sendTextCallback(text, targetDevices);
+  }
+
+  async sendImage(bytes: Uint8Array, mimeType: string, targetDevices: string[]): Promise<EngineSendReport> {
+    return await this.sendImageCallback(bytes, mimeType, targetDevices);
+  }
+
+  async sendFiles(fileHandles: string[], targetDevices: string[]): Promise<EngineSendReport> {
+    return await this.sendFilesCallback(fileHandles, targetDevices);
+  }
+
+  async captureCurrentClipboard(): Promise<string | null> {
+    return await this.captureCurrentClipboardCallback();
+  }
+
+  async queryActiveClipboard(): Promise<EngineActiveClipboard | null> {
+    return await this.queryActiveClipboardCallback();
+  }
+
+  async restoreClipboard(entryId: string, mode: string): Promise<string> {
+    return await this.restoreClipboardCallback(entryId, mode);
+  }
+
+  async exportEntry(entryId: string, destinationHandle: string): Promise<void> {
+    await this.exportEntryCallback(entryId, destinationHandle);
+  }
+
+  async removeMember(deviceId: string): Promise<EngineWorkspaceConvergence> {
+    return await this.removeMemberCallback(deviceId);
+  }
+
+  async queryDeviceTrust(): Promise<string> {
+    return await this.queryDeviceTrustCallback();
+  }
+
+  async decideDeviceTrustChange(changeId: string, choice: string,
+    confirmLocalRemoval: boolean): Promise<string> {
+    return await this.decideDeviceTrustChangeCallback(changeId, choice, confirmLocalRemoval);
+  }
 }
 
 class OfficialEngineRuntimeHost implements EngineRuntimeHost {
@@ -174,12 +496,16 @@ class OfficialEngineRuntimeHost implements EngineRuntimeHost {
     return this.adapter.prepare(context);
   }
 
+  listenClipboard(observer: EngineClipboardObserver): void {
+    this.adapter.listenClipboard(observer);
+  }
+
   shutdown(): void {
     this.adapter.shutdown();
   }
 }
 
-export class EngineRuntimeService {
+export class EngineRuntimeService implements EngineClipboardObserver {
   private static instance: EngineRuntimeService | null = null;
 
   private backend: EngineRuntimeBackend;
@@ -196,6 +522,8 @@ export class EngineRuntimeService {
   private resumeTask: Promise<void> | null = null;
   private shutdownTask: Promise<void> | null = null;
   private eventPollTask: Promise<void> | null = null;
+  private clipboardCaptureTask: Promise<void> | null = null;
+  private clipboardWriteSuppression: boolean = false;
   private eventPolling: boolean = false;
   private observers: EngineRuntimeObserver[] = [];
   private eventObservers: EngineRuntimeEventObserver[] = [];
@@ -303,6 +631,104 @@ export class EngineRuntimeService {
         this.startTask = null;
       }
     }
+  }
+
+  async createSpace(deviceName: string | null, passphrase: string): Promise<EngineSpaceCreated> {
+    return await this.executeFeature('create_space',
+      (handle: EngineRuntimeHandle): Promise<EngineSpaceCreated> => handle.createSpace(deviceName, passphrase));
+  }
+
+  async recoverSession(allowSecureStorageUnlock: boolean): Promise<EngineSessionRecovery> {
+    return await this.executeFeature('recover_session',
+      (handle: EngineRuntimeHandle): Promise<EngineSessionRecovery> =>
+        handle.recoverSession(allowSecureStorageUnlock));
+  }
+
+  async issueInvitation(): Promise<EngineInvitationIssued> {
+    return await this.executeFeature('issue_invitation',
+      (handle: EngineRuntimeHandle): Promise<EngineInvitationIssued> => handle.issueInvitation());
+  }
+
+  async joinSpace(invitationCode: string, deviceName: string | null, passphrase: string,
+    preserveUnreadableHistory: boolean): Promise<EngineSpaceJoined> {
+    return await this.executeFeature('join_space',
+      (handle: EngineRuntimeHandle): Promise<EngineSpaceJoined> => handle.joinSpace(invitationCode,
+        deviceName, passphrase, preserveUnreadableHistory));
+  }
+
+  async sendText(text: string, targetDevices: string[]): Promise<EngineSendReport> {
+    return await this.executeFeature('send_text',
+      (handle: EngineRuntimeHandle): Promise<EngineSendReport> => handle.sendText(text, targetDevices));
+  }
+
+  async sendImage(bytes: Uint8Array, mimeType: string, targetDevices: string[]): Promise<EngineSendReport> {
+    return await this.executeFeature('send_image',
+      (handle: EngineRuntimeHandle): Promise<EngineSendReport> => handle.sendImage(bytes, mimeType, targetDevices));
+  }
+
+  async sendFiles(fileHandles: string[], targetDevices: string[]): Promise<EngineSendReport> {
+    return await this.executeFeature('send_files',
+      (handle: EngineRuntimeHandle): Promise<EngineSendReport> => handle.sendFiles(fileHandles, targetDevices));
+  }
+
+  async captureCurrentClipboard(): Promise<string | null> {
+    return await this.executeFeature('capture_clipboard',
+      (handle: EngineRuntimeHandle): Promise<string | null> => handle.captureCurrentClipboard());
+  }
+
+  async queryActiveClipboard(): Promise<EngineActiveClipboard | null> {
+    return await this.executeFeature('query_active_clipboard',
+      (handle: EngineRuntimeHandle): Promise<EngineActiveClipboard | null> => handle.queryActiveClipboard());
+  }
+
+  async restoreClipboard(entryId: string, mode: string): Promise<string> {
+    this.clipboardWriteSuppression = true;
+    try {
+      return await this.executeFeature('restore_clipboard',
+        (handle: EngineRuntimeHandle): Promise<string> => handle.restoreClipboard(entryId, mode));
+    } finally {
+      this.clipboardWriteSuppression = false;
+    }
+  }
+
+  async exportEntry(entryId: string, destinationHandle: string): Promise<void> {
+    await this.executeFeature('export_entry',
+      (handle: EngineRuntimeHandle): Promise<void> => handle.exportEntry(entryId, destinationHandle));
+  }
+
+  async removeMember(deviceId: string): Promise<EngineWorkspaceConvergence> {
+    return await this.executeFeature('remove_member',
+      (handle: EngineRuntimeHandle): Promise<EngineWorkspaceConvergence> => handle.removeMember(deviceId));
+  }
+
+  async queryDeviceTrust(): Promise<string> {
+    return await this.executeFeature('query_device_trust',
+      (handle: EngineRuntimeHandle): Promise<string> => handle.queryDeviceTrust());
+  }
+
+  async decideDeviceTrustChange(changeId: string, choice: string,
+    confirmLocalRemoval: boolean): Promise<string> {
+    return await this.executeFeature('decide_device_trust_change',
+      (handle: EngineRuntimeHandle): Promise<string> => handle.decideDeviceTrustChange(changeId,
+        choice, confirmLocalRemoval));
+  }
+
+  onClipboardChanged(): void {
+    if (this.clipboardWriteSuppression || this.clipboardCaptureTask !== null ||
+      this.state !== EngineRuntimeState.RUNNING) {
+      return;
+    }
+    let task: Promise<void> = this.captureCurrentClipboardFromHost();
+    this.clipboardCaptureTask = task;
+    task.then((): void => {
+      if (this.clipboardCaptureTask === task) {
+        this.clipboardCaptureTask = null;
+      }
+    }).catch((): void => {
+      if (this.clipboardCaptureTask === task) {
+        this.clipboardCaptureTask = null;
+      }
+    });
   }
 
   async suspend(): Promise<void> {
@@ -422,6 +848,7 @@ export class EngineRuntimeService {
       let preparedHost: Object = this.preparedHost;
       let startedHandle: EngineRuntimeHandle = await this.backend.startEngine(config, preparedHost);
       this.handle = startedHandle;
+      this.host.listenClipboard(this);
       this.startEventPolling(startedHandle);
       this.lastErrorCategory = '';
       this.setState(EngineRuntimeState.RUNNING);
@@ -555,7 +982,35 @@ export class EngineRuntimeService {
     this.callbacks = null;
     this.startConfig = null;
     this.eventPollTask = null;
+    this.clipboardCaptureTask = null;
+    this.clipboardWriteSuppression = false;
     this.eventPolling = false;
+  }
+
+  private async captureCurrentClipboardFromHost(): Promise<void> {
+    try {
+      let handle: EngineRuntimeHandle = this.requireRunningHandle('capture_clipboard');
+      await handle.captureCurrentClipboard();
+    } catch (error) {
+      this.fail('capture_clipboard', error);
+    }
+  }
+
+  private requireRunningHandle(operation: string): EngineRuntimeHandle {
+    if (this.state !== EngineRuntimeState.RUNNING || this.handle === null) {
+      throw new EngineRuntimeError('not_running', operation);
+    }
+    return this.handle;
+  }
+
+  private async executeFeature<T>(operation: string,
+    action: (handle: EngineRuntimeHandle) => Promise<T>): Promise<T> {
+    let handle: EngineRuntimeHandle = this.requireRunningHandle(operation);
+    try {
+      return await action(handle);
+    } catch (error) {
+      throw this.fail(operation, error);
+    }
   }
 
   private fail(operation: string, error: Object): EngineRuntimeError {
