@@ -22,10 +22,7 @@ import {
   AppearanceStorageService,
   BackgroundSyncPreferenceService,
   BackgroundSyncTaskService,
-  engineRuntimeService,
-  setSpaceBackgroundMode,
-  stopSpaceNode,
-  wakeSpaceConnections
+  engineRuntimeService
 } from 'common';
 
 const DOMAIN = 0x0000;
@@ -103,12 +100,8 @@ export default class EntryAbility extends UIAbility {
   }
 
   onDestroy(): void {
-    setSpaceBackgroundMode(false);
     this.backgroundSyncTaskService.stop(this.context).catch((): void => {
       hilog.warn(DOMAIN, 'testTag', 'Background sync task shutdown did not complete cleanly.');
-    });
-    stopSpaceNode().catch((): void => {
-      hilog.warn(DOMAIN, 'testTag', 'Space node shutdown did not complete cleanly.');
     });
     engineRuntimeService.shutdown().catch((): void => {
       hilog.warn(DOMAIN, 'testTag', 'Engine runtime shutdown did not complete cleanly.');
@@ -196,13 +189,9 @@ export default class EntryAbility extends UIAbility {
   }
 
   onForeground(): void {
-    setSpaceBackgroundMode(false);
     this.backgroundSyncTaskService.stop(this.context).catch((): void => {
       hilog.warn(DOMAIN, 'testTag', 'Background sync task cleanup did not complete cleanly.');
     });
-    // HarmonyOS may suspend timers and network work while the ability is in
-    // background. Wake the native peer scheduler as soon as the app returns.
-    wakeSpaceConnections();
     this.startEngineRuntime().catch((): void => {
       hilog.warn(DOMAIN, 'testTag', 'Official Engine resume did not complete cleanly.');
     });
@@ -213,12 +202,10 @@ export default class EntryAbility extends UIAbility {
     let backgroundSyncEnabled: boolean | undefined = AppStorage.get<boolean>('backgroundSyncEnabled');
     let spaceJoined: boolean | undefined = AppStorage.get<boolean>('spaceJoined');
     if (backgroundSyncEnabled === true && spaceJoined === true) {
-      setSpaceBackgroundMode(true);
       this.backgroundSyncTaskService.start(this.context).catch((): void => {
         hilog.warn(DOMAIN, 'testTag', 'Background sync task startup did not complete cleanly.');
       });
     } else {
-      setSpaceBackgroundMode(false);
       this.backgroundSyncTaskService.stop(this.context).catch((): void => {
         hilog.warn(DOMAIN, 'testTag', 'Background sync task cleanup did not complete cleanly.');
       });

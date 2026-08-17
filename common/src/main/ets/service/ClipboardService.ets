@@ -55,6 +55,10 @@ export class ClipboardService {
 
   async readImage(): Promise<image.PixelMap | null> {
     let data: pasteboard.PasteData = await this.systemPasteboard.getData();
+    return await this.readImageFromPasteData(data);
+  }
+
+  async readImageFromPasteData(data: pasteboard.PasteData): Promise<image.PixelMap | null> {
     let count: number = data.getRecordCount();
     for (let index: number = 0; index < count; index += 1) {
       let record: pasteboard.PasteDataRecord = data.getRecord(index);

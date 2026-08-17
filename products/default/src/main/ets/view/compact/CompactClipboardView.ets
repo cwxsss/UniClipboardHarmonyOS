@@ -3,7 +3,7 @@ import {
   common,
   ConfigurationConstant
 } from '@kit.AbilityKit';
-import { BusinessError, deviceInfo } from '@kit.BasicServicesKit';
+import { BusinessError, deviceInfo, pasteboard } from '@kit.BasicServicesKit';
 import { scanBarcode, scanCore } from '@kit.ScanKit';
 import { image } from '@kit.ImageKit';
 import { fileIo, fileUri, picker } from '@kit.CoreFileKit';
@@ -45,7 +45,7 @@ import {
   SpaceNodeService,
   NativeCreateSpaceResult,
   NativeJoinSpaceResult,
-  NativeSpaceDevice,
+  EngineRuntimeDevice,
   NativeSpaceFileEvent,
   NativeSpaceFileSendResult,
   NativeSpaceFileStatusEvent,
@@ -76,6 +76,7 @@ import { HdrImage } from '../../components/HdrImage';
 @Component
 export struct CompactClipboardView {
   @State controller: ClipboardFeatureController = ClipboardFeatureController.getInstance();
+  @StorageLink('historyRevision') historyRenderRevision: number = 0;
   @State showAboutSheet: boolean = false;
   @State showFeedbackSheet: boolean = false;
   @State showConnectionDiagnosticsSheet: boolean = false;
@@ -595,13 +596,13 @@ export struct CompactClipboardView {
       }).onClick((): void => {
           this.controller.sendServerHistoryItemToTarget(item, 'all');
       })
-      ForEach(this.controller.spaceDevices, (device: NativeSpaceDevice) => {
+      ForEach(this.controller.spaceDevices, (device: EngineRuntimeDevice) => {
         MenuItem({
           content: device.deviceName
         }).enabled(device.online).onClick((): void => {
             this.controller.sendServerHistoryItemToTarget(item, device.deviceName);
         })
-      }, (device: NativeSpaceDevice): string => 'space-' + device.deviceId)
+      }, (device: EngineRuntimeDevice): string => 'space-' + device.deviceId)
       ForEach(this.controller.mobileSyncDevices, (device: NativeMobileSyncDevice) => {
         MenuItem({
           content: device.label
@@ -627,13 +628,13 @@ export struct CompactClipboardView {
       }).onClick((): void => {
           this.controller.sendLocalHistoryItemToTarget(item, 'all');
       })
-      ForEach(this.controller.spaceDevices, (device: NativeSpaceDevice) => {
+      ForEach(this.controller.spaceDevices, (device: EngineRuntimeDevice) => {
         MenuItem({
           content: device.deviceName
         }).enabled(device.online).onClick((): void => {
             this.controller.sendLocalHistoryItemToTarget(item, device.deviceName);
         })
-      }, (device: NativeSpaceDevice): string => 'space-' + device.deviceId)
+      }, (device: EngineRuntimeDevice): string => 'space-' + device.deviceId)
       ForEach(this.controller.mobileSyncDevices, (device: NativeMobileSyncDevice) => {
         MenuItem({
           content: device.label
@@ -1180,7 +1181,14 @@ export struct CompactClipboardView {
               .enabled(!this.controller.busy && this.controller.imageReadState !== 1)
               .onClick((_event: ClickEvent, result: PasteButtonOnClickResult): void => {
                 if (result === PasteButtonOnClickResult.SUCCESS) {
-                  this.controller.readLocalImage();
+                  pasteboard.getSystemPasteboard().getData((error: BusinessError, data: pasteboard.PasteData): void => {
+                    if (error) {
+                      this.controller.imageReadState = 4;
+                      this.controller.statusCode = 3;
+                      return;
+                    }
+                    this.controller.readLocalImageFromPasteData(data);
+                  });
                 } else {
                   this.controller.imageReadState = 4;
                   this.controller.statusCode = 3;
@@ -1542,7 +1550,7 @@ export struct CompactClipboardView {
             }
             .width('100%')
           }
-          if (this.controller.compactFilteredHistory().length === 0) {
+          if (this.historyRenderRevision >= 0 && this.controller.compactFilteredHistory().length === 0) {
             Text($r('app.string.history_empty'))
               .fontSize(14)
               .lineHeight(21)
@@ -1577,37 +1585,45 @@ export struct CompactClipboardView {
                     .textOverflow({ overflow: TextOverflow.Ellipsis })
                     .width('100%')
                   Row({ space: 8 }) {
-                    if (item.isSnippet) {
-                      SymbolGlyph($r('sys.symbol.bookmark_fill'))
+                    Row({ space: 6 }) {
+                      if (item.isSnippet) {
+                        SymbolGlyph($r('sys.symbol.bookmark_fill'))
+                          .fontSize(12)
+                          .fontColor([this.controller.accentColor()])
+                      }
+                      if (item.tags.length > 0) {
+                        Text(this.controller.historyTagsText(item))
+                          .fontSize(11)
+                          .maxLines(1)
+                          .textOverflow({ overflow: TextOverflow.Ellipsis })
+                          .fontColor($r('app.color.text_secondary'))
+                          .layoutWeight(1)
+                      }
+                      if (item.sourceDevice.length > 0) {
+                        Text(item.sourceDevice)
+                          .fontSize(11)
+                          .maxLines(1)
+                          .textOverflow({ overflow: TextOverflow.Ellipsis })
+                          .fontColor($r('app.color.text_secondary'))
+                          .layoutWeight(1)
+                      }
+                    }
+                    .layoutWeight(1)
+                    .clip(true)
+                    Row({ space: 8 }) {
+                      Text(item.direction === 'sent' ? $r('app.string.direction_sent') :
+                        $r('app.string.direction_received'))
                         .fontSize(12)
-                        .fontColor([this.controller.accentColor()])
-                    }
-                    if (item.tags.length > 0) {
-                      Text(this.controller.historyTagsText(item))
-                        .fontSize(11)
-                        .maxLines(1)
+                        .fontColor(item.direction === 'sent' ? this.controller.accentColor() :
+                          $r('app.color.success'))
+                      Text(item.time)
+                        .fontSize(12)
                         .fontColor($r('app.color.text_secondary'))
-                    }
-                    if (item.sourceDevice.length > 0) {
-                      Text(item.sourceDevice)
-                        .fontSize(11)
-                        .maxLines(1)
-                        .textOverflow({ overflow: TextOverflow.Ellipsis })
-                        .fontColor($r('app.color.text_secondary'))
-                    }
-                    Blank()
-                    Text(item.direction === 'sent' ? $r('app.string.direction_sent') :
-                      $r('app.string.direction_received'))
-                      .fontSize(12)
-                      .fontColor(item.direction === 'sent' ? this.controller.accentColor() :
-                        $r('app.color.success'))
-                    Text(item.time)
-                      .fontSize(12)
-                      .fontColor($r('app.color.text_secondary'))
-                    if (item.occurrenceCount > 1) {
-                      Text('×' + item.occurrenceCount.toString())
-                        .fontSize(11)
-                        .fontColor($r('app.color.text_secondary'))
+                      if (item.occurrenceCount > 1) {
+                        Text('×' + item.occurrenceCount.toString())
+                          .fontSize(11)
+                          .fontColor($r('app.color.text_secondary'))
+                      }
                     }
                   }
                   .width('100%')
@@ -2825,9 +2841,9 @@ export struct CompactClipboardView {
                 .fontColor($r('app.color.danger'))
                 .width('100%')
             }
-            ForEach(this.controller.spaceDevices, (device: NativeSpaceDevice) => {
+            ForEach(this.controller.spaceDevices, (device: EngineRuntimeDevice) => {
               this.desktopPairedDeviceRow(device)
-            }, (device: NativeSpaceDevice): string => device.deviceId + ':' + device.online.toString() + ':' +
+            }, (device: EngineRuntimeDevice): string => device.deviceId + ':' + device.online.toString() + ':' +
               device.state)
             if (this.controller.desktopSelectedSpaceDeviceId.length > 0 &&
               !this.controller.desktopSelectedSpaceDeviceIsLocal) {
@@ -4269,7 +4285,7 @@ export struct CompactClipboardView {
 
 
   @Builder
-  private desktopPairedDeviceContextMenu(device: NativeSpaceDevice) {
+  private desktopPairedDeviceContextMenu(device: EngineRuntimeDevice) {
     Menu() {
       if (device.isLocal) {
         MenuItem({
@@ -4447,7 +4463,7 @@ export struct CompactClipboardView {
 
 
   @Builder
-  private desktopPairedDeviceRow(device: NativeSpaceDevice) {
+  private desktopPairedDeviceRow(device: EngineRuntimeDevice) {
     Row({ space: 11 }) {
       Stack({ alignContent: Alignment.BottomEnd }) {
         Column() {

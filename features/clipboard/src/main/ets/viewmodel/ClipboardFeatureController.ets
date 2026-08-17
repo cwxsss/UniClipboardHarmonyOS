@@ -7,7 +7,7 @@ import {
   PermissionRequestResult,
   Permissions
 } from '@kit.AbilityKit';
-import { BusinessError, deviceInfo } from '@kit.BasicServicesKit';
+import { BusinessError, deviceInfo, pasteboard } from '@kit.BasicServicesKit';
 import { connection } from '@kit.NetworkKit';
 import { detectBarcode, scanBarcode, scanCore } from '@kit.ScanKit';
 import { textRecognition } from '@kit.CoreVisionKit';
@@ -37,6 +37,7 @@ import {
   ServerHistoryItem,
   SyncContent,
   SyncEvent,
+  ClipboardFilePayload,
   ClipboardFileSelection,
   ClipboardService,
   APPEARANCE_MODE_DARK,
@@ -52,6 +53,17 @@ import {
   LinkPreviewService,
   Logger,
   EngineVersionService,
+  engineRuntimeService,
+  EngineInvitationIssued,
+  EngineActiveClipboard,
+  EngineSendReport,
+  EngineSpaceCreated,
+  EngineSpaceJoined,
+  EngineRuntimeDevice,
+  EngineRuntimeEvent,
+  EngineRuntimeEventObserver,
+  EngineRuntimeState,
+  EngineSessionRecovery,
   MobileSyncClient,
   MobileSyncServerService,
   NativeProtocolService,
@@ -59,7 +71,6 @@ import {
   SpaceNodeService,
   NativeCreateSpaceResult,
   NativeJoinSpaceResult,
-  NativeSpaceDevice,
   NativeSpaceFileEvent,
   NativeSpaceFileSendResult,
   NativeSpaceFileStatusEvent,
@@ -84,6 +95,8 @@ const POLL_INTERVAL_RELAXED_MS: number = 2000;
 const POLL_INTERVAL_SLOW_MS: number = 5000;
 const POLL_IDLE_RELAXED_ROUNDS: number = 30;
 const POLL_IDLE_SLOW_ROUNDS: number = 120;
+const OFFICIAL_ENGINE_ENTRY_RETRY_DELAY_MS: number = 1000;
+const OFFICIAL_ENGINE_ENTRY_MAX_RETRIES: number = 5;
 const APPEARANCE_BACKGROUND_IMAGE_STORAGE_KEY: string = 'appearanceBackgroundImage';
 const APPEARANCE_BACKGROUND_OPACITY_STORAGE_KEY: string = 'appearanceBackgroundOpacity';
 const APPEARANCE_BACKGROUND_BLUR_STORAGE_KEY: string = 'appearanceBackgroundBlur';
@@ -162,7 +175,7 @@ const historyFilterCache: HistoryFilterCache = new HistoryFilterCache();
 
 
 @Observed
-export class ClipboardFeatureController {
+export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   private static instance: ClipboardFeatureController | null = null;
   public avoidAreaRectHeight: number = 0;
   public navigationRectHeight: number = 0;
@@ -200,6 +213,8 @@ export class ClipboardFeatureController {
   public linkPreview: LinkPreview | null = null;
   public linkPreviewState: number = 0;
   public history: ClipboardHistoryItem[] = [];
+  // Explicit observable revision for ArkUI list/data-source rebuilds.
+  public historyRevision: number = 0;
   public serverHistory: ServerHistoryItem[] = [];
   public historyPage: number = 1;
   public historyEnd: boolean = false;
@@ -220,7 +235,7 @@ export class ClipboardFeatureController {
   public spaceNodeState: number = 0;
   public spaceJoined: boolean = false;
   public spacePeerConnected: boolean = false;
-  public spaceDevices: NativeSpaceDevice[] = [];
+  public spaceDevices: EngineRuntimeDevice[] = [];
   public spaceDeviceName: string = '';
   public spaceInvitationCode: string = '';
   public spacePassphrase: string = '';
@@ -388,6 +403,11 @@ export class ClipboardFeatureController {
   public desktopGestureSharePageVisible: boolean = false;
   public pendingFileTransferId: string = '';
   public linkPreviewRequestId: number = 0;
+  private lastOfficialActiveEntryId: string = '';
+  private officialEngineInboundRefreshBusy: boolean = false;
+  private officialEngineInboundRefreshQueued: boolean = false;
+  private officialEngineInboundRefreshRetryCount: number = 0;
+  private officialEngineInboundRefreshTimerId: number = -1;
 
   private uiContextRef: UIContext | null = null;
 
@@ -442,6 +462,7 @@ export class ClipboardFeatureController {
     this.restoreAppearanceTheme();
     this.restoreAppearanceVisualSettings();
     this.restoreLocalHistory();
+    engineRuntimeService.addEventObserver(this);
     this.initializeSpaceNode();
   }
 
@@ -464,7 +485,15 @@ export class ClipboardFeatureController {
   }
 
   public stop(): void {
+    engineRuntimeService.removeEventObserver(this);
     this.pollingActive = false;
+    if (this.officialEngineInboundRefreshTimerId >= 0) {
+      clearTimeout(this.officialEngineInboundRefreshTimerId);
+      this.officialEngineInboundRefreshTimerId = -1;
+    }
+    this.officialEngineInboundRefreshBusy = false;
+    this.officialEngineInboundRefreshQueued = false;
+    this.officialEngineInboundRefreshRetryCount = 0;
     if (this.sseTimerId >= 0) {
       clearTimeout(this.sseTimerId);
       this.sseTimerId = -1;
@@ -565,7 +594,7 @@ export class ClipboardFeatureController {
       this.username = config.username;
       this.password = config.password;
       this.legacyConnectionExpanded = this.hasConfig();
-      if (this.hasConfig()) {
+      if (this.hasConfig() && !this.spaceJoined) {
         this.realtimeAutoConnect = true;
         this.startRealtime();
       }
@@ -970,15 +999,11 @@ export class ClipboardFeatureController {
         this.recordConnectionDiagnosticFailure('node_unavailable');
         return;
       }
-      let status: NativeSpaceStatus = await this.spaceNodeService.start(
-        context.filesDir, context.cacheDir, deviceInfo.deviceType);
-      this.spaceNodeState = status.running ? 2 : 3;
-      if (!status.running) {
-        this.recordConnectionDiagnosticFailure('node_unavailable');
-      }
-      this.setSpaceJoined(status.joined);
-      this.spaceDeviceName = status.deviceName;
-      this.spaceCreatedId = status.spaceId;
+      await engineRuntimeService.prepare(context as common.UIAbilityContext);
+      await engineRuntimeService.start();
+      let recovery = await engineRuntimeService.recoverSession(true);
+      this.spaceNodeState = 2;
+      this.setSpaceJoined(recovery.resumed);
       await this.refreshSpaceNetworkSettings();
       if (this.spaceJoined) {
         await this.refreshSpaceDevices();
@@ -991,14 +1016,9 @@ export class ClipboardFeatureController {
   }
 
   public async refreshSpaceNetworkSettings(): Promise<void> {
-    try {
-      let settings: NativeSpaceNetworkSettings = await this.spaceNodeService.networkSettings();
-      this.spaceRelayFallbackEnabled = settings.allowRelayFallback;
-      this.spaceRelayUrlsText = settings.customRelayUrls.join('\n');
-      this.spaceRelaySettingsState = 0;
-    } catch (error) {
-      this.spaceRelaySettingsState = 2;
-    }
+    this.spaceRelayFallbackEnabled = false;
+    this.spaceRelayUrlsText = '';
+    this.spaceRelaySettingsState = 0;
   }
 
   public spaceRelaySettingsChanged(): void {
@@ -1023,25 +1043,10 @@ export class ClipboardFeatureController {
     }
     this.spaceRelaySettingsBusy = true;
     this.spaceRelaySettingsState = 0;
-    let requestedAllowRelayFallback: boolean = this.spaceRelayFallbackEnabled;
-    let requestedRelayUrls: string[] = this.spaceRelayUrls();
-    try {
-      if (this.spaceNodeState === 2) {
-        for (let index: number = 0; index < requestedRelayUrls.length; index++) {
-          await this.spaceNodeService.probeRelayUrl(requestedRelayUrls[index]);
-        }
-      }
-      let settings: NativeSpaceNetworkSettings = await this.spaceNodeService.updateNetworkSettings(
-        requestedAllowRelayFallback, requestedRelayUrls);
-      this.spaceRelayFallbackEnabled = settings.allowRelayFallback;
-      this.spaceRelayUrlsText = settings.customRelayUrls.join('\n');
-      this.spaceRelaySettingsState = 1;
-    } catch (error) {
-      this.reportError('space-relay', 'failed to save relay settings: ' + this.errorDetail(error));
-      this.spaceRelaySettingsState = 2;
-    } finally {
-      this.spaceRelaySettingsBusy = false;
-    }
+    this.spaceRelayFallbackEnabled = false;
+    this.spaceRelayUrlsText = '';
+    this.spaceRelaySettingsState = 2;
+    this.spaceRelaySettingsBusy = false;
   }
 
   public async initializeMobileSyncServer(): Promise<void> {
@@ -1168,7 +1173,7 @@ export class ClipboardFeatureController {
     }
   }
 
-  public async revokeSpaceDevice(device: NativeSpaceDevice): Promise<void> {
+  public async revokeSpaceDevice(device: EngineRuntimeDevice): Promise<void> {
     if (device.isLocal || this.desktopDeviceMutationBusy || this.spaceConnectBusy ||
       !this.spaceJoined || this.spaceNodeState !== 2) {
       return;
@@ -1186,7 +1191,7 @@ export class ClipboardFeatureController {
         return;
       }
       this.desktopDeviceMutationBusy = true;
-      await this.spaceNodeService.revoke(device.deviceId);
+      await engineRuntimeService.removeMember(device.deviceId);
       await this.refreshSpaceDevices();
       this.statusCode = 2;
     } catch (error) {
@@ -1315,14 +1320,9 @@ export class ClipboardFeatureController {
     try {
       let switching: boolean = this.spaceJoined;
       let deviceName: string = this.spaceJoinDeviceName.trim();
-      let result: NativeJoinSpaceResult;
-      if (switching) {
-        result = await this.spaceNodeService.switchTo(
-          this.spaceInvitationCode.trim(), this.spacePassphrase);
-      } else {
-        result = await this.spaceNodeService.join(
-          this.spaceInvitationCode.trim(), this.spacePassphrase, deviceName);
-      }
+      let requestedDeviceName: string | null = switching ? null : deviceName;
+      let result: EngineSpaceJoined = await engineRuntimeService.joinSpace(
+        this.spaceInvitationCode.trim(), requestedDeviceName, this.spacePassphrase, true);
       this.setSpaceJoined(result.spaceId.length > 0);
       this.spacePeerConnected = false;
       if (!switching) {
@@ -1388,12 +1388,8 @@ export class ClipboardFeatureController {
     this.spaceCreateState = 0;
     try {
       let deviceName: string = this.spaceCreateDeviceName.trim();
-      let result: NativeCreateSpaceResult;
-      if (replacing) {
-        result = await this.spaceNodeService.replace(this.spaceCreatePassphrase, deviceName);
-      } else {
-        result = await this.spaceNodeService.create(this.spaceCreatePassphrase, deviceName);
-      }
+      let result: EngineSpaceCreated = await engineRuntimeService.createSpace(
+        deviceName, this.spaceCreatePassphrase);
       this.setSpaceJoined(result.spaceId.length > 0);
       this.spacePeerConnected = false;
       this.spaceCreatedId = result.spaceId;
@@ -1418,8 +1414,8 @@ export class ClipboardFeatureController {
     }
     this.spaceInvitationBusy = true;
     try {
-      let invitation: NativeSpaceInvitation = await this.spaceNodeService.issueInvitation();
-      this.spaceIssuedInvitationCode = invitation.code;
+      let invitation: EngineInvitationIssued = await engineRuntimeService.issueInvitation();
+      this.spaceIssuedInvitationCode = invitation.invitationCode;
       this.spaceInvitationExpiresAtMs = invitation.expiresAtMs;
       this.spaceCreateState = 1;
     } catch (error) {
@@ -1755,16 +1751,16 @@ export class ClipboardFeatureController {
     }
   }
 
-  private applyConnectionDiagnosticDevices(devices: NativeSpaceDevice[]): NativeSpaceDevice | null {
+  private applyConnectionDiagnosticDevices(devices: EngineRuntimeDevice[]): EngineRuntimeDevice | null {
     this.spaceDevices = devices;
     this.connectionDiagnosticDirectCount = 0;
     this.connectionDiagnosticRelayCount = 0;
     this.connectionDiagnosticUnknownCount = 0;
     this.connectionDiagnosticOfflineCount = 0;
-    let target: NativeSpaceDevice | null = null;
+    let target: EngineRuntimeDevice | null = null;
     let peerConnected: boolean = false;
     for (let index: number = 0; index < devices.length; index++) {
-      let device: NativeSpaceDevice = devices[index];
+      let device: EngineRuntimeDevice = devices[index];
       if (device.isLocal) {
         continue;
       }
@@ -1809,18 +1805,12 @@ export class ClipboardFeatureController {
     if (this.spaceNodeState === 2 && this.spaceJoined) {
       try {
         this.spaceNodeService.wakeConnections();
-        let devices: NativeSpaceDevice[] = await this.spaceNodeService.devices();
-        let target: NativeSpaceDevice | null = this.applyConnectionDiagnosticDevices(devices);
+        let devices: EngineRuntimeDevice[] = await engineRuntimeService.queryDevices();
+        let target: EngineRuntimeDevice | null = this.applyConnectionDiagnosticDevices(devices);
         if (target === null) {
           failureReason = 'no_peer';
         } else {
-          let startedAt: number = Date.now();
-          let online: boolean = await this.spaceNodeService.connect(target.deviceId);
-          let elapsedMs: number = Date.now() - startedAt;
-          let refreshedDevices: NativeSpaceDevice[] = await this.spaceNodeService.devices();
-          this.applyConnectionDiagnosticDevices(refreshedDevices);
-          if (online) {
-            this.connectionDiagnosticLatencyMs = Math.max(0, elapsedMs);
+          if (target.online) {
             probeSucceeded = true;
           } else {
             failureReason = 'peer_offline';
@@ -1960,7 +1950,7 @@ export class ClipboardFeatureController {
     this.desktopDeviceSyncRichText = preferences.richText;
   }
 
-  private assignDesktopSelectedSpaceDevice(device: NativeSpaceDevice): void {
+  private assignDesktopSelectedSpaceDevice(device: EngineRuntimeDevice): void {
     this.desktopSelectedSpaceDeviceId = device.deviceId;
     this.desktopSelectedSpaceDeviceName = device.deviceName;
     this.desktopSelectedSpaceDeviceType = device.deviceType;
@@ -1969,7 +1959,7 @@ export class ClipboardFeatureController {
     this.desktopSelectedSpaceDeviceIsLocal = device.isLocal;
   }
 
-  public selectDesktopSpaceDevice(device: NativeSpaceDevice): void {
+  public selectDesktopSpaceDevice(device: EngineRuntimeDevice): void {
     this.assignDesktopSelectedSpaceDevice(device);
     if (device.isLocal) {
       this.desktopDeviceSyncState = 0;
@@ -1978,11 +1968,11 @@ export class ClipboardFeatureController {
     this.loadDesktopDeviceSyncPreferences(device.deviceId);
   }
 
-  private synchronizeDesktopSpaceDeviceSelection(devices: NativeSpaceDevice[]): void {
-    let selected: NativeSpaceDevice | null = null;
-    let local: NativeSpaceDevice | null = null;
+  private synchronizeDesktopSpaceDeviceSelection(devices: EngineRuntimeDevice[]): void {
+    let selected: EngineRuntimeDevice | null = null;
+    let local: EngineRuntimeDevice | null = null;
     for (let index: number = 0; index < devices.length; index++) {
-      let device: NativeSpaceDevice = devices[index];
+      let device: EngineRuntimeDevice = devices[index];
       if (device.isLocal) {
         local = device;
       }
@@ -2119,21 +2109,22 @@ export class ClipboardFeatureController {
     }
     this.spaceDeviceRefreshBusy = true;
     try {
-      let devices: NativeSpaceDevice[] = await this.spaceNodeService.devices();
+      await this.ensureOfficialEngineRunning();
+      let devices: EngineRuntimeDevice[] = await engineRuntimeService.queryDevices();
       this.spaceDevices = devices;
       this.synchronizeDesktopSpaceDeviceSelection(devices);
-      this.spacePeerConnected = devices.some((device: NativeSpaceDevice): boolean => {
+      this.spacePeerConnected = devices.some((device: EngineRuntimeDevice): boolean => {
         return !device.isLocal && device.online;
       });
     } catch (error) {
-      logger.error('UniClipboard refresh space devices failed');
+      logger.error('UniClipboard refresh space devices failed: ' + this.errorDetail(error));
       this.recordConnectionDiagnosticFailure('space_probe_failed');
     } finally {
       this.spaceDeviceRefreshBusy = false;
     }
   }
 
-  public async connectSpaceDevice(device: NativeSpaceDevice): Promise<void> {
+  public async connectSpaceDevice(device: EngineRuntimeDevice): Promise<void> {
     if (device.isLocal || this.spaceConnectBusy || this.desktopDeviceMutationBusy ||
       this.spaceNodeState !== 2 || !this.spaceJoined) {
       return;
@@ -2142,10 +2133,9 @@ export class ClipboardFeatureController {
     this.spaceConnectingDeviceId = device.deviceId;
     this.spaceConnectState = 1;
     try {
-      let online: boolean = await this.spaceNodeService.connect(device.deviceId);
       await this.refreshSpaceDevices();
-      this.spaceConnectState = online ? 2 : 3;
-      if (online) {
+      this.spaceConnectState = device.online ? 2 : 3;
+      if (device.online) {
         this.spacePeerConnected = true;
         this.statusCode = 2;
       } else {
@@ -2173,12 +2163,9 @@ export class ClipboardFeatureController {
     try {
       await this.refreshSpaceDevices();
       for (let index: number = 0; index < this.spaceDevices.length; index++) {
-        let device: NativeSpaceDevice = this.spaceDevices[index];
-        if (!device.isLocal) {
-          let online: boolean = await this.spaceNodeService.connect(device.deviceId);
-          if (online) {
-            anyOnline = true;
-          }
+        let device: EngineRuntimeDevice = this.spaceDevices[index];
+        if (!device.isLocal && device.online) {
+          anyOnline = true;
         }
       }
       await this.refreshSpaceDevices();
@@ -2629,7 +2616,8 @@ export class ClipboardFeatureController {
   }
 
   private historyFilterSignature(): string {
-    let signature: string = this.historySearchText.trim().toLowerCase() + '|' +
+    let signature: string = this.historyRevision.toString() + '|' +
+      this.historySearchText.trim().toLowerCase() + '|' +
       (this.desktopStarredOnly ? '1' : '0') + '|' + this.desktopTypeFilter.toString() + '|' +
       this.desktopTagFilter.toString() + '|' + this.desktopSourceFilter.toString() + '|' +
       this.desktopTimeFilter.toString() + '|' + this.desktopExtensionFilter + '|' +
@@ -4104,6 +4092,7 @@ export class ClipboardFeatureController {
       items.push(current);
     }
     this.history = items;
+    this.historyRevision += 1;
     this.animateHistoryUpdate();
     this.scheduleHistorySave();
   }
@@ -4554,7 +4543,11 @@ export class ClipboardFeatureController {
       }
     }
     this.history = items;
+    this.historyRevision += 1;
+    AppStorage.setOrCreate('historyRevision', this.historyRevision);
     this.pruneHistoryByRetention();
+    // LazyForEach must be notified from the data mutation, not during build().
+    this.sessionHistoryDataSourceInstance.reload(this.desktopFilteredSessionHistory());
     this.animateHistoryUpdate();
     this.scheduleHistorySave();
   }
@@ -4806,29 +4799,9 @@ export class ClipboardFeatureController {
         this.composerText = '';
         return;
       }
-      if (!await this.requestClipboardPermission()) {
-        this.statusCode = 3;
-        return;
-      }
       this.composerText = await this.clipboardService.readText();
     } catch (error) {
       this.statusCode = 3;
-    }
-  }
-
-  private async requestClipboardPermission(): Promise<boolean> {
-    let context: common.Context | undefined = this.getUIContext().getHostContext();
-    if (context === undefined) {
-      return false;
-    }
-    let permissions: Permissions[] = ['ohos.permission.READ_PASTEBOARD'];
-    let accessManager: abilityAccessCtrl.AtManager = abilityAccessCtrl.createAtManager();
-    try {
-      let result: PermissionRequestResult = await accessManager.requestPermissionsFromUser(context, permissions);
-      return result.authResults.length > 0 &&
-        result.authResults[0] === abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED;
-    } catch (error) {
-      return false;
     }
   }
 
@@ -4839,12 +4812,30 @@ export class ClipboardFeatureController {
     this.imageReadState = 1;
     this.imageSendState = 0;
     try {
-      if (!await this.requestClipboardPermission()) {
-        this.imageReadState = 4;
-        this.statusCode = 3;
-        return;
-      }
       let pixelMap: image.PixelMap | null = await this.clipboardService.readImage();
+      this.composerImage = pixelMap;
+      if (pixelMap !== null) {
+        this.composerImageRevision += 1;
+        this.imageReadState = 2;
+      } else {
+        this.imageReadState = 3;
+      }
+      this.statusCode = this.composerImage === null ? 3 : 2;
+    } catch (error) {
+      this.composerImage = null;
+      this.imageReadState = 5;
+      this.statusCode = 3;
+    }
+  }
+
+  public async readLocalImageFromPasteData(data: pasteboard.PasteData): Promise<void> {
+    if (this.imageReadState === 1) {
+      return;
+    }
+    this.imageReadState = 1;
+    this.imageSendState = 0;
+    try {
+      let pixelMap: image.PixelMap | null = await this.clipboardService.readImageFromPasteData(data);
       this.composerImage = pixelMap;
       if (pixelMap !== null) {
         this.composerImageRevision += 1;
@@ -4883,7 +4874,18 @@ export class ClipboardFeatureController {
           mobilePublished = false;
         }
       }
-      if (this.hasConfig()) {
+      if (this.spaceJoined) {
+        let report: EngineSendReport = await engineRuntimeService.sendText(text, []);
+        logger.info('UniClipboard official Engine accepted peer count: ' + report.totalAccepted.toString());
+        this.latestContentId = report.entryId;
+        if (report.totalAccepted > 0 || report.totalPending > 0) {
+          this.spacePeerConnected = true;
+          delivered = true;
+        } else if (!mobilePublished) {
+          throw new Error('no official Engine peer accepted the clipboard');
+        }
+      }
+      if (!delivered && !this.spaceJoined && this.hasConfig()) {
         try {
           let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
           this.latestContentId = await client.putText(text);
@@ -4891,23 +4893,6 @@ export class ClipboardFeatureController {
           logger.info('UniClipboard text sent through desktop relay');
         } catch (error) {
           logger.warn('UniClipboard desktop relay unavailable, trying P2P');
-        }
-      }
-      if (!delivered && this.spaceJoined) {
-        try {
-          let acceptedCount: number = await this.spaceNodeService.sendText(text);
-          logger.info('UniClipboard P2P accepted peer count: ' + acceptedCount.toString());
-          if (acceptedCount > 0) {
-            this.spacePeerConnected = true;
-            this.latestContentId = '';
-            delivered = true;
-          } else if (!mobilePublished) {
-            throw new Error('no online space peer accepted the clipboard');
-          }
-        } catch (error) {
-          if (!mobilePublished) {
-            throw new Error('space text delivery failed');
-          }
         }
       }
       if (!delivered && mobilePublished) {
@@ -4975,13 +4960,14 @@ export class ClipboardFeatureController {
       }
       if (!delivered && this.spaceJoined) {
         try {
-          let data: Uint8Array = await this.clipboardService.encodeSpaceImage(pixelMap);
-          let acceptedCount: number = await this.spaceNodeService.sendImage(data);
-          logger.info('UniClipboard P2P image accepted peer count: ' + acceptedCount.toString());
-          if (acceptedCount > 0) {
+          let data: Uint8Array = await this.clipboardService.encodePng(pixelMap);
+          let report: EngineSendReport = await engineRuntimeService.sendImage(data, 'image/png', []);
+          logger.info('UniClipboard official Engine image accepted peer count: ' +
+            report.totalAccepted.toString());
+          if (report.totalAccepted > 0 || report.totalPending > 0) {
             this.spacePeerConnected = true;
-            this.latestContentId = '';
-            this.latestText = 'image.jpg';
+            this.latestContentId = report.entryId;
+            this.latestText = 'image.png';
             delivered = true;
           } else if (!mobilePublished) {
             throw new Error('no online space peer accepted the clipboard image');
@@ -5102,7 +5088,7 @@ export class ClipboardFeatureController {
           mobilePublished = false;
         }
       }
-      if (this.hasConfig()) {
+      if (this.hasConfig() && !this.spaceJoined) {
         try {
           let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
           this.latestContentId = await client.putFileFromUri(
@@ -5116,11 +5102,10 @@ export class ClipboardFeatureController {
       }
       if (!delivered && this.spaceJoined) {
         try {
-          let sendResult: NativeSpaceFileSendResult = await this.spaceNodeService.sendFileFromUri(
-            sourceUri, sourceSize, this.composerFileName);
-          if (sendResult.acceptedCount > 0) {
-            this.pendingFileTransferId = sendResult.transferId;
-            this.latestContentId = '';
+          let report: EngineSendReport = await engineRuntimeService.sendFileFromUri(sourceUri, '', []);
+          if (report.totalAccepted > 0 || report.totalPending > 0) {
+            this.pendingFileTransferId = report.entryId;
+            this.latestContentId = report.entryId;
             this.spacePeerConnected = true;
             delivered = true;
           } else if (!mobilePublished) {
@@ -5185,11 +5170,7 @@ export class ClipboardFeatureController {
       let uris: string[] = await documentPicker.save(options);
       if (uris.length > 0) {
         if (sourcePath.length > 0) {
-          if (sourcePath.startsWith('/')) {
-            await this.spaceNodeService.copyFileToUri(sourcePath, uris[0]);
-          } else {
-            await this.spaceNodeService.copyUriToUri(sourcePath, uris[0]);
-          }
+          this.copyLocalFileToUri(sourcePath, uris[0]);
         } else if (data !== null) {
           this.clipboardService.writeFile(uris[0], data);
         }
@@ -5242,6 +5223,9 @@ export class ClipboardFeatureController {
     activityCount += await this.consumeMobileSyncEvents();
     activityCount += await this.consumeSpaceTextEvents();
     this.realtimeTick += 1;
+    if (this.spaceJoined) {
+      activityCount += await this.pollOfficialEngineInbound();
+    }
     if (this.spaceInvitationExpiresAtMs > 0 && Date.now() >= this.spaceInvitationExpiresAtMs) {
       this.spaceIssuedInvitationCode = '';
       this.spaceInvitationExpiresAtMs = 0;
@@ -5295,10 +5279,302 @@ export class ClipboardFeatureController {
     return activityCount;
   }
 
-  public async consumeSpaceTextEvents(): Promise<number> {
+  public onEngineRuntimeEvent(event: EngineRuntimeEvent): void {
+    if (event.kind === 'active_clipboard_changed' || event.kind === 'incoming_entry' ||
+      event.kind === 'inbound_notice' || event.kind === 'incoming_pending' ||
+      event.kind === 'receive_attempt_state_changed') {
+      this.scheduleOfficialEngineInboundRefresh();
+    } else if (event.kind === 'device_trust_changed' || event.kind === 'refresh_required') {
+      this.refreshSpaceDevices();
+    }
+  }
+
+  private scheduleOfficialEngineInboundRefresh(): void {
     if (!this.spaceJoined) {
+      return;
+    }
+    if (this.officialEngineInboundRefreshBusy) {
+      this.officialEngineInboundRefreshQueued = true;
+      return;
+    }
+    if (this.officialEngineInboundRefreshTimerId >= 0) {
+      return;
+    }
+    this.officialEngineInboundRefreshTimerId = setTimeout((): void => {
+      this.officialEngineInboundRefreshTimerId = -1;
+      this.consumeOfficialEngineInbound().catch((): void => {
+        this.scheduleOfficialEngineInboundRetry();
+      });
+    }, 0);
+  }
+
+  private async consumeOfficialEngineInbound(): Promise<void> {
+    if (!this.spaceJoined) {
+      return;
+    }
+    if (this.officialEngineInboundRefreshBusy) {
+      this.officialEngineInboundRefreshQueued = true;
+      return;
+    }
+    this.officialEngineInboundRefreshBusy = true;
+    let consumed: boolean = false;
+    try {
+      consumed = await this.consumeOfficialEngineClipboard();
+    } catch (error) {
+      consumed = false;
+    } finally {
+      this.officialEngineInboundRefreshBusy = false;
+    }
+    if (this.officialEngineInboundRefreshQueued) {
+      this.officialEngineInboundRefreshQueued = false;
+      this.officialEngineInboundRefreshRetryCount = 0;
+      this.scheduleOfficialEngineInboundRefresh();
+    } else if (consumed) {
+      this.officialEngineInboundRefreshRetryCount = 0;
+    } else {
+      this.scheduleOfficialEngineInboundRetry();
+    }
+  }
+
+  private async pollOfficialEngineInbound(): Promise<number> {
+    if (!this.spaceJoined || this.officialEngineInboundRefreshBusy) {
       return 0;
     }
+    this.officialEngineInboundRefreshBusy = true;
+    let consumed: boolean = false;
+    try {
+      consumed = await this.consumeOfficialEngineClipboard();
+    } catch (error) {
+      consumed = false;
+    } finally {
+      this.officialEngineInboundRefreshBusy = false;
+      this.officialEngineInboundRefreshQueued = false;
+    }
+    return consumed ? 1 : 0;
+  }
+
+  private scheduleOfficialEngineInboundRetry(): void {
+    if (!this.spaceJoined || this.officialEngineInboundRefreshTimerId >= 0 ||
+      this.officialEngineInboundRefreshRetryCount >= OFFICIAL_ENGINE_ENTRY_MAX_RETRIES) {
+      return;
+    }
+    this.officialEngineInboundRefreshRetryCount += 1;
+    this.officialEngineInboundRefreshTimerId = setTimeout((): void => {
+      this.officialEngineInboundRefreshTimerId = -1;
+      this.consumeOfficialEngineInbound().catch((): void => {
+      });
+    }, OFFICIAL_ENGINE_ENTRY_RETRY_DELAY_MS);
+  }
+
+  private async consumeOfficialEngineClipboard(): Promise<boolean> {
+    if (!this.spaceJoined) {
+      return true;
+    }
+    await this.ensureOfficialEngineRunning();
+    let active = await engineRuntimeService.queryActiveClipboard();
+    if (active === null || active.entryId.length === 0 || active.entryId === this.lastOfficialActiveEntryId) {
+      return false;
+    }
+    if (this.isOfficialEngineLocalDevice(active.activatedBy)) {
+      this.lastOfficialActiveEntryId = active.entryId;
+      return false;
+    }
+    try {
+      let exportedPath: string = await this.exportOfficialEngineEntry(active.entryId);
+      let payload: ClipboardFilePayload = this.clipboardService.readFile(exportedPath);
+      let imagePayload: image.PixelMap | null = await this.tryDecodeOfficialEngineImage(payload.data);
+      this.lastOfficialActiveEntryId = active.entryId;
+      this.latestContentId = active.entryId;
+      if (imagePayload !== null) {
+        this.applyOfficialEngineImage(active, payload, imagePayload, exportedPath);
+      } else if (this.isLikelyOfficialEngineText(payload.data)) {
+        this.applyOfficialEngineText(active, payload.data);
+      } else {
+        this.applyOfficialEngineFile(active, payload, exportedPath);
+      }
+    } catch (error) {
+      return false;
+    }
+    this.spacePeerConnected = true;
+    this.statusCode = 2;
+    this.animateLatestContent();
+    return true;
+  }
+
+  private async ensureOfficialEngineRunning(): Promise<void> {
+    let snapshot = engineRuntimeService.getSnapshot();
+    if (snapshot.state === EngineRuntimeState.RUNNING) {
+      return;
+    }
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context === undefined) {
+      throw new Error('no application context for official Engine recovery');
+    }
+    await engineRuntimeService.prepare(context as common.UIAbilityContext);
+    await engineRuntimeService.start();
+    let recovery: EngineSessionRecovery = await engineRuntimeService.recoverSession(true);
+    if (recovery.resumed) {
+      this.setSpaceJoined(true);
+    }
+  }
+
+  private isOfficialEngineLocalDevice(deviceId: string): boolean {
+    for (let index: number = 0; index < this.spaceDevices.length; index += 1) {
+      let device: EngineRuntimeDevice = this.spaceDevices[index];
+      if (device.deviceId === deviceId) {
+        return device.isLocal;
+      }
+    }
+    return false;
+  }
+
+  private async exportOfficialEngineEntry(entryId: string): Promise<string> {
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context === undefined) {
+      throw new Error('no application context for official Engine export');
+    }
+    let directory: string = context.filesDir + '/engine-received';
+    try {
+      fileIo.mkdirSync(directory, true);
+    } catch (error) {
+    }
+    let path: string = directory + '/entry-' + this.safeOfficialEngineFilePart(entryId) + '-' +
+      Date.now().toString() + '.bin';
+    let target: fileIo.File = fileIo.openSync(path,
+      fileIo.OpenMode.CREATE | fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.TRUNC);
+    fileIo.closeSync(target.fd);
+    await engineRuntimeService.exportEntryToUri(entryId, path);
+    return path;
+  }
+
+  private safeOfficialEngineFilePart(value: string): string {
+    let safe: string = value.replace(/[^a-zA-Z0-9_-]/g, '_');
+    return safe.length > 0 ? safe : 'entry';
+  }
+
+  private async tryDecodeOfficialEngineImage(data: Uint8Array): Promise<image.PixelMap | null> {
+    if (!this.isOfficialEngineImageData(data)) {
+      return null;
+    }
+    try {
+      return await this.clipboardService.decodeImage(data);
+    } catch (error) {
+      return null;
+    }
+  }
+
+  private isOfficialEngineImageData(data: Uint8Array): boolean {
+    if (data.length >= 8 && data[0] === 137 && data[1] === 80 && data[2] === 78 && data[3] === 71 &&
+      data[4] === 13 && data[5] === 10 && data[6] === 26 && data[7] === 10) {
+      return true;
+    }
+    if (data.length >= 3 && data[0] === 255 && data[1] === 216 && data[2] === 255) {
+      return true;
+    }
+    if (data.length >= 6 && data[0] === 71 && data[1] === 73 && data[2] === 70 && data[3] === 56) {
+      return true;
+    }
+    if (data.length >= 2 && data[0] === 66 && data[1] === 77) {
+      return true;
+    }
+    return data.length >= 12 && data[0] === 82 && data[1] === 73 && data[2] === 70 && data[3] === 70 &&
+      data[8] === 87 && data[9] === 69 && data[10] === 66 && data[11] === 80;
+  }
+
+  private isLikelyOfficialEngineText(data: Uint8Array): boolean {
+    if (data.length === 0 || data.length > 1024 * 1024) {
+      return false;
+    }
+    let controls: number = 0;
+    for (let index: number = 0; index < data.length; index += 1) {
+      let value: number = data[index];
+      if (value === 0) {
+        return false;
+      }
+      if (value < 32 && value !== 9 && value !== 10 && value !== 13) {
+        controls += 1;
+      }
+    }
+    return controls * 20 < data.length;
+  }
+
+  private applyOfficialEngineText(active: EngineActiveClipboard, data: Uint8Array): void {
+    let decoder: util.TextDecoder = util.TextDecoder.create('utf-8', { fatal: false, ignoreBOM: true });
+    let text: string = decoder.decodeToString(data);
+    this.latestText = text;
+    this.latestKind = 'Text';
+    this.latestImage = null;
+    if (this.desktopSelectedId.length === 0) {
+      this.releaseDesktopAudio();
+      this.refreshCurrentLinkPreview();
+    }
+    this.addHistory(text, 'received', 'Text', null, null, '', active.entryId, active.activatedBy);
+    this.clipboardService.writeText(text).catch((): void => {
+    });
+    this.notifyReceivedContent('Text', text, null, 0, active.activatedBy);
+  }
+
+  private applyOfficialEngineImage(active: EngineActiveClipboard, payload: ClipboardFilePayload,
+    pixelMap: image.PixelMap, path: string): void {
+    this.latestKind = 'Image';
+    this.latestText = 'image.png';
+    this.latestImage = pixelMap;
+    this.latestImageRevision += 1;
+    if (this.desktopSelectedId.length === 0) {
+      this.releaseDesktopAudio();
+      this.clearLinkPreview();
+    }
+    this.addHistory(this.latestText, 'received', 'Image', pixelMap, null, path, active.entryId,
+      active.activatedBy);
+    this.clipboardService.writeImage(pixelMap).catch((): void => {
+    });
+    this.notifyReceivedContent('Image', this.latestText, pixelMap, payload.data.length, active.activatedBy);
+  }
+
+  private applyOfficialEngineFile(active: EngineActiveClipboard, payload: ClipboardFilePayload, path: string): void {
+    let fileName: string = this.fileNameForOfficialEnginePayload(payload.data);
+    this.latestKind = 'File';
+    this.latestText = fileName;
+    this.latestFileName = fileName;
+    this.latestFileData = null;
+    this.latestFilePath = path;
+    this.latestFileRevision += 1;
+    this.desktopFilePreviewState = 0;
+    this.resetDesktopVideoAspectRatio();
+    if (this.desktopSelectedId.length === 0) {
+      this.releaseDesktopAudio();
+      this.clearLinkPreview();
+    }
+    this.latestImage = null;
+    this.addHistory(fileName, 'received', 'File', null, null, path, active.entryId, active.activatedBy);
+    this.notifyReceivedContent('File', fileName, null, payload.data.length, active.activatedBy);
+  }
+
+  private fileNameForOfficialEnginePayload(data: Uint8Array): string {
+    if (data.length >= 5 && data[0] === 37 && data[1] === 80 && data[2] === 68 && data[3] === 70 &&
+      data[4] === 45) {
+      return 'received-file.pdf';
+    }
+    if (data.length >= 4 && data[0] === 80 && data[1] === 75 && data[2] === 3 && data[3] === 4) {
+      return 'received-file.zip';
+    }
+    return 'received-file';
+  }
+
+  private copyLocalFileToUri(sourcePath: string, targetUri: string): void {
+    let source: fileIo.File = fileIo.openSync(sourcePath, fileIo.OpenMode.READ_ONLY);
+    try {
+      fileIo.copyFileSync(source.fd, targetUri);
+    } finally {
+      fileIo.closeSync(source.fd);
+    }
+  }
+
+  public async consumeSpaceTextEvents(): Promise<number> {
+    // EngineRuntimeService owns the official event stream. The legacy native
+    // event queues are deliberately not consumed by the product UI.
+    return 0;
+    /*
     if (this.spaceDevices.length === 0) {
       await this.refreshSpaceDevices();
     }
@@ -5409,6 +5685,7 @@ export class ClipboardFeatureController {
       this.animateLatestContent();
     }
     return events.length + imageEvents.length + fileEvents.length + fileStatusEvents.length;
+    */
   }
 
   public async pullLatestFromRealtime(client: MobileSyncClient): Promise<void> {
@@ -5450,7 +5727,7 @@ export class ClipboardFeatureController {
       return '';
     }
     for (let index: number = 0; index < this.spaceDevices.length; index++) {
-      let device: NativeSpaceDevice = this.spaceDevices[index];
+      let device: EngineRuntimeDevice = this.spaceDevices[index];
       if (device.deviceId !== deviceId) {
         continue;
       }

@@ -41,18 +41,8 @@
           "when": "inuse"
         }
       },
-      // Temporarily disabled while the current signing profile lacks the
-      // restricted permission ACL. Engine host clipboard access fails closed.
-      // {
-      //   "name": "ohos.permission.READ_PASTEBOARD",
-      //   "reason": "$string:entry_pasteboard_permission_reason",
-      //   "usedScene": {
-      //     "abilities": [
-      //       "EntryAbility"
-      //     ],
-      //     "when": "inuse"
-      //   }
-      // }
+      // PasteButton grants temporary clipboard-read access after an explicit
+      // user click. The restricted permission is intentionally not declared.
     ],
     "abilities": [
       {

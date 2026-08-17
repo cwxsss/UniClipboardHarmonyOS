@@ -1,18 +1,15 @@
 import { common } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
-import { deviceInfo } from '@kit.BasicServicesKit';
 import { fileIo } from '@kit.CoreFileKit';
 import { image } from '@kit.ImageKit';
 import { systemShare } from '@kit.ShareKit';
 import { uniformTypeDescriptor } from '@kit.ArkData';
 import {
-  ClipboardFileSelection,
   ClipboardService,
-  Logger,
-  NativeSpaceDevice,
-  NativeSpaceFileSendResult,
-  NativeSpaceStatus,
-  SpaceNodeService
+  engineRuntimeService,
+  EngineRuntimeDevice,
+  EngineSendReport,
+  Logger
 } from 'common';
 import { ClipboardFeatureController } from 'clipboard_feature';
 
@@ -49,19 +46,16 @@ export class ShareTargetController {
   public kind: number = 0;
   public summary: string = '';
   public sending: boolean = false;
-  public devices: NativeSpaceDevice[] = [];
+  public devices: EngineRuntimeDevice[] = [];
   public headerImages: DeviceHeaderRecord[] = [];
   public selectedDeviceId: string = '';
 
   private record: systemShare.SharedRecord | null = null;
   private clipboardService: ClipboardService = new ClipboardService();
-  private spaceNodeService: SpaceNodeService = new SpaceNodeService();
   private historyController: ClipboardFeatureController = ClipboardFeatureController.getInstance();
   private initializationId: number = 0;
   private initializationTimerId: number = -1;
   private initializationStage: string = '';
-  private nodeStartPromise: Promise<NativeSpaceStatus> | null = null;
-  private deviceListPromise: Promise<NativeSpaceDevice[]> | null = null;
 
   public async initialize(data: systemShare.SharedData, context: common.Context): Promise<void> {
     this.initializationId += 1;
@@ -87,26 +81,25 @@ export class ShareTargetController {
         return;
       }
       this.record = record;
-      this.initializationStage = 'space node startup';
-      logger.info('UniClipboard share target is starting the space node.');
-      let status: NativeSpaceStatus = await this.startSpaceNode(
-        context.filesDir, context.cacheDir, deviceInfo.deviceType);
+      this.initializationStage = 'official engine session';
+      await engineRuntimeService.start();
+      let recovery = await engineRuntimeService.recoverSession(true);
       if (!this.isInitializationActive(initializationId)) {
         return;
       }
-      if (!status.running || !status.joined) {
+      if (!recovery.resumed) {
         this.state = SHARE_STATE_NOT_JOINED;
         return;
       }
       this.initializationStage = 'device list';
-      logger.info('UniClipboard share target is reading the device list.');
-      let allDevices: NativeSpaceDevice[] = await this.loadDevices();
+      logger.info('UniClipboard share target is reading official Engine devices.');
+      let allDevices: EngineRuntimeDevice[] = await engineRuntimeService.queryDevices();
       if (!this.isInitializationActive(initializationId)) {
         return;
       }
-      let targets: NativeSpaceDevice[] = [];
+      let targets: EngineRuntimeDevice[] = [];
       for (let index: number = 0; index < allDevices.length; index += 1) {
-        let device: NativeSpaceDevice = allDevices[index];
+        let device: EngineRuntimeDevice = allDevices[index];
         if (!device.isLocal) {
           targets.push(device);
         }
@@ -246,36 +239,6 @@ export class ShareTargetController {
     this.initializationTimerId = -1;
   }
 
-  private async startSpaceNode(dataDir: string, cacheDir: string, deviceType: string): Promise<NativeSpaceStatus> {
-    let pending: Promise<NativeSpaceStatus> | null = this.nodeStartPromise;
-    if (pending === null) {
-      pending = this.spaceNodeService.start(dataDir, cacheDir, deviceType);
-      this.nodeStartPromise = pending;
-    }
-    try {
-      return await pending;
-    } finally {
-      if (this.nodeStartPromise === pending) {
-        this.nodeStartPromise = null;
-      }
-    }
-  }
-
-  private async loadDevices(): Promise<NativeSpaceDevice[]> {
-    let pending: Promise<NativeSpaceDevice[]> | null = this.deviceListPromise;
-    if (pending === null) {
-      pending = this.spaceNodeService.devices();
-      this.deviceListPromise = pending;
-    }
-    try {
-      return await pending;
-    } finally {
-      if (this.deviceListPromise === pending) {
-        this.deviceListPromise = null;
-      }
-    }
-  }
-
   public async sendTo(deviceId: string): Promise<boolean> {
     let record: systemShare.SharedRecord | null = this.record;
     if (record === null || (this.state !== SHARE_STATE_READY && this.state !== SHARE_STATE_FAILED) || this.sending) {
@@ -290,31 +253,35 @@ export class ShareTargetController {
       let historyKind: string = 'Text';
       let historyImage: image.PixelMap | null = null;
       let historyFilePath: string = '';
+      let targets: string[] = [];
+      if (deviceId.length > 0) {
+        targets.push(deviceId);
+      }
       if (this.kind === SHARE_KIND_TEXT) {
         let content: string = record.content === undefined ? '' : record.content;
-        acceptedCount = deviceId.length === 0 ? await this.spaceNodeService.sendText(content) :
-          await this.spaceNodeService.sendTextToDevice(content, deviceId);
+        let report: EngineSendReport = await engineRuntimeService.sendText(content, targets);
+        acceptedCount = report.totalAccepted + report.totalPending;
         historyText = content;
       } else if (this.kind === SHARE_KIND_IMAGE) {
         let imageUri: string = record.uri === undefined ? '' : record.uri;
         let pixelMap: image.PixelMap = await this.clipboardService.decodeImageUri(imageUri);
-        let imageData: Uint8Array = await this.clipboardService.encodeSpaceImage(pixelMap);
-        acceptedCount = deviceId.length === 0 ? await this.spaceNodeService.sendImage(imageData) :
-          await this.spaceNodeService.sendImageToDevice(imageData, deviceId);
+        let imageData: Uint8Array = await this.clipboardService.encodePng(pixelMap);
+        let report: EngineSendReport = await engineRuntimeService.sendImage(imageData, 'image/png', targets);
+        acceptedCount = report.totalAccepted + report.totalPending;
         historyText = this.summary.length > 0 ? this.summary : 'image.jpg';
         historyKind = 'Image';
         historyImage = pixelMap;
       } else if (this.kind === SHARE_KIND_FILE) {
         let fileUri: string = record.uri === undefined ? '' : record.uri;
-        let selection: ClipboardFileSelection = this.clipboardService.inspectFile(fileUri);
-        let result: NativeSpaceFileSendResult = deviceId.length === 0 ?
-          await this.spaceNodeService.sendFileFromUri(selection.uri, selection.size, selection.fileName) :
-          await this.spaceNodeService.sendFileFromUriToDevice(
-            selection.uri, selection.size, selection.fileName, deviceId);
-        acceptedCount = result.acceptedCount;
-        historyText = selection.fileName;
+        if (fileUri.length === 0) {
+          this.state = SHARE_STATE_FAILED;
+          return false;
+        }
+        let report: EngineSendReport = await engineRuntimeService.sendFileFromUri(fileUri, '', targets);
+        acceptedCount = report.totalAccepted + report.totalPending;
+        historyText = this.summary.length > 0 ? this.summary : 'shared-file';
         historyKind = 'File';
-        historyFilePath = selection.uri;
+        historyFilePath = fileUri;
       }
       if (acceptedCount <= 0) {
         this.state = SHARE_STATE_FAILED;

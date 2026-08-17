@@ -9,7 +9,7 @@ import {
   IconStyleMode,
   ScrollEffectType
 } from '@kit.UIDesignKit';
-import { Logger, NativeSpaceDevice } from 'common';
+import { EngineRuntimeDevice, Logger } from 'common';
 import { ClipboardFeatureController } from 'clipboard_feature';
 import {
   SHARE_KIND_FILE,
@@ -140,7 +140,7 @@ struct ShareTarget {
     return $r('app.string.share_target_content_text');
   }
 
-  private deviceIcon(device: NativeSpaceDevice): Resource {
+  private deviceIcon(device: EngineRuntimeDevice): Resource {
     if (device.deviceType === 'phone') {
       return $r('sys.symbol.phone');
     }
@@ -255,7 +255,7 @@ struct ShareTarget {
   }
 
   @Builder
-  private DeviceCard(device: NativeSpaceDevice) {
+  private DeviceCard(device: EngineRuntimeDevice) {
     Stack({ alignContent: Alignment.TopEnd }) {
       Stack({ alignContent: Alignment.BottomStart }) {
         if (this.controller.headerImagePath(device.deviceId).length > 0) {
@@ -394,11 +394,11 @@ struct ShareTarget {
             this.EmptyDevices()
           } else {
             Grid(this.contentScroller) {
-              ForEach(this.controller.devices, (device: NativeSpaceDevice) => {
+              ForEach(this.controller.devices, (device: EngineRuntimeDevice) => {
                 GridItem() {
                   this.DeviceCard(device)
                 }
-              }, (device: NativeSpaceDevice): string => device.deviceId)
+              }, (device: EngineRuntimeDevice): string => device.deviceId)
             }
             .columnsTemplate('1fr 1fr')
             .columnsGap(20)
@@ -443,9 +443,9 @@ struct ShareTarget {
             }
             .height(180)
           } else {
-            ForEach(this.controller.devices, (device: NativeSpaceDevice) => {
+            ForEach(this.controller.devices, (device: EngineRuntimeDevice) => {
               this.DeviceCard(device)
-            }, (device: NativeSpaceDevice): string => device.deviceId)
+            }, (device: EngineRuntimeDevice): string => device.deviceId)
           }
         }
         .width('100%')

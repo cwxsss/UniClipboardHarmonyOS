@@ -3,7 +3,7 @@ import {
   common,
   ConfigurationConstant
 } from '@kit.AbilityKit';
-import { BusinessError, deviceInfo } from '@kit.BasicServicesKit';
+import { BusinessError, deviceInfo, pasteboard } from '@kit.BasicServicesKit';
 import { scanBarcode, scanCore } from '@kit.ScanKit';
 import { image } from '@kit.ImageKit';
 import { fileIo, fileUri, picker } from '@kit.CoreFileKit';
@@ -45,7 +45,7 @@ import {
   SpaceNodeService,
   NativeCreateSpaceResult,
   NativeJoinSpaceResult,
-  NativeSpaceDevice,
+  EngineRuntimeDevice,
   NativeSpaceFileEvent,
   NativeSpaceFileSendResult,
   NativeSpaceFileStatusEvent,
@@ -76,6 +76,7 @@ import { HdrImage } from '../../components/HdrImage';
 @Component
 export struct ExpandedClipboardView {
   @State controller: ClipboardFeatureController = ClipboardFeatureController.getInstance();
+  @StorageLink('historyRevision') historyRenderRevision: number = 0;
   @State showAboutSheet: boolean = false;
   @State showFeedbackSheet: boolean = false;
   @State showConnectionDiagnosticsSheet: boolean = false;
@@ -581,13 +582,13 @@ export struct ExpandedClipboardView {
       }).onClick((): void => {
           this.controller.sendServerHistoryItemToTarget(item, 'all');
       })
-      ForEach(this.controller.spaceDevices, (device: NativeSpaceDevice) => {
+      ForEach(this.controller.spaceDevices, (device: EngineRuntimeDevice) => {
         MenuItem({
           content: device.deviceName
         }).enabled(device.online).onClick((): void => {
             this.controller.sendServerHistoryItemToTarget(item, device.deviceName);
         })
-      }, (device: NativeSpaceDevice): string => 'space-' + device.deviceId)
+      }, (device: EngineRuntimeDevice): string => 'space-' + device.deviceId)
       ForEach(this.controller.mobileSyncDevices, (device: NativeMobileSyncDevice) => {
         MenuItem({
           content: device.label
@@ -613,13 +614,13 @@ export struct ExpandedClipboardView {
       }).onClick((): void => {
           this.controller.sendLocalHistoryItemToTarget(item, 'all');
       })
-      ForEach(this.controller.spaceDevices, (device: NativeSpaceDevice) => {
+      ForEach(this.controller.spaceDevices, (device: EngineRuntimeDevice) => {
         MenuItem({
           content: device.deviceName
         }).enabled(device.online).onClick((): void => {
             this.controller.sendLocalHistoryItemToTarget(item, device.deviceName);
         })
-      }, (device: NativeSpaceDevice): string => 'space-' + device.deviceId)
+      }, (device: EngineRuntimeDevice): string => 'space-' + device.deviceId)
       ForEach(this.controller.mobileSyncDevices, (device: NativeMobileSyncDevice) => {
         MenuItem({
           content: device.label
@@ -1946,7 +1947,7 @@ export struct ExpandedClipboardView {
         .padding({ left: 16, right: 16 })
         .border({ width: { bottom: 1 }, color: $r('app.color.divider') })
       }
-      if (this.controller.desktopFilteredServerHistory().length === 0 &&
+      if (this.historyRenderRevision >= 0 && this.controller.desktopFilteredServerHistory().length === 0 &&
         this.controller.desktopFilteredSessionHistory().length === 0) {
         Scroll() {
           Column({ space: 12 }) {
@@ -1991,6 +1992,8 @@ export struct ExpandedClipboardView {
         .padding(8)
         .scrollBar(BarState.Auto)
         .cachedCount(6)
+        .scale({ x: this.controller.historyPulse, y: this.controller.historyPulse })
+        .id('history-list-' + this.historyRenderRevision.toString())
       }
     }
     .width(listWidth)
@@ -2190,7 +2193,14 @@ export struct ExpandedClipboardView {
         .enabled(!this.controller.busy && this.controller.imageReadState !== 1)
         .onClick((_event: ClickEvent, result: PasteButtonOnClickResult): void => {
           if (result === PasteButtonOnClickResult.SUCCESS) {
-            this.controller.readLocalImage();
+            pasteboard.getSystemPasteboard().getData((error: BusinessError, data: pasteboard.PasteData): void => {
+              if (error) {
+                this.controller.imageReadState = 4;
+                this.controller.statusCode = 3;
+                return;
+              }
+              this.controller.readLocalImageFromPasteData(data);
+            });
           } else {
             this.controller.imageReadState = 4;
             this.controller.statusCode = 3;
@@ -3310,7 +3320,7 @@ export struct ExpandedClipboardView {
 
 
   @Builder
-  private desktopPairedDeviceContextMenu(device: NativeSpaceDevice) {
+  private desktopPairedDeviceContextMenu(device: EngineRuntimeDevice) {
     Menu() {
       if (device.isLocal) {
         MenuItem({
@@ -3356,7 +3366,7 @@ export struct ExpandedClipboardView {
 
 
   @Builder
-  private desktopPairedDeviceRow(device: NativeSpaceDevice) {
+  private desktopPairedDeviceRow(device: EngineRuntimeDevice) {
     Row({ space: 11 }) {
       Stack({ alignContent: Alignment.BottomEnd }) {
         Column() {
@@ -3976,9 +3986,9 @@ export struct ExpandedClipboardView {
         .width('100%')
         .margin({ top: 14 })
         if (this.controller.spaceJoined) {
-          ForEach(this.controller.spaceDevices, (device: NativeSpaceDevice) => {
+          ForEach(this.controller.spaceDevices, (device: EngineRuntimeDevice) => {
             this.desktopPairedDeviceRow(device)
-          }, (device: NativeSpaceDevice): string => device.deviceId + ':' + device.online.toString() + ':' +
+          }, (device: EngineRuntimeDevice): string => device.deviceId + ':' + device.online.toString() + ':' +
             device.state)
         }
         Row() {

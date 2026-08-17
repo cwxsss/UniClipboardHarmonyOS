@@ -77,6 +77,17 @@ class TestRuntimeHost implements EngineRuntimeHost {
   listenClipboard(observer: EngineClipboardObserver): void {
   }
 
+  registerInputFile(uri: string, mimeType: string): string {
+    return 'test-input';
+  }
+
+  registerOutputFile(uri: string, mimeType: string): string {
+    return 'test-output';
+  }
+
+  releaseFile(handle: string): void {
+  }
+
   shutdown(): void {
     this.shutdownCount += 1;
   }

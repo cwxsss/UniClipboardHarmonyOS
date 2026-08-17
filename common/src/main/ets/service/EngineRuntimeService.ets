@@ -59,12 +59,15 @@ export interface EngineRuntimeEventObserver {
 export class EngineRuntimeError extends Error {
   category: string;
   operation: string;
+  detail: string;
 
-  constructor(category: string, operation: string) {
-    super('ENGINE_RUNTIME_' + category.toUpperCase() + ':' + operation);
+  constructor(category: string, operation: string, detail: string = '') {
+    super('ENGINE_RUNTIME_' + category.toUpperCase() + ':' + operation +
+      (detail.length > 0 ? ':' + detail : ''));
     this.name = 'EngineRuntimeError';
     this.category = category;
     this.operation = operation;
+    this.detail = detail;
   }
 }
 
@@ -166,6 +169,43 @@ export class EngineActiveClipboard {
   }
 }
 
+// The native rc.3 binding serializes device-trust snapshots as JSON. Convert
+// them here so views only see a stable ArkTS model, never native JSON.
+class EngineDeviceTrustRelationshipPayload {
+  device_id: string = '';
+  display_name: string = '';
+  is_local: boolean = false;
+  reachability: string = 'unknown';
+  membership: string = 'unknown';
+  sync_relationship: string = 'unknown';
+}
+
+class EngineDeviceTrustSnapshotPayload {
+  local_device_id: string = '';
+  devices: EngineDeviceTrustRelationshipPayload[] = [];
+}
+
+export class EngineRuntimeDevice {
+  deviceId: string;
+  deviceName: string;
+  deviceType: string;
+  isLocal: boolean;
+  online: boolean;
+  state: string;
+  channel: string;
+
+  constructor(deviceId: string, deviceName: string, isLocal: boolean, online: boolean,
+    state: string, channel: string) {
+    this.deviceId = deviceId;
+    this.deviceName = deviceName;
+    this.deviceType = 'unknown';
+    this.isLocal = isLocal;
+    this.online = online;
+    this.state = state;
+    this.channel = channel;
+  }
+}
+
 export class EngineWorkspaceConvergence {
   phase: string;
   effectiveMemberCount: number;
@@ -253,6 +293,9 @@ export interface EngineRuntimeBackend {
 export interface EngineRuntimeHost {
   prepare(context: common.UIAbilityContext): EngineHostCallbacks;
   listenClipboard(observer: EngineClipboardObserver): void;
+  registerInputFile(uri: string, mimeType: string): string;
+  registerOutputFile(uri: string, mimeType: string): string;
+  releaseFile(handle: string): void;
   shutdown(): void;
 }
 
@@ -500,6 +543,18 @@ class OfficialEngineRuntimeHost implements EngineRuntimeHost {
     this.adapter.listenClipboard(observer);
   }
 
+  registerInputFile(uri: string, mimeType: string): string {
+    return this.adapter.registerInput(uri, mimeType);
+  }
+
+  registerOutputFile(uri: string, mimeType: string): string {
+    return this.adapter.registerOutput(uri, mimeType);
+  }
+
+  releaseFile(handle: string): void {
+    this.adapter.releaseFile(handle);
+  }
+
   shutdown(): void {
     this.adapter.shutdown();
   }
@@ -671,14 +726,63 @@ export class EngineRuntimeService implements EngineClipboardObserver {
       (handle: EngineRuntimeHandle): Promise<EngineSendReport> => handle.sendFiles(fileHandles, targetDevices));
   }
 
+  async sendFileFromUri(uri: string, mimeType: string, targetDevices: string[]): Promise<EngineSendReport> {
+    this.requireRunningHandle('send_file');
+    let fileHandle: string = '';
+    try {
+      fileHandle = this.host.registerInputFile(uri, mimeType);
+      let handles: string[] = [fileHandle];
+      return await this.sendFiles(handles, targetDevices);
+    } catch (error) {
+      throw this.fail('send_file', error);
+    } finally {
+      if (fileHandle.length > 0) {
+        try {
+          this.host.releaseFile(fileHandle);
+        } catch (error) {
+        }
+      }
+    }
+  }
+
   async captureCurrentClipboard(): Promise<string | null> {
     return await this.executeFeature('capture_clipboard',
       (handle: EngineRuntimeHandle): Promise<string | null> => handle.captureCurrentClipboard());
   }
 
   async queryActiveClipboard(): Promise<EngineActiveClipboard | null> {
-    return await this.executeFeature('query_active_clipboard',
+    return await this.executeReadOnly('query_active_clipboard',
       (handle: EngineRuntimeHandle): Promise<EngineActiveClipboard | null> => handle.queryActiveClipboard());
+  }
+
+  async queryDevices(): Promise<EngineRuntimeDevice[]> {
+    let serialized: string = await this.executeReadOnly('query_device_trust',
+      (handle: EngineRuntimeHandle): Promise<string> => handle.queryDeviceTrust());
+    if (serialized.trim().length === 0) {
+      return [];
+    }
+    let snapshot: EngineDeviceTrustSnapshotPayload = JSON.parse(serialized) as EngineDeviceTrustSnapshotPayload;
+    let devices: EngineRuntimeDevice[] = [];
+    let hasLocalDevice: boolean = false;
+    let sources: EngineDeviceTrustRelationshipPayload[] = snapshot.devices === undefined ? [] : snapshot.devices;
+    let localDeviceId: string = snapshot.local_device_id === undefined ? '' : snapshot.local_device_id;
+    for (let index: number = 0; index < sources.length; index++) {
+      let source: EngineDeviceTrustRelationshipPayload = sources[index];
+      let isLocal: boolean = source.is_local || source.device_id === localDeviceId;
+      let name: string = source.display_name.length > 0 ? source.display_name : source.device_id;
+      let online: boolean = source.reachability === 'online';
+      devices.push(new EngineRuntimeDevice(source.device_id, name, isLocal, online,
+        source.sync_relationship.length > 0 ? source.sync_relationship : source.membership,
+        source.reachability));
+      if (isLocal) {
+        hasLocalDevice = true;
+      }
+    }
+    if (!hasLocalDevice && localDeviceId.length > 0) {
+      devices.push(new EngineRuntimeDevice(localDeviceId, localDeviceId,
+        true, true, 'active', 'local'));
+    }
+    return devices;
   }
 
   async restoreClipboard(entryId: string, mode: string): Promise<string> {
@@ -696,13 +800,31 @@ export class EngineRuntimeService implements EngineClipboardObserver {
       (handle: EngineRuntimeHandle): Promise<void> => handle.exportEntry(entryId, destinationHandle));
   }
 
+  async exportEntryToUri(entryId: string, destinationUri: string, mimeType: string = ''): Promise<void> {
+    this.requireRunningHandle('export_entry');
+    let fileHandle: string = '';
+    try {
+      fileHandle = this.host.registerOutputFile(destinationUri, mimeType);
+      await this.exportEntry(entryId, fileHandle);
+    } catch (error) {
+      throw this.fail('export_entry', error);
+    } finally {
+      if (fileHandle.length > 0) {
+        try {
+          this.host.releaseFile(fileHandle);
+        } catch (error) {
+        }
+      }
+    }
+  }
+
   async removeMember(deviceId: string): Promise<EngineWorkspaceConvergence> {
     return await this.executeFeature('remove_member',
       (handle: EngineRuntimeHandle): Promise<EngineWorkspaceConvergence> => handle.removeMember(deviceId));
   }
 
   async queryDeviceTrust(): Promise<string> {
-    return await this.executeFeature('query_device_trust',
+    return await this.executeReadOnly('query_device_trust',
       (handle: EngineRuntimeHandle): Promise<string> => handle.queryDeviceTrust());
   }
 
@@ -992,7 +1114,9 @@ export class EngineRuntimeService implements EngineClipboardObserver {
       let handle: EngineRuntimeHandle = this.requireRunningHandle('capture_clipboard');
       await handle.captureCurrentClipboard();
     } catch (error) {
-      this.fail('capture_clipboard', error);
+      // Clipboard reads can be denied when the app is not running behind a
+      // user-authorized PasteButton. A denied capture must not stop the
+      // official Engine event loop or invalidate an already joined session.
     }
   }
 
@@ -1010,6 +1134,16 @@ export class EngineRuntimeService implements EngineClipboardObserver {
       return await action(handle);
     } catch (error) {
       throw this.fail(operation, error);
+    }
+  }
+
+  private async executeReadOnly<T>(operation: string,
+    action: (handle: EngineRuntimeHandle) => Promise<T>): Promise<T> {
+    let handle: EngineRuntimeHandle = this.requireRunningHandle(operation);
+    try {
+      return await action(handle);
+    } catch (error) {
+      throw this.toRuntimeError(operation, error);
     }
   }
 
@@ -1034,6 +1168,10 @@ export class EngineRuntimeService implements EngineClipboardObserver {
     if (error instanceof EngineHostError) {
       let hostError: EngineHostError = error as EngineHostError;
       return new EngineRuntimeError(hostError.category, operation);
+    }
+    if (error instanceof Error) {
+      let nativeError: Error = error as Error;
+      return new EngineRuntimeError('engine_unavailable', operation, nativeError.message);
     }
     return new EngineRuntimeError('engine_unavailable', operation);
   }

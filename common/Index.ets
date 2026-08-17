@@ -39,9 +39,15 @@ export { EngineHostError, EngineHostErrorCategory } from './src/main/ets/engine/
 export { EngineVersionService } from './src/main/ets/service/EngineVersionService';
 export {
   EngineRuntimeBackend,
+  EngineInvitationIssued,
+  EngineActiveClipboard,
   EngineRuntimeError,
   EngineRuntimeEvent,
   EngineRuntimeEventObserver,
+  EngineRuntimeDevice,
+  EngineSendReport,
+  EngineSpaceCreated,
+  EngineSpaceJoined,
   EngineRuntimeHandle,
   EngineRuntimeHost,
   EngineRuntimeObserver,
@@ -49,6 +55,7 @@ export {
   EngineRuntimeSnapshot,
   EngineRuntimeStartConfig,
   EngineRuntimeState,
+  EngineSessionRecovery,
   engineRuntimeService
 } from './src/main/ets/service/EngineRuntimeService';
 export { Logger } from './src/main/ets/util/Logger';
