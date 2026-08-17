@@ -2,14 +2,17 @@ import { http } from '@kit.NetworkKit';
 import { deviceInfo } from '@kit.BasicServicesKit';
 import { rcp } from '@kit.RemoteCommunicationKit';
 import { LinkPreview } from '../model/ClipboardModels';
+import { Logger } from '../util/Logger';
+
+const logger: Logger = new Logger('LinkPreview');
 
 export class LinkPreviewService {
   async load(url: string): Promise<LinkPreview> {
-    if (deviceInfo.sdkApiVersion >= 24) {
+    if (deviceInfo.apiAvailable('6.1.1(24)')) {
       try {
         return await this.loadWithPreconnect(url);
       } catch (error) {
-        console.warn('UniClipboard RCP preconnect failed, falling back to Network Kit HTTP.');
+        logger.warn('UniClipboard RCP preconnect failed, falling back to Network Kit HTTP.');
       }
     }
     return this.loadWithHttp(url);
@@ -32,7 +35,11 @@ export class LinkPreviewService {
     };
     let preconnectRequest: rcp.Request = new rcp.Request(url, 'GET', headers);
     preconnectRequest.configuration = configuration;
-    preconnectRequest.connectOnly = true;
+    if (deviceInfo.apiAvailable('6.1.1(24)')) {
+      preconnectRequest.connectOnly = true;
+    } else {
+      throw new Error('RCP preconnect is unavailable on this system version');
+    }
     await session.fetch(preconnectRequest);
 
     let contentRequest: rcp.Request = new rcp.Request(url, 'GET', headers);
@@ -99,7 +106,61 @@ export class LinkPreviewService {
     if (title.length === 0) {
       title = siteName;
     }
-    return new LinkPreview(url, title, description, siteName, imageUrl);
+    let metaKeywords: string = this.readMeta(html, 'keywords');
+    let keywords: string[] = this.collectKeywords(url, title, siteName, metaKeywords);
+    return new LinkPreview(url, title, description, siteName, imageUrl, keywords);
+  }
+
+  public createFallback(url: string): LinkPreview {
+    let siteName: string = this.host(url);
+    let keywords: string[] = this.collectKeywords(url, siteName, siteName, '');
+    return new LinkPreview(url, siteName, '', siteName, '', keywords);
+  }
+
+  private collectKeywords(url: string, title: string, siteName: string, metaKeywords: string): string[] {
+    let keywords: string[] = [];
+    let metaParts: string[] = metaKeywords.split(/[,，;；|]/);
+    for (let index: number = 0; index < metaParts.length && keywords.length < 3; index++) {
+      this.appendKeyword(keywords, metaParts[index]);
+    }
+    let titleParts: string[] = title.split(/[-_|·—]/);
+    for (let index: number = 0; index < titleParts.length && keywords.length < 3; index++) {
+      this.appendKeyword(keywords, titleParts[index]);
+    }
+    this.appendKeyword(keywords, siteName);
+    let urlParts: string[] = url.split(/[:/?#.&=_-]+/);
+    for (let index: number = 0; index < urlParts.length && keywords.length < 3; index++) {
+      this.appendKeyword(keywords, urlParts[index]);
+    }
+    if (keywords.length === 0) {
+      keywords.push('WEB');
+    }
+    return keywords;
+  }
+
+  private appendKeyword(keywords: string[], value: string): void {
+    let keyword: string = this.decode(this.stripTags(value)).trim();
+    if (keyword.length === 0 || this.keywordIsNoise(keyword)) {
+      return;
+    }
+    if (keyword.length > 18) {
+      keyword = keyword.substring(0, 18);
+    }
+    let normalized: string = keyword.toLowerCase();
+    for (let index: number = 0; index < keywords.length; index++) {
+      if (keywords[index].toLowerCase() === normalized) {
+        return;
+      }
+    }
+    keywords.push(keyword);
+  }
+
+  private keywordIsNoise(keyword: string): boolean {
+    let normalized: string = keyword.toLowerCase();
+    let noiseWords: string[] = [
+      'http', 'https', 'www', 'com', 'cn', 'net', 'org', 'html', 'htm', 'index'
+    ];
+    return noiseWords.indexOf(normalized) >= 0;
   }
 
   private readMeta(html: string, key: string): string {

@@ -1,5 +1,6 @@
 export {
   APPEARANCE_THEME_OPTIONS,
+  AppErrorRecord,
   AppearanceThemeOption,
   ClipboardFeatureController,
   ImageSmartAction,

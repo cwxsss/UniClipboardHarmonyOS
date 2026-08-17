@@ -19,12 +19,13 @@ use uc_application::facade::mobile_sync::{
     RegisterMobileShortcutDeviceInput, RevokeMobileDeviceInput,
     UpdateMobileSyncSettingsInput,
 };
+use uc_application::facade::settings::{NetworkSettingsPatch, SettingsFacade};
 use uc_application::facade::{
     connection_channel_to_wire, decode_v3_bytes_to_snapshot,
     decode_v3_bytes_to_snapshot_and_blob_refs, BatchPosition, ClipboardHostEvent,
     ClipboardOriginKind, ContentTypesPatch, EmitError,
     FetchBlobToPathCommand, FetchTransferContext, HostEvent, HostEventEmitterPort, InboundAction,
-    MemberSyncPreferencesPatch, MemberSyncPreferencesView, PublishBlobPathCommand,
+    MemberSyncPreferencesPatch, MemberSyncPreferencesView, PublishBlobPathCommand, SettingsPatch,
     TransferHostEvent, V3BlobRef,
 };
 use uc_bootstrap::CliAppRuntime;
@@ -34,6 +35,7 @@ use uc_core::ports::ReachabilityState;
 use uc_core::{
     ClipboardChangeOrigin, MimeType, ObservedClipboardRepresentation, SystemClipboardSnapshot,
 };
+use uc_infra::settings::repository::FileSettingsRepository;
 
 mod mobile_sync_server;
 
@@ -272,6 +274,12 @@ pub struct NativeSpaceStatus {
     pub joined: bool,
     pub device_name: String,
     pub space_id: String,
+}
+
+#[napi(object)]
+pub struct NativeSpaceNetworkSettings {
+    pub allow_relay_fallback: bool,
+    pub custom_relay_urls: Vec<String>,
 }
 
 #[napi(object)]
@@ -1204,6 +1212,80 @@ pub async fn start_space_node(
 #[napi]
 pub async fn get_space_status() -> Result<NativeSpaceStatus> {
     current_space_status().await
+}
+
+async fn space_settings_facade() -> Result<Arc<SettingsFacade>> {
+    let running_settings = {
+        let guard = space_runtime().lock().await;
+        guard
+            .as_ref()
+            .map(|runtime| Arc::clone(&runtime.app_facade.settings))
+    };
+    if let Some(settings) = running_settings {
+        return Ok(settings);
+    }
+
+    let data_dir = std::env::var("UC_OHOS_DATA_DIR").map_err(|_| {
+        Error::new(
+            Status::GenericFailure,
+            "HarmonyOS data directory is unavailable",
+        )
+    })?;
+    let settings_path = std::path::PathBuf::from(data_dir).join("settings.json");
+    Ok(Arc::new(SettingsFacade::new(Arc::new(
+        FileSettingsRepository::new(settings_path),
+    ))))
+}
+
+/// Return the persisted relay policy used by the embedded P2P node.
+#[napi]
+pub async fn get_space_network_settings() -> Result<NativeSpaceNetworkSettings> {
+    let settings = space_settings_facade().await?;
+    let view = settings.get().await.map_err(space_error)?;
+    Ok(NativeSpaceNetworkSettings {
+        allow_relay_fallback: view.network.allow_relay_fallback,
+        custom_relay_urls: view.network.custom_relay_urls,
+    })
+}
+
+/// Persist the relay policy. It takes effect the next time the embedded P2P
+/// node starts because iroh freezes its relay mode when the endpoint binds.
+#[napi]
+pub async fn update_space_network_settings(
+    allow_relay_fallback: bool,
+    custom_relay_urls: Vec<String>,
+) -> Result<NativeSpaceNetworkSettings> {
+    let settings = space_settings_facade().await?;
+    let view = settings
+        .update(SettingsPatch {
+            network: Some(NetworkSettingsPatch {
+                allow_relay_fallback: Some(allow_relay_fallback),
+                custom_relay_urls: Some(custom_relay_urls),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .await
+        .map_err(space_error)?;
+    Ok(NativeSpaceNetworkSettings {
+        allow_relay_fallback: view.network.allow_relay_fallback,
+        custom_relay_urls: view.network.custom_relay_urls,
+    })
+}
+
+/// Probe a candidate relay before it is persisted. A failed probe is safe to
+/// retry because it does not mutate the active network settings.
+#[napi]
+pub async fn probe_space_relay_url(url: String) -> Result<u32> {
+    let settings = {
+        let guard = space_runtime().lock().await;
+        guard
+            .as_ref()
+            .map(|runtime| Arc::clone(&runtime.app_facade.settings))
+    }
+    .ok_or_else(|| Error::new(Status::GenericFailure, "space node is not running"))?;
+    let report = settings.probe_relay_url(&url).await.map_err(space_error)?;
+    Ok(report.latency_ms)
 }
 
 /// Wake the native peer scheduler and force-revalidate cached connections.

@@ -1,3 +1,5 @@
+import { Api26Material } from './Api26Material';
+
 const ONBOARDING_PAGE_COUNT: number = 4;
 
 @Component
@@ -51,11 +53,13 @@ export struct OnboardingGuide {
         .height(238)
         .borderRadius(119)
         .backgroundColor($r('app.color.accent_soft'))
+        .attributeModifier(Api26Material.accentSurface())
       Column()
         .width(174)
         .height(174)
         .borderRadius(87)
         .backgroundColor($r('app.color.accent_medium'))
+        .attributeModifier(Api26Material.accentSurface())
       Image($r('app.media.uniclipboard_start_icon'))
         .width(112)
         .height(112)
@@ -85,6 +89,7 @@ export struct OnboardingGuide {
     .justifyContent(FlexAlign.Center)
     .borderRadius(24)
     .backgroundColor($r('app.color.surface'))
+    .attributeModifier(Api26Material.panel())
     .border({ width: 1, color: $r('app.color.divider') })
     .shadow({ radius: 18, color: '#14000000', offsetY: 8 })
   }
@@ -120,6 +125,7 @@ export struct OnboardingGuide {
       .padding({ left: 14, right: 14, top: 8, bottom: 8 })
       .borderRadius(18)
       .backgroundColor($r('app.color.surface_muted'))
+      .attributeModifier(Api26Material.subtle())
     }
     .width('100%')
   }
@@ -137,6 +143,7 @@ export struct OnboardingGuide {
       .justifyContent(FlexAlign.Center)
       .borderRadius(12)
       .backgroundColor($r('app.color.accent_soft'))
+      .attributeModifier(Api26Material.accentSurface())
       Column({ space: 3 }) {
         Text(title)
           .fontSize(14)
@@ -171,6 +178,7 @@ export struct OnboardingGuide {
       .padding({ left: 14, right: 14 })
       .borderRadius(14)
       .backgroundColor($r('app.color.surface_muted'))
+      .attributeModifier(Api26Material.subtle())
       this.HistoryItem($r('sys.symbol.doc_text'), $r('app.string.onboarding_history_text'),
         $r('app.string.onboarding_history_text_note'))
       this.HistoryItem($r('sys.symbol.ohos_photo'), $r('app.string.onboarding_history_image'),
@@ -182,6 +190,7 @@ export struct OnboardingGuide {
     .padding(16)
     .borderRadius(24)
     .backgroundColor($r('app.color.surface'))
+    .attributeModifier(Api26Material.panel())
     .border({ width: 1, color: $r('app.color.divider') })
     .shadow({ radius: 20, color: '#14000000', offsetY: 8 })
   }
@@ -205,6 +214,7 @@ export struct OnboardingGuide {
     .justifyContent(FlexAlign.Center)
     .borderRadius(20)
     .backgroundColor($r('app.color.surface'))
+    .attributeModifier(Api26Material.panel())
     .border({ width: 1, color: $r('app.color.divider') })
   }
 
@@ -217,6 +227,7 @@ export struct OnboardingGuide {
           .height(132)
           .borderRadius(42)
           .backgroundColor($r('app.color.accent_soft'))
+          .attributeModifier(Api26Material.accentSurface())
         SymbolGlyph($r('sys.symbol.lock_shield_fill'))
           .fontSize(62)
           .fontColor([$r('app.color.accent')])
@@ -300,6 +311,7 @@ export struct OnboardingGuide {
       .height(8)
       .borderRadius(4)
       .backgroundColor(this.currentIndex === index ? $r('app.color.accent') : $r('app.color.divider'))
+      .attributeModifier(Api26Material.accentSurface())
       .animation({ duration: 220, curve: Curve.EaseOut })
   }
 
@@ -313,6 +325,7 @@ export struct OnboardingGuide {
             .fontSize(14)
             .fontColor($r('app.color.text_secondary'))
             .backgroundColor(Color.Transparent)
+            .attributeModifier(Api26Material.accent())
             .onClick((): void => {
               this.finishGuide();
             })
@@ -356,10 +369,11 @@ export struct OnboardingGuide {
         .height(50)
         .fontSize(16)
         .fontWeight(FontWeight.Medium)
-        .fontColor($r('app.color.on_accent'))
+        .fontColor(Api26Material.accentTextColor())
         .backgroundColor($r('app.color.accent'))
         .borderRadius(16)
         .margin({ top: 10, bottom: 18 })
+        .attributeModifier(Api26Material.accent())
         .onClick((): void => {
           this.nextPage();
         })

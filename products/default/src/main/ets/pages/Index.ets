@@ -2,9 +2,12 @@ import { common } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
 import { mediaquery } from '@kit.ArkUI';
 import { ClipboardFeatureController } from 'clipboard_feature';
+import { Logger } from 'common';
 import { OnboardingGuide } from '../components/OnboardingGuide';
 import { CompactClipboardView } from '../view/compact/CompactClipboardView';
 import { ExpandedClipboardView } from '../view/expanded/ExpandedClipboardView';
+
+const logger: Logger = new Logger('IndexPage');
 
 const ONBOARDING_STORE_NAME: string = 'onboarding_preferences';
 const ONBOARDING_COMPLETED_KEY: string = 'onboarding_completed';
@@ -14,6 +17,9 @@ const ONBOARDING_COMPLETED_KEY: string = 'onboarding_completed';
 struct Index {
   @StorageProp('avoidAreaRectHeight') avoidAreaRectHeight: number = 0;
   @StorageProp('navigationRectHeight') navigationRectHeight: number = 0;
+  @StorageLink('appearanceBackgroundImage') appearanceBackgroundImage: string = '';
+  @StorageLink('appearanceBackgroundOpacity') appearanceBackgroundOpacity: number = 0.4;
+  @StorageLink('appearanceBackgroundBlur') appearanceBackgroundBlur: number = 8;
   @State controller: ClipboardFeatureController = ClipboardFeatureController.getInstance();
   @State showOnboardingGuide: boolean = false;
   private wideScreenListener: mediaquery.MediaQueryListener | null = null;
@@ -39,26 +45,33 @@ struct Index {
 
   private loadOnboardingState(): void {
     try {
-      let context: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
+      let context: common.Context | undefined = this.getUIContext().getHostContext();
+      if (context === undefined) {
+        this.showOnboardingGuide = true;
+        return;
+      }
       let options: preferences.Options = { name: ONBOARDING_STORE_NAME };
       let store: preferences.Preferences = preferences.getPreferencesSync(context, options);
       let completed: boolean = store.getSync(ONBOARDING_COMPLETED_KEY, false) as boolean;
       this.showOnboardingGuide = !completed;
     } catch (error) {
       this.showOnboardingGuide = true;
-      console.error('Index: failed to load onboarding state: ' + JSON.stringify(error));
+      logger.error('Index: failed to load onboarding state: ' + JSON.stringify(error));
     }
   }
 
   private completeOnboarding(): void {
     try {
-      let context: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
+      let context: common.Context | undefined = this.getUIContext().getHostContext();
+      if (context === undefined) {
+        return;
+      }
       let options: preferences.Options = { name: ONBOARDING_STORE_NAME };
       let store: preferences.Preferences = preferences.getPreferencesSync(context, options);
       store.putSync(ONBOARDING_COMPLETED_KEY, true);
       store.flushSync();
     } catch (error) {
-      console.error('Index: failed to save onboarding state: ' + JSON.stringify(error));
+      logger.error('Index: failed to save onboarding state: ' + JSON.stringify(error));
     }
   }
 
@@ -93,9 +106,23 @@ struct Index {
   }
 
   build() {
-    Stack() {
+    Stack({ alignContent: Alignment.Center }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor($r('app.color.page_background'))
+      if (this.appearanceBackgroundImage.length > 0) {
+        Image(this.appearanceBackgroundImage)
+          .width('100%')
+          .height('100%')
+          .objectFit(ImageFit.Cover)
+          .opacity(this.appearanceBackgroundOpacity)
+          .blur(this.appearanceBackgroundBlur)
+      }
       if (this.controller.isWideScreen) {
-        ExpandedClipboardView()
+        ExpandedClipboardView({
+          avoidAreaRectHeight: this.avoidAreaRectHeight
+        })
       } else {
         CompactClipboardView({
           avoidAreaRectHeight: this.avoidAreaRectHeight,

@@ -137,6 +137,11 @@ export interface NativeSpaceMemberSyncPreferences {
   richText: boolean
 }
 
+export interface NativeSpaceNetworkSettings {
+  allowRelayFallback: boolean
+  customRelayUrls: Array<string>
+}
+
 export interface NativeSpaceStatus {
   running: boolean
   joined: boolean
@@ -209,6 +214,9 @@ export declare function getSpaceDevices(): Promise<Array<NativeSpaceDevice>>
 /** Return the local device's outbound sync preferences for one paired member. */
 export declare function getSpaceMemberSyncPreferences(deviceId: string): Promise<NativeSpaceMemberSyncPreferences>
 
+/** Return the persisted relay policy used by the embedded P2P node. */
+export declare function getSpaceNetworkSettings(): Promise<NativeSpaceNetworkSettings>
+
 export declare function getSpaceStatus(): Promise<NativeSpaceStatus>
 
 /** Issue a fresh, short-lived invitation for the space owned by this device. */
@@ -221,6 +229,12 @@ export declare function listMobileSyncDevices(): Promise<Array<NativeMobileSyncD
 export declare function parseConnectUri(uri: string): ConnectPayload
 
 export declare function probeServer(config: NativeServerConfig): Promise<void>
+
+/**
+  * Probe a candidate relay before it is persisted. A failed probe is safe to
+  * retry because it does not mutate the active network settings.
+  */
+export declare function probeSpaceRelayUrl(url: string): Promise<number>
 
 export declare function publishMobileSyncFileFromFd(fd: number, fileSize: number, fileName: string, mimeType: string): string
 
@@ -326,6 +340,12 @@ export declare function switchSpace(invitationCode: string, newPassphrase: strin
   * The unexposed code-snippet and all receive-side preferences are preserved.
   */
 export declare function updateSpaceMemberSendPreferences(deviceId: string, sendEnabled: boolean, text: boolean, image: boolean, file: boolean, link: boolean, richText: boolean): Promise<NativeSpaceMemberSyncPreferences>
+
+/**
+  * Persist the relay policy. It takes effect the next time the embedded P2P
+  * node starts because iroh freezes its relay mode when the endpoint binds.
+  */
+export declare function updateSpaceNetworkSettings(allowRelayFallback: boolean, customRelayUrls: Array<string>): Promise<NativeSpaceNetworkSettings>
 
 /**
   * Wake the native peer scheduler and force-revalidate cached connections.

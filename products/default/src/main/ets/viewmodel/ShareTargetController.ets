@@ -8,12 +8,15 @@ import { uniformTypeDescriptor } from '@kit.ArkData';
 import {
   ClipboardFileSelection,
   ClipboardService,
+  Logger,
   NativeSpaceDevice,
   NativeSpaceFileSendResult,
   NativeSpaceStatus,
   SpaceNodeService
 } from 'common';
 import { ClipboardFeatureController } from 'clipboard_feature';
+
+const logger: Logger = new Logger('ShareTarget');
 
 export const SHARE_KIND_TEXT: number = 1;
 export const SHARE_KIND_IMAGE: number = 2;
@@ -85,7 +88,7 @@ export class ShareTargetController {
       }
       this.record = record;
       this.initializationStage = 'space node startup';
-      console.info('UniClipboard share target is starting the space node.');
+      logger.info('UniClipboard share target is starting the space node.');
       let status: NativeSpaceStatus = await this.startSpaceNode(
         context.filesDir, context.cacheDir, deviceInfo.deviceType);
       if (!this.isInitializationActive(initializationId)) {
@@ -96,7 +99,7 @@ export class ShareTargetController {
         return;
       }
       this.initializationStage = 'device list';
-      console.info('UniClipboard share target is reading the device list.');
+      logger.info('UniClipboard share target is reading the device list.');
       let allDevices: NativeSpaceDevice[] = await this.loadDevices();
       if (!this.isInitializationActive(initializationId)) {
         return;
@@ -112,7 +115,7 @@ export class ShareTargetController {
       this.state = SHARE_STATE_READY;
     } catch (error) {
       if (this.isInitializationActive(initializationId)) {
-        console.error('UniClipboard share target initialization failed at ' + this.initializationStage + '.');
+        logger.error('UniClipboard share target initialization failed at ' + this.initializationStage + '.');
         this.state = SHARE_STATE_LOAD_FAILED;
       }
     } finally {
@@ -163,7 +166,7 @@ export class ShareTargetController {
         try {
           fileIo.unlinkSync(previousPath);
         } catch (removeError) {
-          console.error('UniClipboard failed to remove the previous device header image.');
+          logger.error('UniClipboard failed to remove the previous device header image.');
         }
       }
       return true;
@@ -171,9 +174,9 @@ export class ShareTargetController {
       try {
         fileIo.unlinkSync(targetPath);
       } catch (removeError) {
-        console.error('UniClipboard failed to remove an incomplete device header image.');
+        logger.error('UniClipboard failed to remove an incomplete device header image.');
       }
-      console.error('UniClipboard failed to save the device header image.');
+      logger.error('UniClipboard failed to save the device header image.');
       return false;
     } finally {
       if (source !== null) {
@@ -211,7 +214,7 @@ export class ShareTargetController {
       store.putSync(DEVICE_HEADER_KEY, JSON.stringify(records));
       store.flushSync();
     } catch (error) {
-      console.error('UniClipboard failed to persist device header images.');
+      logger.error('UniClipboard failed to persist device header images.');
     }
   }
 
@@ -229,7 +232,7 @@ export class ShareTargetController {
       if (!this.isInitializationActive(initializationId)) {
         return;
       }
-      console.error('UniClipboard share target initialization timed out at ' + this.initializationStage + '.');
+      logger.error('UniClipboard share target initialization timed out at ' + this.initializationStage + '.');
       this.state = SHARE_STATE_LOAD_FAILED;
       this.initializationTimerId = -1;
     }, SHARE_INITIALIZATION_TIMEOUT_MS);

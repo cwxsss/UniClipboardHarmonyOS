@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>UniClipboard 光学发送</title>
+    <link rel="stylesheet" href="../shared/style.css" />
+  </head>
+  <body>
+    <h1>UNICLIPBOARD <small>— 光学发送到 HarmonyOS</small></h1>
+    <div class="source-panel">
+      <label class="source-field">
+        <span>选择文件</span>
+        <input id="source-file" type="file" />
+      </label>
+      <div class="source-or">或</div>
+      <label class="source-field">
+        <span>发送文本</span>
+        <textarea id="source-text" rows="3" placeholder="输入要传到手机的文字"></textarea>
+      </label>
+      <button id="start-stream">开始光学发送</button>
+    </div>
+    <div class="hint" id="specs">请选择文件或输入文本</div>
+    <details class="settings">
+      <summary>Settings</summary>
+      <div class="row">
+        <label>
+          tx fps
+          <select id="cfg-fps">
+            <option>6</option>
+            <option selected>8</option>
+            <option>10</option>
+            <option>12</option>
+          </select>
+        </label>
+        <label>
+          error correction
+          <select id="cfg-ecc">
+            <option selected>L</option>
+            <option>M</option>
+            <option>Q</option>
+            <option>H</option>
+          </select>
+        </label>
+        <label>
+          display size
+          <input id="cfg-size" type="range" min="300" max="1200" step="50" value="900" />
+        </label>
+      </div>
+      <div class="hint" style="text-align: left; padding-top: 8px">
+        Changes restart the stream — the receiver resets automatically (new
+        session id in the frame headers; that's the fountain protocol's gift).
+      </div>
+    </details>
+    <div class="stage"><canvas id="qr" width="16" height="16"></canvas></div>
+    <div class="hint">
+      手机打开 UniClipboard → 光学传输 → 接收。二维码会持续变化，手机显示接收完成后即可停止。
+    </div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
+

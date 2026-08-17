@@ -5,8 +5,9 @@ import {
   IconStyleMode,
   ScrollEffectType
 } from '@kit.UIDesignKit';
-import { ClipboardFeatureController } from 'clipboard_feature';
+import { AppErrorRecord, ClipboardFeatureController } from 'clipboard_feature';
 
+import { Api26Material } from './Api26Material';
 @Component
 export struct ConnectionDiagnosticsSheet {
   @Link visible: boolean;
@@ -40,39 +41,6 @@ export struct ConnectionDiagnosticsSheet {
       Text($r('app.string.connection_diagnostics_transport_offline'))
         .fontSize(14)
         .fontWeight(FontWeight.Medium)
-        .fontColor($r('app.color.danger'))
-    }
-  }
-
-  @Builder
-  private networkValue() {
-    if (this.controller.connectionDiagnosticNetworkType === 'wifi') {
-      Text($r('app.string.connection_diagnostics_network_wifi'))
-        .fontSize(14)
-        .fontColor($r('app.color.text_primary'))
-    } else if (this.controller.connectionDiagnosticNetworkType === 'cellular') {
-      Text($r('app.string.connection_diagnostics_network_cellular'))
-        .fontSize(14)
-        .fontColor($r('app.color.text_primary'))
-    } else if (this.controller.connectionDiagnosticNetworkType === 'ethernet') {
-      Text($r('app.string.connection_diagnostics_network_ethernet'))
-        .fontSize(14)
-        .fontColor($r('app.color.text_primary'))
-    } else if (this.controller.connectionDiagnosticNetworkType === 'vpn') {
-      Text($r('app.string.connection_diagnostics_network_vpn'))
-        .fontSize(14)
-        .fontColor($r('app.color.text_primary'))
-    } else if (this.controller.connectionDiagnosticNetworkType === 'bluetooth') {
-      Text($r('app.string.connection_diagnostics_network_bluetooth'))
-        .fontSize(14)
-        .fontColor($r('app.color.text_primary'))
-    } else if (this.controller.connectionDiagnosticNetworkType === 'other') {
-      Text($r('app.string.connection_diagnostics_network_other'))
-        .fontSize(14)
-        .fontColor($r('app.color.text_primary'))
-    } else {
-      Text($r('app.string.connection_diagnostics_network_unavailable'))
-        .fontSize(14)
         .fontColor($r('app.color.danger'))
     }
   }
@@ -177,6 +145,7 @@ export struct ConnectionDiagnosticsSheet {
             .justifyContent(FlexAlign.Center)
             .borderRadius(15)
             .backgroundColor(this.controller.accentSoftColor())
+            .attributeModifier(Api26Material.accentSurface())
             Column({ space: 4 }) {
               Text($r('app.string.connection_diagnostics_title'))
                 .fontSize(22)
@@ -234,21 +203,12 @@ export struct ConnectionDiagnosticsSheet {
           .width('100%')
           .height(44)
           .border({ width: { top: 1 }, color: $r('app.color.divider') })
-          Row() {
-            Text($r('app.string.connection_diagnostics_network_label'))
-              .fontSize(14)
-              .fontColor($r('app.color.text_secondary'))
-              .layoutWeight(1)
-            this.networkValue()
-          }
-          .width('100%')
-          .height(44)
-          .border({ width: { top: 1 }, color: $r('app.color.divider') })
         }
         .width('100%')
         .padding({ left: 16, right: 16, top: 4, bottom: 4 })
         .borderRadius($r('app.float.corner_radius_level10'))
         .backgroundColor($r('app.color.surface_muted'))
+        .attributeModifier(Api26Material.subtle())
 
         Row() {
           this.pathCount(this.controller.connectionDiagnosticDirectCount,
@@ -279,6 +239,49 @@ export struct ConnectionDiagnosticsSheet {
         .border({ width: 1, color: $r('app.color.divider') })
 
         Column({ space: 0 }) {
+          Text($r('app.string.connection_diagnostics_recent_errors_title'))
+            .fontSize(12)
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('app.color.text_secondary'))
+            .width('100%')
+          if (this.controller.recentErrors.length === 0) {
+            Text($r('app.string.connection_diagnostics_recent_errors_empty'))
+              .fontSize(14)
+              .fontColor($r('app.color.success'))
+              .width('100%')
+              .margin({ top: 8 })
+          } else {
+            ForEach(this.controller.recentErrors, (record: AppErrorRecord) => {
+              Column({ space: 2 }) {
+                Row({ space: 8 }) {
+                  Text(record.timeLabel)
+                    .fontSize(12)
+                    .fontColor($r('app.color.text_secondary'))
+                  Text(record.source)
+                    .fontSize(12)
+                    .fontWeight(FontWeight.Medium)
+                    .fontColor($r('app.color.danger'))
+                }
+                .width('100%')
+                Text(record.message)
+                  .fontSize(12)
+                  .lineHeight(17)
+                  .fontColor($r('app.color.text_primary'))
+                  .maxLines(3)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  .width('100%')
+              }
+              .width('100%')
+              .margin({ top: 10 })
+            }, (record: AppErrorRecord, index: number) => index.toString() + record.timeLabel + record.message)
+          }
+        }
+        .width('100%')
+        .padding(16)
+        .borderRadius($r('app.float.corner_radius_level10'))
+        .border({ width: 1, color: $r('app.color.divider') })
+
+        Column({ space: 0 }) {
           Text($r('app.string.connection_diagnostics_permissions_title'))
             .fontSize(15)
             .fontWeight(FontWeight.Medium)
@@ -294,6 +297,7 @@ export struct ConnectionDiagnosticsSheet {
         .padding({ left: 16, right: 16, top: 14, bottom: 8 })
         .borderRadius($r('app.float.corner_radius_level10'))
         .backgroundColor($r('app.color.surface_muted'))
+        .attributeModifier(Api26Material.subtle())
 
         Text($r('app.string.connection_diagnostics_redaction_note'))
           .fontSize(11)
@@ -310,6 +314,7 @@ export struct ConnectionDiagnosticsSheet {
             .backgroundColor($r('app.color.surface_muted'))
             .borderRadius($r('app.float.corner_radius_level10'))
             .enabled(!this.controller.connectionDiagnosticBusy)
+            .attributeModifier(Api26Material.interactive())
             .onClick((): void => {
               this.controller.refreshConnectionDiagnostics();
             })
@@ -319,10 +324,11 @@ export struct ConnectionDiagnosticsSheet {
             .layoutWeight(1)
             .height(46)
             .fontSize(14)
-            .fontColor($r('app.color.on_accent'))
+            .fontColor(Api26Material.accentTextColor())
             .backgroundColor(this.controller.accentColor())
             .borderRadius($r('app.float.corner_radius_level10'))
             .enabled(this.controller.connectionDiagnosticExportState !== 1)
+            .attributeModifier(Api26Material.accent())
             .onClick((): void => {
               this.controller.exportRedactedConnectionDiagnostics();
             })
@@ -372,7 +378,7 @@ export struct ConnectionDiagnosticsSheet {
         },
         systemMaterialEffect: {
           materialType: hdsMaterial.MaterialType.IMMERSIVE,
-          materialLevel: this.controller.aboutMaterialLevel
+          materialLevel: this.controller.appearanceMaterialLevel
         }
       }
     })

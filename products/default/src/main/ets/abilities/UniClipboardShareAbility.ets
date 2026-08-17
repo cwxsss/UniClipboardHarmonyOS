@@ -1,5 +1,8 @@
 import { ShareExtensionAbility, UIExtensionContentSession, Want } from '@kit.AbilityKit';
 import { systemShare } from '@kit.ShareKit';
+import { Logger } from 'common';
+
+const logger: Logger = new Logger('ShareAbility');
 
 export default class UniClipboardShareAbility extends ShareExtensionAbility {
   onSessionCreate(want: Want, session: UIExtensionContentSession): void {
@@ -16,7 +19,7 @@ export default class UniClipboardShareAbility extends ShareExtensionAbility {
         resultCode: systemShare.ShareAbilityResultCode.CLOSE
       });
     } catch (error) {
-      console.error('UniClipboard failed to forward shared data to the main ability.');
+      logger.error('UniClipboard failed to forward shared data to the main ability.');
       await session.terminateSelfWithResult({
         resultCode: systemShare.ShareAbilityResultCode.ERROR
       });

@@ -19,6 +19,7 @@ export {
   APPEARANCE_MODE_LIGHT,
   APPEARANCE_MODE_SYSTEM,
   APPEARANCE_THEME_DEFAULT,
+  AppearanceVisualSettings,
   AppearanceStorageService
 } from './src/main/ets/service/AppearanceStorageService';
 
@@ -28,8 +29,21 @@ export {
 } from './src/main/ets/service/BackgroundSyncService';
 
 export { ConfigStorageService } from './src/main/ets/service/ConfigStorageService';
+export { Logger } from './src/main/ets/util/Logger';
 export { HistoryLibrarySettings, HistoryStorageService } from './src/main/ets/service/HistoryStorageService';
 export { LinkPreviewService } from './src/main/ets/service/LinkPreviewService';
+export {
+  OPTICAL_FRAME_BYTES,
+  OPTICAL_MAX_PAYLOAD_BYTES,
+  OpticalFountainDecoder,
+  OpticalFountainEncoder,
+  OpticalFrame,
+  OpticalTransferEnvelope,
+  opticalFnv1a,
+  packOpticalEnvelope,
+  parseOpticalFrame,
+  unpackOpticalEnvelope
+} from './src/main/ets/service/OpticalTransferService';
 export { MobileSyncClient } from './src/main/ets/service/MobileSyncClient';
 export { MobileSyncServerService } from './src/main/ets/service/MobileSyncServerService';
 export { NativeProtocolService } from './src/main/ets/service/NativeProtocolService';
@@ -50,6 +64,7 @@ export {
   NativeSpaceImageEvent,
   NativeSpaceInvitation,
   NativeSpaceMemberSyncPreferences,
+  NativeSpaceNetworkSettings,
   NativeSpaceStatus,
   NativeSpaceTextEvent,
   setSpaceBackgroundMode,

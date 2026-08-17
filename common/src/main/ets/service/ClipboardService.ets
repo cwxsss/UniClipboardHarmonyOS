@@ -1,6 +1,9 @@
 import { pasteboard } from '@kit.BasicServicesKit';
 import { fileIo } from '@kit.CoreFileKit';
 import { image } from '@kit.ImageKit';
+import { Logger } from '../util/Logger';
+
+const logger: Logger = new Logger('ClipboardService');
 
 export class ClipboardFilePayload {
   fileName: string = '';
@@ -69,7 +72,7 @@ export class ClipboardService {
         try {
           return await this.decodeImageUri(uri);
         } catch (error) {
-          console.error('UniClipboard failed to decode clipboard image URI: ' + uri);
+          logger.error('UniClipboard failed to decode clipboard image URI: ' + uri);
         }
       }
     }
@@ -81,7 +84,10 @@ export class ClipboardService {
     try {
       let source: image.ImageSource = image.createImageSource(file.fd);
       try {
-        return await source.createPixelMap();
+        let options: image.DecodingOptions = {
+          desiredDynamicRange: image.DecodingDynamicRange.AUTO
+        };
+        return await source.createPixelMap(options);
       } finally {
         await source.release();
       }
@@ -107,12 +113,12 @@ export class ClipboardService {
       let scaleRatio: number = maximumSide / longestSide;
       await pixelMap.scale(scaleRatio, scaleRatio);
     }
-    let data: Uint8Array = await this.encodeImage(pixelMap, 'image/jpeg', 78);
+    let data: Uint8Array = await this.encodeImage(pixelMap, 'image/jpeg', 78, true);
     let maximumBytes: number = 1536 * 1024;
     let attempts: number = 0;
     while (data.length > maximumBytes && attempts < 2) {
       await pixelMap.scale(0.75, 0.75);
-      data = await this.encodeImage(pixelMap, 'image/jpeg', 72);
+      data = await this.encodeImage(pixelMap, 'image/jpeg', 72, true);
       attempts += 1;
     }
     if (data.length > maximumBytes) {
@@ -121,12 +127,16 @@ export class ClipboardService {
     return data;
   }
 
-  private async encodeImage(pixelMap: image.PixelMap, format: string, quality: number): Promise<Uint8Array> {
+  private async encodeImage(pixelMap: image.PixelMap, format: string, quality: number,
+    preserveDynamicRange: boolean = false): Promise<Uint8Array> {
     let packer: image.ImagePacker = image.createImagePacker();
     let options: image.PackingOption = {
       format: format,
       quality: quality
     };
+    if (preserveDynamicRange) {
+      options.desiredDynamicRange = image.PackingDynamicRange.AUTO;
+    }
     try {
       let packed: ArrayBuffer = await packer.packToData(pixelMap, options);
       return new Uint8Array(packed);
@@ -138,7 +148,10 @@ export class ClipboardService {
   async decodeImage(data: Uint8Array): Promise<image.PixelMap> {
     let source: image.ImageSource = image.createImageSource(data.buffer);
     try {
-      return await source.createPixelMap();
+      let options: image.DecodingOptions = {
+        desiredDynamicRange: image.DecodingDynamicRange.AUTO
+      };
+      return await source.createPixelMap(options);
     } finally {
       await source.release();
     }

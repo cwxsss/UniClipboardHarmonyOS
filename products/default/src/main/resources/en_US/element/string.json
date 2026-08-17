@@ -191,6 +191,98 @@
     {
       "name": "share_target_back",
       "value": "Back to share panel"
+    },
+    {
+      "name": "entry_pasteboard_permission_reason",
+      "value": "Used only when you choose to read clipboard text or images for sending"
+    },
+    {
+      "name": "camera_permission_reason",
+      "value": "Used to scan optical transfer codes shown on another device"
+    },
+    {
+      "name": "optical_transfer_action",
+      "value": "Optical transfer"
+    },
+    {
+      "name": "optical_transfer_title",
+      "value": "Optical transfer"
+    },
+    {
+      "name": "optical_transfer_subtitle",
+      "value": "Transfer through a screen and camera, with no network"
+    },
+    {
+      "name": "optical_send_tab",
+      "value": "Send"
+    },
+    {
+      "name": "optical_receive_tab",
+      "value": "Receive"
+    },
+    {
+      "name": "optical_send_note",
+      "value": "Sends the selected file, image, or composer text first, then falls back to the latest item. Keep the screen on and aim the receiving device at the code."
+    },
+    {
+      "name": "optical_receive_note",
+      "value": "Aim the viewfinder at the animated code on the other device. Missed frames need no retransmission; content is restored and verified automatically."
+    },
+    {
+      "name": "optical_start_send",
+      "value": "Start optical send"
+    },
+    {
+      "name": "optical_restart_send",
+      "value": "Restart"
+    },
+    {
+      "name": "optical_start_receive",
+      "value": "Open camera to receive"
+    },
+    {
+      "name": "optical_preparing",
+      "value": "Preparing content…"
+    },
+    {
+      "name": "optical_send_ready",
+      "value": "An animated QR stream will appear when ready"
+    },
+    {
+      "name": "optical_no_content",
+      "value": "There is no content to send, or QR generation failed"
+    },
+    {
+      "name": "optical_too_large",
+      "value": "This version supports up to 4 MB. Choose a smaller item."
+    },
+    {
+      "name": "optical_frames_sent",
+      "value": "Frames shown"
+    },
+    {
+      "name": "optical_frames_received",
+      "value": "Frames received"
+    },
+    {
+      "name": "optical_requesting_camera",
+      "value": "Requesting camera access…"
+    },
+    {
+      "name": "optical_receive_ready",
+      "value": "Open the camera to search for an optical stream"
+    },
+    {
+      "name": "optical_receive_complete",
+      "value": "Transfer complete"
+    },
+    {
+      "name": "optical_camera_denied",
+      "value": "Camera access is required. Grant permission and try again."
+    },
+    {
+      "name": "optical_receive_failed",
+      "value": "Receiving or integrity verification failed. Scan again."
     }
   ]
 }

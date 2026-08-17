@@ -429,6 +429,30 @@
       "value": "加密同步空间"
     },
     {
+      "name": "device_space_connection_eyebrow",
+      "value": "安全同步"
+    },
+    {
+      "name": "device_space_connection_title",
+      "value": "空间连接"
+    },
+    {
+      "name": "device_space_connection_not_joined",
+      "value": "创建或加入同步空间"
+    },
+    {
+      "name": "device_more_connections_eyebrow",
+      "value": "兼容与网络"
+    },
+    {
+      "name": "device_more_connections_title",
+      "value": "更多连接方式"
+    },
+    {
+      "name": "device_more_connections_note",
+      "value": "中继、移动设备同步与旧版桌面服务"
+    },
+    {
       "name": "mobile_space_connection_recommended",
       "value": "推荐"
     },
@@ -439,6 +463,46 @@
     {
       "name": "mobile_connection_difference_note",
       "value": "空间邀请用于加入空间；服务地址仅用于旧版桌面服务，两者不能互换。"
+    },
+    {
+      "name": "space_relay_settings_title",
+      "value": "同步空间中继"
+    },
+    {
+      "name": "space_relay_allow_note",
+      "value": "直连不可用时允许通过中继继续同步"
+    },
+    {
+      "name": "space_relay_settings_note",
+      "value": "每行填写一个 HTTP(S) 中继地址；留空使用默认中继。关闭开关时仅允许直连。修改后需完全退出并重新打开应用。"
+    },
+    {
+      "name": "space_relay_urls_label",
+      "value": "自定义中继地址"
+    },
+    {
+      "name": "space_relay_urls_placeholder",
+      "value": "https://relay.example.com."
+    },
+    {
+      "name": "space_relay_save_action",
+      "value": "保存中继设置"
+    },
+    {
+      "name": "space_relay_retry_action",
+      "value": "重试保存"
+    },
+    {
+      "name": "space_relay_saving_action",
+      "value": "正在保存…"
+    },
+    {
+      "name": "space_relay_saved",
+      "value": "中继设置已保存，完全退出并重新打开应用后生效"
+    },
+    {
+      "name": "space_relay_save_failed",
+      "value": "保存失败，中继不可达或地址格式有误，请修改后重试"
     },
     {
       "name": "legacy_connection_title",
@@ -1674,6 +1738,36 @@
     { "name": "connection_diagnostics_exporting", "value": "正在导出…" },
     { "name": "connection_diagnostics_export_ready", "value": "脱敏诊断日志已交给系统分享面板" },
     { "name": "connection_diagnostics_export_failed", "value": "日志导出失败，请稍后重试" },
-    { "name": "connection_diagnostics_log_title", "value": "UniClipboard 脱敏连接诊断日志" }
+    { "name": "connection_diagnostics_log_title", "value": "UniClipboard 脱敏连接诊断日志" },
+    { "name": "connection_diagnostics_recent_errors_title", "value": "最近错误" },
+    { "name": "connection_diagnostics_recent_errors_empty", "value": "暂无错误记录" },
+    { "name": "error_toast_history_restore", "value": "剪贴板历史读取失败" },
+    { "name": "error_toast_history_persist", "value": "剪贴板历史保存失败" },
+    { "name": "error_toast_sync", "value": "同步连接出现问题" },
+    { "name": "appearance_background_title", "value": "专属背景" },
+    { "name": "appearance_background_note", "value": "选择一张图片作为应用背景，材质会实时透出图片色彩。" },
+    { "name": "appearance_background_preview_applied", "value": "背景与材质预览" },
+    { "name": "appearance_background_preview_empty", "value": "尚未选择背景图片" },
+    { "name": "appearance_background_select", "value": "选择背景图片" },
+    { "name": "appearance_background_clear", "value": "恢复默认背景" },
+    { "name": "appearance_background_opacity", "value": "背景透明度" },
+    { "name": "appearance_background_blur", "value": "背景高斯模糊" },
+    { "name": "appearance_background_applied", "value": "专属背景已应用" },
+    { "name": "appearance_background_failed", "value": "选择背景图片失败" },
+    { "name": "appearance_background_cleared", "value": "已恢复默认背景" },
+    { "name": "appearance_material_level_title", "value": "沉浸光感材质" },
+    { "name": "appearance_material_level_note", "value": "选择标题栏、浮动栏和弹窗使用的材质质量。" },
+    { "name": "appearance_material_exquisite", "value": "精美" },
+    { "name": "appearance_material_gentle", "value": "轻柔" },
+    { "name": "appearance_material_smooth", "value": "流畅" },
+    { "name": "appearance_material_adaptive", "value": "自适应" },
+    { "name": "appearance_component_material_title", "value": "沉浸组件材质" },
+    { "name": "appearance_component_material_note", "value": "调节卡片、按钮和输入框使用的 API 26 系统材质厚度。" },
+    { "name": "appearance_component_material_off", "value": "关闭" },
+    { "name": "appearance_component_material_ultra_thin", "value": "超薄" },
+    { "name": "appearance_component_material_thin", "value": "薄" },
+    { "name": "appearance_component_material_regular", "value": "常规" },
+    { "name": "appearance_component_material_thick", "value": "厚" },
+    { "name": "appearance_component_material_ultra_thick", "value": "超厚" }
   ]
 }

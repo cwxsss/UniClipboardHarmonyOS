@@ -24,8 +24,8 @@ local.properties
 
 # Local test captures and runtime data
 /artifacts/
-/uniclipboard_devices.jpeg
-/tablet-file-result.jpeg
+/*.jpeg
+/*.png
 *.db
 *.db-shm
 *.db-wal
@@ -52,3 +52,8 @@ Thumbs.db
 *.app
 *.hap
 *.har
+
+# UniClipboard optical-transfer web companion
+/tools/optical-transfer-web/node_modules/
+/tools/optical-transfer-web/dist/
+/tools/optical-transfer-web/.playwright-cli/

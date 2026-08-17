@@ -45,6 +45,10 @@
       "value": "#99000000"
     },
     {
+      "name": "link_preview_keyword_background",
+      "value": "#33FFFFFF"
+    },
+    {
       "name": "on_accent",
       "value": "#FFFFFFFF"
     },

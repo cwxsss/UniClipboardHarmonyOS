@@ -4,6 +4,7 @@ import {
   bundleManager,
   common,
   ConfigurationConstant,
+  PermissionRequestResult,
   Permissions
 } from '@kit.AbilityKit';
 import { BusinessError, deviceInfo } from '@kit.BasicServicesKit';
@@ -13,6 +14,7 @@ import { textRecognition } from '@kit.CoreVisionKit';
 import { image } from '@kit.ImageKit';
 import { fileIo, fileUri, picker } from '@kit.CoreFileKit';
 import { media } from '@kit.MediaKit';
+import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { call } from '@kit.TelephonyKit';
 import { filePreview } from '@kit.PreviewKit';
 import { harmonyShare, systemShare } from '@kit.ShareKit';
@@ -30,6 +32,7 @@ import {
 } from '@kit.UIDesignKit';
 import {
   ClipboardHistoryItem,
+  LinkPreview,
   ServerConfig,
   ServerHistoryItem,
   SyncContent,
@@ -40,11 +43,14 @@ import {
   APPEARANCE_MODE_LIGHT,
   APPEARANCE_MODE_SYSTEM,
   APPEARANCE_THEME_DEFAULT,
+  AppearanceVisualSettings,
   AppearanceStorageService,
   ConfigStorageService,
   BackgroundSyncPreferenceService,
   HistoryStorageService,
   HistoryLibrarySettings,
+  LinkPreviewService,
+  Logger,
   MobileSyncClient,
   MobileSyncServerService,
   NativeProtocolService,
@@ -59,6 +65,7 @@ import {
   NativeSpaceImageEvent,
   NativeSpaceInvitation,
   NativeSpaceMemberSyncPreferences,
+  NativeSpaceNetworkSettings,
   NativeSpaceStatus,
   NativeSpaceTextEvent,
   NativeMobileSyncCredential,
@@ -66,6 +73,20 @@ import {
   NativeMobileSyncInboundEvent,
   NativeMobileSyncStatus
 } from 'common';
+
+import { HistoryDataSource } from './HistoryDataSource';
+
+const logger: Logger = new Logger('ClipboardFeature');
+
+const POLL_INTERVAL_BASE_MS: number = 1000;
+const POLL_INTERVAL_RELAXED_MS: number = 2000;
+const POLL_INTERVAL_SLOW_MS: number = 5000;
+const POLL_IDLE_RELAXED_ROUNDS: number = 30;
+const POLL_IDLE_SLOW_ROUNDS: number = 120;
+const APPEARANCE_BACKGROUND_IMAGE_STORAGE_KEY: string = 'appearanceBackgroundImage';
+const APPEARANCE_BACKGROUND_OPACITY_STORAGE_KEY: string = 'appearanceBackgroundOpacity';
+const APPEARANCE_BACKGROUND_BLUR_STORAGE_KEY: string = 'appearanceBackgroundBlur';
+const APPEARANCE_COMPONENT_MATERIAL_STYLE_STORAGE_KEY: string = 'appearanceComponentMaterialStyle';
 
 export class AudioLyricLine {
   timeMs: number = 0;
@@ -110,6 +131,34 @@ export const APPEARANCE_THEME_OPTIONS: AppearanceThemeOption[] = [
 
 export const FEEDBACK_EMAIL: string = '3514795319@qq.com';
 
+export class AppErrorRecord {
+  timeLabel: string = '';
+  source: string = '';
+  message: string = '';
+
+  constructor(timeLabel: string, source: string, message: string) {
+    this.timeLabel = timeLabel;
+    this.source = source;
+    this.message = message;
+  }
+}
+
+const MAX_RECENT_ERRORS: number = 20;
+
+class HistoryFilterCache {
+  serverItems: ServerHistoryItem[] = [];
+  serverSource: ServerHistoryItem[] | null = null;
+  serverSignature: string = '';
+  sessionItems: ClipboardHistoryItem[] = [];
+  sessionSource: ClipboardHistoryItem[] | null = null;
+  sessionSignature: string = '';
+  compactItems: ClipboardHistoryItem[] = [];
+  compactSource: ClipboardHistoryItem[] | null = null;
+  compactSignature: string = '';
+}
+
+const historyFilterCache: HistoryFilterCache = new HistoryFilterCache();
+
 
 @Observed
 export class ClipboardFeatureController {
@@ -120,6 +169,11 @@ export class ClipboardFeatureController {
   public isWideScreen: boolean = false;
   public isLargeScreen: boolean = false;
   public statusCode: number = 0;
+  public recentErrors: AppErrorRecord[] = [];
+  private serverHistoryDataSourceInstance: HistoryDataSource<ServerHistoryItem> =
+    new HistoryDataSource<ServerHistoryItem>();
+  private sessionHistoryDataSourceInstance: HistoryDataSource<ClipboardHistoryItem> =
+    new HistoryDataSource<ClipboardHistoryItem>();
   public busy: boolean = false;
   public serverUrl: string = '';
   public username: string = '';
@@ -141,6 +195,8 @@ export class ClipboardFeatureController {
   public latestFileRevision: number = 0;
   public fileTransferState: number = 0;
   public latestContentId: string = '';
+  public linkPreview: LinkPreview | null = null;
+  public linkPreviewState: number = 0;
   public history: ClipboardHistoryItem[] = [];
   public serverHistory: ServerHistoryItem[] = [];
   public historyPage: number = 1;
@@ -186,6 +242,10 @@ export class ClipboardFeatureController {
   public spaceConnectBusy: boolean = false;
   public spaceConnectingDeviceId: string = '';
   public spaceConnectState: number = 0;
+  public spaceRelayFallbackEnabled: boolean = true;
+  public spaceRelayUrlsText: string = '';
+  public spaceRelaySettingsBusy: boolean = false;
+  public spaceRelaySettingsState: number = 0;
   public connectionDiagnosticBusy: boolean = false;
   public connectionDiagnosticExportState: number = 0;
   public connectionDiagnosticDirectCount: number = 0;
@@ -235,6 +295,11 @@ export class ClipboardFeatureController {
   public desktopCustomTagFilter: string = '';
   public appearanceMode: string = APPEARANCE_MODE_SYSTEM;
   public appearanceThemeId: string = APPEARANCE_THEME_DEFAULT;
+  public appearanceBackgroundImage: string = '';
+  public appearanceBackgroundOpacity: number = 0.4;
+  public appearanceBackgroundBlur: number = 8;
+  public appearanceMaterialLevel: hdsMaterial.MaterialLevel = hdsMaterial.MaterialLevel.ADAPTIVE;
+  public appearanceComponentMaterialStyle: number = 2;
   public latestContentPulse: number = 1;
   public historyPulse: number = 1;
   public backgroundSyncEnabled: boolean = false;
@@ -274,6 +339,7 @@ export class ClipboardFeatureController {
   public backgroundSyncPreferenceService: BackgroundSyncPreferenceService =
     new BackgroundSyncPreferenceService();
   public historyStorageService: HistoryStorageService = new HistoryStorageService();
+  public linkPreviewService: LinkPreviewService = new LinkPreviewService();
   public mobileSyncServerService: MobileSyncServerService = new MobileSyncServerService();
   public receivedNotificationService: ReceivedNotificationService =
     ReceivedNotificationService.getInstance();
@@ -281,6 +347,9 @@ export class ClipboardFeatureController {
   public spaceNodeService: SpaceNodeService = new SpaceNodeService();
   public largeNavStack: NavPathStack = new NavPathStack();
   public sseTimerId: number = -1;
+  private pollingActive: boolean = false;
+  private pollIdleRounds: number = 0;
+  private pagePollingVisible: boolean = true;
   public historySearchTimerId: number = -1;
   public sseEventBusy: boolean = false;
   public spaceDeviceRefreshBusy: boolean = false;
@@ -316,6 +385,7 @@ export class ClipboardFeatureController {
   public desktopGestureShareRegistering: boolean = false;
   public desktopGestureSharePageVisible: boolean = false;
   public pendingFileTransferId: string = '';
+  public linkPreviewRequestId: number = 0;
 
   private uiContextRef: UIContext | null = null;
 
@@ -359,15 +429,16 @@ export class ClipboardFeatureController {
     }
     this.initializeRecommendedSpaceDeviceName();
     this.selectPage(this.selectedTab);
-    if (this.sseTimerId < 0) {
-      this.sseTimerId = setInterval(() => {
-        this.consumeRealtimeEvents();
-      }, 1000);
+    if (!this.pollingActive) {
+      this.pollingActive = true;
+      this.pollIdleRounds = 0;
+      this.schedulePollTimer(POLL_INTERVAL_BASE_MS);
     }
     this.restoreConfig();
     this.restoreBackgroundSyncPreference();
     this.restoreAppearanceMode();
     this.restoreAppearanceTheme();
+    this.restoreAppearanceVisualSettings();
     this.restoreLocalHistory();
     this.initializeSpaceNode();
   }
@@ -375,16 +446,25 @@ export class ClipboardFeatureController {
   public onPageShow(): void {
     this.desktopGestureSharePageVisible = true;
     this.registerDesktopGestureShare();
+    this.pagePollingVisible = true;
+    this.pollIdleRounds = 0;
+    if (this.pollingActive && this.sseTimerId >= 0) {
+      clearTimeout(this.sseTimerId);
+      this.sseTimerId = -1;
+      this.schedulePollTimer(0);
+    }
   }
 
   public onPageHide(): void {
     this.desktopGestureSharePageVisible = false;
     this.unregisterDesktopGestureShare();
+    this.pagePollingVisible = false;
   }
 
   public stop(): void {
+    this.pollingActive = false;
     if (this.sseTimerId >= 0) {
-      clearInterval(this.sseTimerId);
+      clearTimeout(this.sseTimerId);
       this.sseTimerId = -1;
     }
     if (this.historySearchTimerId >= 0) {
@@ -407,6 +487,43 @@ export class ClipboardFeatureController {
     this.uiContextRef = null;
   }
 
+  private schedulePollTimer(delayMs: number): void {
+    if (!this.pollingActive) {
+      return;
+    }
+    this.sseTimerId = setTimeout(() => {
+      this.pollRealtimeOnce();
+    }, delayMs);
+  }
+
+  private async pollRealtimeOnce(): Promise<void> {
+    this.sseTimerId = -1;
+    let activityCount: number = 0;
+    try {
+      activityCount = await this.consumeRealtimeEvents();
+    } finally {
+      this.schedulePollTimer(this.nextPollDelayMs(activityCount));
+    }
+  }
+
+  private nextPollDelayMs(activityCount: number): number {
+    if (activityCount > 0) {
+      this.pollIdleRounds = 0;
+    } else {
+      this.pollIdleRounds += 1;
+    }
+    if (!this.pagePollingVisible) {
+      return this.backgroundSyncEnabled ? POLL_INTERVAL_RELAXED_MS : POLL_INTERVAL_SLOW_MS;
+    }
+    if (this.pollIdleRounds >= POLL_IDLE_SLOW_ROUNDS) {
+      return POLL_INTERVAL_SLOW_MS;
+    }
+    if (this.pollIdleRounds >= POLL_IDLE_RELAXED_ROUNDS) {
+      return POLL_INTERVAL_RELAXED_MS;
+    }
+    return POLL_INTERVAL_BASE_MS;
+  }
+
   public showLatestClipboardContent(): void {
     this.desktopSelectedId = '';
     this.desktopSelectedText = '';
@@ -419,6 +536,7 @@ export class ClipboardFeatureController {
     this.desktopFilePreviewState = 0;
     this.resetDesktopVideoAspectRatio();
     this.releaseDesktopAudio();
+    this.refreshCurrentLinkPreview();
   }
 
   public getConfig(): ServerConfig {
@@ -497,6 +615,173 @@ export class ClipboardFeatureController {
     this.appearanceThemeId = this.getAppearanceTheme(storedThemeId).id;
   }
 
+  public restoreAppearanceVisualSettings(): void {
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context === undefined) {
+      return;
+    }
+    let settings: AppearanceVisualSettings = this.appearanceStorageService.loadVisualSettings(context);
+    this.appearanceBackgroundImage = settings.backgroundImage;
+    this.appearanceBackgroundOpacity = settings.backgroundOpacity;
+    this.appearanceBackgroundBlur = settings.backgroundBlur;
+    this.appearanceMaterialLevel = this.resolveAppearanceMaterialLevel(settings.materialLevel);
+    this.appearanceComponentMaterialStyle = settings.componentMaterialStyle;
+    this.syncAppearanceBackgroundAppStorage();
+    AppStorage.setOrCreate(APPEARANCE_COMPONENT_MATERIAL_STYLE_STORAGE_KEY,
+      this.appearanceComponentMaterialStyle);
+  }
+
+  private syncAppearanceBackgroundAppStorage(): void {
+    AppStorage.setOrCreate(APPEARANCE_BACKGROUND_IMAGE_STORAGE_KEY, this.appearanceBackgroundImage);
+    AppStorage.setOrCreate(APPEARANCE_BACKGROUND_OPACITY_STORAGE_KEY, this.appearanceBackgroundOpacity);
+    AppStorage.setOrCreate(APPEARANCE_BACKGROUND_BLUR_STORAGE_KEY, this.appearanceBackgroundBlur);
+  }
+
+  private resolveAppearanceMaterialLevel(level: number): hdsMaterial.MaterialLevel {
+    if (level === hdsMaterial.MaterialLevel.EXQUISITE) {
+      return hdsMaterial.MaterialLevel.EXQUISITE;
+    }
+    if (level === hdsMaterial.MaterialLevel.GENTLE) {
+      return hdsMaterial.MaterialLevel.GENTLE;
+    }
+    if (level === hdsMaterial.MaterialLevel.SMOOTH) {
+      return hdsMaterial.MaterialLevel.SMOOTH;
+    }
+    return hdsMaterial.MaterialLevel.ADAPTIVE;
+  }
+
+  public persistAppearanceVisualSettings(): void {
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context === undefined) {
+      return;
+    }
+    let settings: AppearanceVisualSettings = new AppearanceVisualSettings(
+      this.appearanceBackgroundImage,
+      this.appearanceBackgroundOpacity,
+      this.appearanceBackgroundBlur,
+      this.appearanceMaterialLevel,
+      this.appearanceComponentMaterialStyle
+    );
+    this.appearanceStorageService.saveVisualSettings(context, settings);
+  }
+
+  public async selectAppearanceBackgroundImage(): Promise<void> {
+    try {
+      let options: photoAccessHelper.PhotoSelectOptions = new photoAccessHelper.PhotoSelectOptions();
+      options.MIMEType = photoAccessHelper.PhotoViewMIMETypes.IMAGE_TYPE;
+      options.maxSelectNumber = 1;
+      let photoPicker: photoAccessHelper.PhotoViewPicker = new photoAccessHelper.PhotoViewPicker();
+      let result: photoAccessHelper.PhotoSelectResult = await photoPicker.select(options);
+      if (result.photoUris.length > 0) {
+        this.appearanceBackgroundImage = result.photoUris[0];
+        this.syncAppearanceBackgroundAppStorage();
+        this.persistAppearanceVisualSettings();
+        this.showFeedbackToast($r('app.string.appearance_background_applied'));
+      }
+    } catch (error) {
+      logger.error('UniClipboard failed to select an appearance background image.');
+      this.showFeedbackToast($r('app.string.appearance_background_failed'));
+    }
+  }
+
+  public clearAppearanceBackgroundImage(): void {
+    this.appearanceBackgroundImage = '';
+    this.appearanceBackgroundOpacity = 0.4;
+    this.appearanceBackgroundBlur = 8;
+    this.syncAppearanceBackgroundAppStorage();
+    this.persistAppearanceVisualSettings();
+    this.showFeedbackToast($r('app.string.appearance_background_cleared'));
+  }
+
+  public selectAppearanceMaterialLevel(level: hdsMaterial.MaterialLevel): void {
+    this.appearanceMaterialLevel = level;
+    this.persistAppearanceVisualSettings();
+  }
+
+  public appearanceComponentMaterialIndex(): number {
+    return this.appearanceComponentMaterialStyle + 1;
+  }
+
+  public selectAppearanceComponentMaterialByIndex(index: number): void {
+    if (index <= 0) {
+      this.appearanceComponentMaterialStyle = -1;
+    } else if (index >= 5) {
+      this.appearanceComponentMaterialStyle = 4;
+    } else {
+      this.appearanceComponentMaterialStyle = index - 1;
+    }
+    AppStorage.setOrCreate(APPEARANCE_COMPONENT_MATERIAL_STYLE_STORAGE_KEY,
+      this.appearanceComponentMaterialStyle);
+    this.persistAppearanceVisualSettings();
+  }
+
+  public appearanceComponentMaterialLabel(): Resource {
+    if (this.appearanceComponentMaterialStyle < 0) {
+      return $r('app.string.appearance_component_material_off');
+    }
+    if (this.appearanceComponentMaterialStyle === 0) {
+      return $r('app.string.appearance_component_material_ultra_thin');
+    }
+    if (this.appearanceComponentMaterialStyle === 1) {
+      return $r('app.string.appearance_component_material_thin');
+    }
+    if (this.appearanceComponentMaterialStyle === 3) {
+      return $r('app.string.appearance_component_material_thick');
+    }
+    if (this.appearanceComponentMaterialStyle === 4) {
+      return $r('app.string.appearance_component_material_ultra_thick');
+    }
+    return $r('app.string.appearance_component_material_regular');
+  }
+
+  public updateAppearanceBackgroundOpacity(value: number, persist: boolean): void {
+    this.appearanceBackgroundOpacity = value;
+    AppStorage.setOrCreate(APPEARANCE_BACKGROUND_OPACITY_STORAGE_KEY, value);
+    if (persist) {
+      this.persistAppearanceVisualSettings();
+    }
+  }
+
+  public updateAppearanceBackgroundBlur(value: number, persist: boolean): void {
+    this.appearanceBackgroundBlur = value;
+    AppStorage.setOrCreate(APPEARANCE_BACKGROUND_BLUR_STORAGE_KEY, value);
+    if (persist) {
+      this.persistAppearanceVisualSettings();
+    }
+  }
+
+  public appearanceMaterialLevelIndex(): number {
+    if (this.appearanceMaterialLevel === hdsMaterial.MaterialLevel.EXQUISITE) {
+      return 0;
+    }
+    if (this.appearanceMaterialLevel === hdsMaterial.MaterialLevel.GENTLE) {
+      return 1;
+    }
+    if (this.appearanceMaterialLevel === hdsMaterial.MaterialLevel.SMOOTH) {
+      return 2;
+    }
+    return 3;
+  }
+
+  public selectAppearanceMaterialLevelByIndex(index: number): void {
+    if (index === 0) {
+      this.selectAppearanceMaterialLevel(hdsMaterial.MaterialLevel.EXQUISITE);
+    } else if (index === 1) {
+      this.selectAppearanceMaterialLevel(hdsMaterial.MaterialLevel.GENTLE);
+    } else if (index === 2) {
+      this.selectAppearanceMaterialLevel(hdsMaterial.MaterialLevel.SMOOTH);
+    } else {
+      this.selectAppearanceMaterialLevel(hdsMaterial.MaterialLevel.ADAPTIVE);
+    }
+  }
+
+  public pageBackgroundColor(): ResourceColor {
+    if (this.appearanceBackgroundImage.length > 0) {
+      return Color.Transparent;
+    }
+    return $r('app.color.page_background');
+  }
+
   public selectAppearanceMode(mode: string): void {
     let context: common.Context | undefined = this.getUIContext().getHostContext();
     if (context === undefined) {
@@ -508,7 +793,7 @@ export class ClipboardFeatureController {
       this.appearanceMode = mode;
       this.appearanceStorageService.save(context, mode);
     } catch (error) {
-      console.error('UniClipboard failed to update the appearance mode.');
+      logger.error('UniClipboard failed to update the appearance mode.');
     }
   }
 
@@ -624,7 +909,8 @@ export class ClipboardFeatureController {
       this.history = this.historyMergeDuplicates ? this.mergeHistoryDuplicates(mergedItems) : mergedItems;
       this.pruneHistoryByRetention();
     } catch (error) {
-      console.error('UniClipboard failed to restore local clipboard history.');
+      this.reportError('history', 'failed to restore local clipboard history: ' + this.errorDetail(error),
+        $r('app.string.error_toast_history_restore'));
     } finally {
       this.historyRestored = true;
       if (this.historySavePending) {
@@ -658,7 +944,8 @@ export class ClipboardFeatureController {
     try {
       await this.historyStorageService.save(context, items);
     } catch (error) {
-      console.error('UniClipboard failed to persist local clipboard history.');
+      this.reportError('history', 'failed to persist local clipboard history: ' + this.errorDetail(error),
+        $r('app.string.error_toast_history_persist'));
     } finally {
       this.historySaveBusy = false;
       if (this.historySavePending) {
@@ -690,6 +977,7 @@ export class ClipboardFeatureController {
       this.setSpaceJoined(status.joined);
       this.spaceDeviceName = status.deviceName;
       this.spaceCreatedId = status.spaceId;
+      await this.refreshSpaceNetworkSettings();
       if (this.spaceJoined) {
         await this.refreshSpaceDevices();
       }
@@ -697,6 +985,60 @@ export class ClipboardFeatureController {
     } catch (error) {
       this.spaceNodeState = 3;
       this.recordConnectionDiagnosticFailure('node_unavailable');
+    }
+  }
+
+  public async refreshSpaceNetworkSettings(): Promise<void> {
+    try {
+      let settings: NativeSpaceNetworkSettings = await this.spaceNodeService.networkSettings();
+      this.spaceRelayFallbackEnabled = settings.allowRelayFallback;
+      this.spaceRelayUrlsText = settings.customRelayUrls.join('\n');
+      this.spaceRelaySettingsState = 0;
+    } catch (error) {
+      this.spaceRelaySettingsState = 2;
+    }
+  }
+
+  public spaceRelaySettingsChanged(): void {
+    this.spaceRelaySettingsState = 0;
+  }
+
+  private spaceRelayUrls(): string[] {
+    let lines: string[] = this.spaceRelayUrlsText.split('\n');
+    let urls: string[] = [];
+    for (let index: number = 0; index < lines.length; index++) {
+      let url: string = lines[index].trim();
+      if (url.length > 0) {
+        urls.push(url);
+      }
+    }
+    return urls;
+  }
+
+  public async saveSpaceNetworkSettings(): Promise<void> {
+    if (this.spaceRelaySettingsBusy) {
+      return;
+    }
+    this.spaceRelaySettingsBusy = true;
+    this.spaceRelaySettingsState = 0;
+    let requestedAllowRelayFallback: boolean = this.spaceRelayFallbackEnabled;
+    let requestedRelayUrls: string[] = this.spaceRelayUrls();
+    try {
+      if (this.spaceNodeState === 2) {
+        for (let index: number = 0; index < requestedRelayUrls.length; index++) {
+          await this.spaceNodeService.probeRelayUrl(requestedRelayUrls[index]);
+        }
+      }
+      let settings: NativeSpaceNetworkSettings = await this.spaceNodeService.updateNetworkSettings(
+        requestedAllowRelayFallback, requestedRelayUrls);
+      this.spaceRelayFallbackEnabled = settings.allowRelayFallback;
+      this.spaceRelayUrlsText = settings.customRelayUrls.join('\n');
+      this.spaceRelaySettingsState = 1;
+    } catch (error) {
+      this.reportError('space-relay', 'failed to save relay settings: ' + this.errorDetail(error));
+      this.spaceRelaySettingsState = 2;
+    } finally {
+      this.spaceRelaySettingsBusy = false;
     }
   }
 
@@ -763,6 +1105,8 @@ export class ClipboardFeatureController {
       this.mobileSyncEnabled = false;
       this.mobileSyncRunning = false;
       this.mobileSyncState = 3;
+      this.reportError('mobile-sync', 'failed to toggle the mobile sync server: ' + this.errorDetail(error),
+        $r('app.string.error_toast_sync'));
     } finally {
       this.mobileSyncBusy = false;
     }
@@ -788,6 +1132,7 @@ export class ClipboardFeatureController {
       this.mobileSyncCustomPassword = '';
     } catch (error) {
       this.mobileSyncState = 3;
+      this.reportError('mobile-sync', 'failed to issue mobile sync credentials: ' + this.errorDetail(error));
     } finally {
       this.mobileSyncBusy = false;
     }
@@ -849,7 +1194,7 @@ export class ClipboardFeatureController {
     }
   }
 
-  public async consumeMobileSyncEvents(): Promise<void> {
+  public async consumeMobileSyncEvents(): Promise<number> {
     let events: NativeMobileSyncInboundEvent[] = this.mobileSyncServerService.drainInboundEvents();
     for (let index: number = 0; index < events.length; index++) {
       let event: NativeMobileSyncInboundEvent = events[index];
@@ -858,6 +1203,9 @@ export class ClipboardFeatureController {
         this.latestText = event.text;
         this.latestKind = 'Text';
         this.latestImage = null;
+        if (this.desktopSelectedId.length === 0) {
+          this.refreshCurrentLinkPreview();
+        }
         this.addHistory(event.text, 'received', 'Text', null, null, '', event.contentId, event.sourceLabel);
         try {
           await this.clipboardService.writeText(event.text);
@@ -872,6 +1220,9 @@ export class ClipboardFeatureController {
           this.latestImageRevision += 1;
           this.latestKind = 'Image';
           this.latestText = event.dataName.length > 0 ? event.dataName : 'image.png';
+          if (this.desktopSelectedId.length === 0) {
+            this.clearLinkPreview();
+          }
           this.addHistory(this.latestText, 'received', 'Image', pixelMap, null, '', event.contentId,
             event.sourceLabel);
           await this.clipboardService.writeImage(pixelMap);
@@ -892,6 +1243,9 @@ export class ClipboardFeatureController {
         }
         this.latestKind = 'File';
         this.latestText = fileName;
+        if (this.desktopSelectedId.length === 0) {
+          this.clearLinkPreview();
+        }
         this.latestFileName = fileName;
         this.latestFileData = event.data;
         this.latestFilePath = '';
@@ -907,6 +1261,7 @@ export class ClipboardFeatureController {
     if (events.length > 0) {
       await this.refreshMobileSyncDevices();
     }
+    return events.length;
   }
 
   public async initializeRecommendedSpaceDeviceName(): Promise<void> {
@@ -928,7 +1283,7 @@ export class ClipboardFeatureController {
             recommendedName = await context.resourceManager.getStringByName('space_device_recommended_default');
           }
         } catch (error) {
-          console.error('UniClipboard failed to load the recommended device name.');
+          logger.error('UniClipboard failed to load the recommended device name.');
         }
       }
     }
@@ -987,7 +1342,7 @@ export class ClipboardFeatureController {
         let joinError: Error = error as Error;
         errorMessage = joinError.message;
       }
-      console.error('UniClipboard join space failed: ' + errorMessage);
+      this.reportError('space', 'join space failed: ' + errorMessage);
       this.spaceJoinState = 2;
     } finally {
       this.spaceJoinBusy = false;
@@ -1118,7 +1473,7 @@ export class ClipboardFeatureController {
       let abilityContext: common.UIAbilityContext = context as common.UIAbilityContext;
       await shareController.show(abilityContext, options);
     } catch (error) {
-      console.error('UniClipboard failed to share the space invitation.');
+      logger.error('UniClipboard failed to share the space invitation.');
       this.showFeedbackToast($r('app.string.space_share_invitation_failed'));
     }
   }
@@ -1182,16 +1537,20 @@ export class ClipboardFeatureController {
       enableAlbum: true
     };
     this.spaceInvitationScanState = 0;
-    try {
-      scanBarcode.startScanForResult(this.getUIContext().getHostContext(), options,
-        (error: BusinessError, result: scanBarcode.ScanResult): void => {
-          if (error) {
-            this.spaceInvitationScanState = 2;
-            return;
-          }
-          this.importSpaceInvitation(result.originalValue);
-        });
-    } catch (error) {
+    if (canIUse('SystemCapability.Multimedia.Scan.ScanBarcode')) {
+      try {
+        scanBarcode.startScanForResult(this.getUIContext().getHostContext(), options,
+          (error: BusinessError, result: scanBarcode.ScanResult): void => {
+            if (error) {
+              this.spaceInvitationScanState = 2;
+              return;
+            }
+            this.importSpaceInvitation(result.originalValue);
+          });
+      } catch (error) {
+        this.spaceInvitationScanState = 2;
+      }
+    } else {
       this.spaceInvitationScanState = 2;
     }
   }
@@ -1222,16 +1581,42 @@ export class ClipboardFeatureController {
   }
 
   public openConnectionSettings(): void {
-    this.largeSettingsSection = 1;
-    this.selectPage(2);
+    this.selectPage(1);
   }
 
   public showFeedbackToast(message: Resource): void {
     try {
       this.getUIContext().getPromptAction().showToast({ message: message });
     } catch (error) {
-      console.error('UniClipboard failed to show feedback status.');
+      logger.error('UniClipboard failed to show feedback status.');
     }
+  }
+
+  public reportError(source: string, message: string, toast?: Resource): void {
+    logger.error('[' + source + '] ' + message);
+    let now: Date = new Date();
+    let timeLabel: string = this.padTimeUnit(now.getHours()) + ':' +
+      this.padTimeUnit(now.getMinutes()) + ':' + this.padTimeUnit(now.getSeconds());
+    let next: AppErrorRecord[] = [new AppErrorRecord(timeLabel, source, message)];
+    for (let index: number = 0; index < this.recentErrors.length && next.length < MAX_RECENT_ERRORS; index++) {
+      next.push(this.recentErrors[index]);
+    }
+    this.recentErrors = next;
+    if (toast !== undefined) {
+      this.showFeedbackToast(toast);
+    }
+  }
+
+  public errorDetail(error: Object): string {
+    let businessError: BusinessError = error as BusinessError;
+    if (businessError.message !== undefined && businessError.message.length > 0) {
+      return businessError.message;
+    }
+    return JSON.stringify(error);
+  }
+
+  private padTimeUnit(value: number): string {
+    return value < 10 ? '0' + value.toString() : value.toString();
   }
 
   public async submitFeedback(): Promise<boolean> {
@@ -1258,7 +1643,7 @@ export class ClipboardFeatureController {
     try {
       subject = await context.resourceManager.getStringByName('feedback_email_subject');
     } catch (error) {
-      console.error('UniClipboard failed to load the feedback email subject.');
+      logger.error('UniClipboard failed to load the feedback email subject.');
     }
     let abilityContext: common.UIAbilityContext = context as common.UIAbilityContext;
     let emailUri: string = 'mailto:' + FEEDBACK_EMAIL + '?subject=' + encodeURIComponent(subject) +
@@ -1270,7 +1655,7 @@ export class ClipboardFeatureController {
       });
       return true;
     } catch (error) {
-      console.error('UniClipboard failed to open the email app.');
+      logger.error('UniClipboard failed to open the email app.');
       this.showFeedbackToast($r('app.string.feedback_email_open_failed'));
       return false;
     }
@@ -1739,7 +2124,7 @@ export class ClipboardFeatureController {
         return !device.isLocal && device.online;
       });
     } catch (error) {
-      console.error('UniClipboard refresh space devices failed');
+      logger.error('UniClipboard refresh space devices failed');
       this.recordConnectionDiagnosticFailure('space_probe_failed');
     } finally {
       this.spaceDeviceRefreshBusy = false;
@@ -2002,6 +2387,76 @@ export class ClipboardFeatureController {
     return this.desktopLinkHostIsValid(candidate.substring(hostStart, hostEnd));
   }
 
+  public currentTextLooksLikeLink(): boolean {
+    return !this.desktopShowsLatestImage() && !this.desktopShowsFile() &&
+      this.desktopTextLooksLikeLink(this.desktopDetailText());
+  }
+
+  public currentLinkUrl(): string {
+    let candidate: string = this.desktopDetailText().trim();
+    if (candidate.toLowerCase().indexOf('www.') === 0) {
+      return 'https://' + candidate;
+    }
+    return candidate;
+  }
+
+  public clearLinkPreview(): void {
+    this.linkPreviewRequestId += 1;
+    this.linkPreview = null;
+    this.linkPreviewState = 0;
+  }
+
+  public async refreshCurrentLinkPreview(): Promise<void> {
+    this.clearLinkPreview();
+    if (!this.currentTextLooksLikeLink()) {
+      return;
+    }
+    let url: string = this.currentLinkUrl();
+    let lowerUrl: string = url.toLowerCase();
+    if (lowerUrl.indexOf('http://') !== 0 && lowerUrl.indexOf('https://') !== 0) {
+      this.linkPreview = this.linkPreviewService.createFallback(url);
+      this.linkPreviewState = 3;
+      return;
+    }
+    let requestId: number = this.linkPreviewRequestId;
+    this.linkPreviewState = 1;
+    try {
+      let preview: LinkPreview = await this.linkPreviewService.load(url);
+      if (requestId !== this.linkPreviewRequestId || this.currentLinkUrl() !== url) {
+        return;
+      }
+      this.linkPreview = preview;
+      this.linkPreviewState = 2;
+    } catch (error) {
+      if (requestId === this.linkPreviewRequestId) {
+        this.linkPreview = this.linkPreviewService.createFallback(url);
+        this.linkPreviewState = 3;
+      }
+    }
+  }
+
+  public markLinkPreviewImageFailed(): void {
+    if (this.linkPreviewState === 2) {
+      this.linkPreviewState = 3;
+    }
+  }
+
+  public async openCurrentLink(): Promise<void> {
+    let url: string = this.currentLinkUrl();
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (url.length === 0 || context === undefined) {
+      return;
+    }
+    try {
+      await (context as common.UIAbilityContext).startAbility({
+        action: 'ohos.want.action.viewData',
+        uri: url
+      });
+    } catch (error) {
+      this.statusCode = 3;
+    }
+  }
+
   public desktopTextLooksLikeCode(text: string): boolean {
     let sourceText: string = text.trim();
     if (sourceText.length === 0 || this.desktopTextLooksLikeLink(sourceText)) {
@@ -2171,25 +2626,51 @@ export class ClipboardFeatureController {
     return timestampMs >= monthStartMs && timestampMs <= nowMs;
   }
 
-  public desktopFilteredServerHistory(): ServerHistoryItem[] {
-    let items: ServerHistoryItem[] = [];
-    if (this.historyDeviceFilter.length > 0 || this.desktopCustomTagFilter.length > 0 ||
-      this.historySnippetOnly) {
-      return items;
+  private historyFilterSignature(): string {
+    let signature: string = this.historySearchText.trim().toLowerCase() + '|' +
+      (this.desktopStarredOnly ? '1' : '0') + '|' + this.desktopTypeFilter.toString() + '|' +
+      this.desktopTagFilter.toString() + '|' + this.desktopSourceFilter.toString() + '|' +
+      this.desktopTimeFilter.toString() + '|' + this.desktopExtensionFilter + '|' +
+      this.desktopCustomTagFilter + '|' + this.historyDeviceFilter + '|' +
+      (this.historySnippetOnly ? '1' : '0');
+    if (this.desktopTimeFilter > 0) {
+      // Time filters compare against "now"; refresh the cache at minute resolution.
+      signature += '|' + Math.floor(Date.now() / 60000).toString();
     }
-    for (let index: number = 0; index < this.serverHistory.length; index++) {
-      let item: ServerHistoryItem = this.serverHistory[index];
-      let starredMatches: boolean = !this.desktopStarredOnly || item.starred;
-      if (starredMatches && this.desktopSearchMatches(item.text) && this.desktopSourceMatchesFilter(true) &&
-        this.desktopTypeMatchesFilter(item.kind, item.text) && this.desktopTagMatchesFilter(item.kind, item.text) &&
-        this.desktopTimeMatchesFilter(item.timestampMs) && this.desktopExtensionMatchesFilter(item.text)) {
-        items.push(item);
+    return signature;
+  }
+
+  public desktopFilteredServerHistory(): ServerHistoryItem[] {
+    let signature: string = this.historyFilterSignature();
+    if (historyFilterCache.serverSource === this.serverHistory &&
+      historyFilterCache.serverSignature === signature) {
+      return historyFilterCache.serverItems;
+    }
+    let items: ServerHistoryItem[] = [];
+    if (this.historyDeviceFilter.length === 0 && this.desktopCustomTagFilter.length === 0 &&
+      !this.historySnippetOnly) {
+      for (let index: number = 0; index < this.serverHistory.length; index++) {
+        let item: ServerHistoryItem = this.serverHistory[index];
+        let starredMatches: boolean = !this.desktopStarredOnly || item.starred;
+        if (starredMatches && this.desktopSearchMatches(item.text) && this.desktopSourceMatchesFilter(true) &&
+          this.desktopTypeMatchesFilter(item.kind, item.text) && this.desktopTagMatchesFilter(item.kind, item.text) &&
+          this.desktopTimeMatchesFilter(item.timestampMs) && this.desktopExtensionMatchesFilter(item.text)) {
+          items.push(item);
+        }
       }
     }
+    historyFilterCache.serverItems = items;
+    historyFilterCache.serverSource = this.serverHistory;
+    historyFilterCache.serverSignature = signature;
     return items;
   }
 
   public desktopFilteredSessionHistory(): ClipboardHistoryItem[] {
+    let signature: string = this.historyFilterSignature();
+    if (historyFilterCache.sessionSource === this.history &&
+      historyFilterCache.sessionSignature === signature) {
+      return historyFilterCache.sessionItems;
+    }
     let items: ClipboardHistoryItem[] = [];
     for (let index: number = 0; index < this.history.length; index++) {
       let item: ClipboardHistoryItem = this.history[index];
@@ -2201,6 +2682,9 @@ export class ClipboardFeatureController {
         items.push(item);
       }
     }
+    historyFilterCache.sessionItems = items;
+    historyFilterCache.sessionSource = this.history;
+    historyFilterCache.sessionSignature = signature;
     return items;
   }
 
@@ -2218,6 +2702,11 @@ export class ClipboardFeatureController {
   }
 
   public compactFilteredHistory(): ClipboardHistoryItem[] {
+    let signature: string = this.historyFilterSignature();
+    if (historyFilterCache.compactSource === this.history &&
+      historyFilterCache.compactSignature === signature) {
+      return historyFilterCache.compactItems;
+    }
     let items: ClipboardHistoryItem[] = [];
     for (let index: number = 0; index < this.history.length; index++) {
       let item: ClipboardHistoryItem = this.history[index];
@@ -2225,7 +2714,20 @@ export class ClipboardFeatureController {
         items.push(item);
       }
     }
+    historyFilterCache.compactItems = items;
+    historyFilterCache.compactSource = this.history;
+    historyFilterCache.compactSignature = signature;
     return items;
+  }
+
+  public desktopServerHistoryDataSource(): HistoryDataSource<ServerHistoryItem> {
+    this.serverHistoryDataSourceInstance.reload(this.desktopFilteredServerHistory());
+    return this.serverHistoryDataSourceInstance;
+  }
+
+  public desktopSessionHistoryDataSource(): HistoryDataSource<ClipboardHistoryItem> {
+    this.sessionHistoryDataSourceInstance.reload(this.desktopFilteredSessionHistory());
+    return this.sessionHistoryDataSourceInstance;
   }
 
   public historyDeviceOptions(): string[] {
@@ -2275,6 +2777,7 @@ export class ClipboardFeatureController {
     this.desktopFilePreviewState = 0;
     this.resetDesktopVideoAspectRatio();
     this.releaseDesktopAudio();
+    this.refreshCurrentLinkPreview();
     if (!item.hasData || (item.kind !== 'File' && item.kind !== 'Image')) {
       return;
     }
@@ -2328,6 +2831,7 @@ export class ClipboardFeatureController {
     this.desktopFilePreviewState = 0;
     this.resetDesktopVideoAspectRatio();
     this.releaseDesktopAudio();
+    this.refreshCurrentLinkPreview();
   }
 
   public desktopDetailText(): string {
@@ -2416,7 +2920,7 @@ export class ClipboardFeatureController {
       this.desktopGestureShareWindowId = windowId;
       this.desktopGestureShareState = 1;
     } catch (error) {
-      console.error('UniClipboard failed to register gesturesShare.');
+      logger.error('UniClipboard failed to register gesturesShare.');
       this.desktopGestureShareState = 4;
     } finally {
       this.desktopGestureShareRegistering = false;
@@ -2440,7 +2944,7 @@ export class ClipboardFeatureController {
     try {
       harmonyShare.off('gesturesShare', capability);
     } catch (error) {
-      console.error('UniClipboard failed to unregister gesturesShare.');
+      logger.error('UniClipboard failed to unregister gesturesShare.');
     }
   }
 
@@ -2553,7 +3057,7 @@ export class ClipboardFeatureController {
       await packer.packToFile(pixelMap, targetFile.fd, options);
       return fileUri.getUriFromPath(targetPath);
     } catch (error) {
-      console.error('UniClipboard failed to prepare the gesture share image.');
+      logger.error('UniClipboard failed to prepare the gesture share image.');
       return '';
     } finally {
       if (packer !== null) {
@@ -2632,7 +3136,7 @@ export class ClipboardFeatureController {
       await target.share(shareData);
       this.desktopGestureShareState = 3;
     } catch (error) {
-      console.error('UniClipboard gesturesShare failed.');
+      logger.error('UniClipboard gesturesShare failed.');
       this.desktopGestureShareState = 4;
     }
     this.resetDesktopGestureShareStateLater();
@@ -2751,14 +3255,14 @@ export class ClipboardFeatureController {
       try {
         await player.release();
       } catch (error) {
-        console.error('UniClipboard failed to release the audio player.');
+        logger.error('UniClipboard failed to release the audio player.');
       }
     }
     if (sourceFile !== null) {
       try {
         fileIo.closeSync(sourceFile.fd);
       } catch (error) {
-        console.error('UniClipboard failed to close the audio preview file.');
+        logger.error('UniClipboard failed to close the audio preview file.');
       }
     }
   }
@@ -2802,20 +3306,30 @@ export class ClipboardFeatureController {
         offset: 0,
         length: sourceStat.size
       };
-      let player: media.AVPlayer = await media.createAVPlayer();
-      if (this.desktopAudioKey !== previewKey) {
-        await player.release();
+      let player: media.AVPlayer | null = null;
+      if (canIUse('SystemCapability.Multimedia.Media.Core')) {
+        if (canIUse('SystemCapability.Multimedia.Media.AVPlayer')) {
+          player = await media.createAVPlayer();
+        }
+      }
+      if (player === null) {
+        this.desktopAudioState = 5;
         return;
       }
-      this.desktopAudioPlayer = player;
-      player.on('stateChange', (state: media.AVPlayerState, _reason: media.StateChangeReason): void => {
-        if (this.desktopAudioPlayer !== player || this.desktopAudioKey !== previewKey) {
+      let activePlayer: media.AVPlayer = player;
+      if (this.desktopAudioKey !== previewKey) {
+        await activePlayer.release();
+        return;
+      }
+      this.desktopAudioPlayer = activePlayer;
+      activePlayer.on('stateChange', (state: media.AVPlayerState, _reason: media.StateChangeReason): void => {
+        if (this.desktopAudioPlayer !== activePlayer || this.desktopAudioKey !== previewKey) {
           return;
         }
         if (state === 'initialized') {
-          this.prepareDesktopAudioPlayer(player, previewKey);
+          this.prepareDesktopAudioPlayer(activePlayer, previewKey);
         } else if (state === 'prepared') {
-          this.desktopAudioDuration = player.duration > 0 ? player.duration : 0;
+          this.desktopAudioDuration = activePlayer.duration > 0 ? activePlayer.duration : 0;
           this.desktopAudioState = 2;
           if (this.desktopAudioPlayWhenReady) {
             this.playDesktopAudio();
@@ -2834,23 +3348,23 @@ export class ClipboardFeatureController {
           this.desktopAudioState = 5;
         }
       });
-      player.on('timeUpdate', (position: number): void => {
-        if (this.desktopAudioPlayer === player && this.desktopAudioKey === previewKey &&
+      activePlayer.on('timeUpdate', (position: number): void => {
+        if (this.desktopAudioPlayer === activePlayer && this.desktopAudioKey === previewKey &&
           !this.desktopAudioSeeking) {
           this.desktopAudioPosition = position;
         }
       });
-      player.on('durationUpdate', (duration: number): void => {
-        if (this.desktopAudioPlayer === player && this.desktopAudioKey === previewKey) {
+      activePlayer.on('durationUpdate', (duration: number): void => {
+        if (this.desktopAudioPlayer === activePlayer && this.desktopAudioKey === previewKey) {
           this.desktopAudioDuration = duration > 0 ? duration : 0;
         }
       });
-      player.on('error', (_error: BusinessError): void => {
-        if (this.desktopAudioPlayer === player && this.desktopAudioKey === previewKey) {
+      activePlayer.on('error', (_error: BusinessError): void => {
+        if (this.desktopAudioPlayer === activePlayer && this.desktopAudioKey === previewKey) {
           this.desktopAudioState = 5;
         }
       });
-      player.fdSrc = sourceDescriptor;
+      activePlayer.fdSrc = sourceDescriptor;
     } catch (error) {
       await this.releaseDesktopAudio();
       this.desktopAudioState = 5;
@@ -2968,7 +3482,7 @@ export class ClipboardFeatureController {
           return fileIo.readTextSync(lyricPath);
         }
       } catch (error) {
-        console.error('UniClipboard failed to read the sidecar lyric file.');
+        logger.error('UniClipboard failed to read the sidecar lyric file.');
       }
     }
     return '';
@@ -3070,7 +3584,15 @@ export class ClipboardFeatureController {
         offset: 0,
         length: sourceStat.size
       };
-      extractor = await media.createAVMetadataExtractor();
+      if (canIUse('SystemCapability.Multimedia.Media.Core')) {
+        if (canIUse('SystemCapability.Multimedia.Media.AVMetadataExtractor')) {
+          extractor = await media.createAVMetadataExtractor();
+        }
+      }
+      if (extractor === null) {
+        this.desktopAudioMetadataState = 2;
+        return;
+      }
       extractor.fdSrc = sourceDescriptor;
       try {
         let metadata: media.AVMetadata = await extractor.fetchMetadata();
@@ -3090,7 +3612,7 @@ export class ClipboardFeatureController {
           }
         }
       } catch (error) {
-        console.error('UniClipboard failed to read the audio metadata.');
+        logger.error('UniClipboard failed to read the audio metadata.');
       }
       try {
         let cover: image.PixelMap = await extractor.fetchAlbumCover();
@@ -3099,10 +3621,10 @@ export class ClipboardFeatureController {
           this.desktopAudioCoverRevision++;
         }
       } catch (error) {
-        console.info('UniClipboard audio file has no embedded cover.');
+        logger.info('UniClipboard audio file has no embedded cover.');
       }
     } catch (error) {
-      console.error('UniClipboard failed to open the audio metadata source.');
+      logger.error('UniClipboard failed to open the audio metadata source.');
     } finally {
       if (extractor !== null) {
         try {
@@ -3257,13 +3779,16 @@ export class ClipboardFeatureController {
         scanTypes: [scanCore.ScanType.QR_CODE],
         enableMultiMode: true
       };
-      let results: scanBarcode.ScanResult[] = await detectBarcode.decode(inputImage, options);
-      for (let index: number = 0; index < results.length; index++) {
-        this.appendImageSmartAction(actions, 'qr', results[index].originalValue);
+      if (canIUse('SystemCapability.Multimedia.Scan.ScanBarcode')) {
+        let results: scanBarcode.ScanResult[] = await detectBarcode.decode(inputImage, options);
+        for (let index: number = 0; index < results.length; index++) {
+          this.appendImageSmartAction(actions, 'qr', results[index].originalValue);
+        }
+        return true;
       }
-      return true;
+      return false;
     } catch (error) {
-      console.error('UniClipboard failed to detect QR codes in the current image.');
+      logger.error('UniClipboard failed to detect QR codes in the current image.');
       return false;
     } finally {
       if (targetFile !== null) {
@@ -3314,7 +3839,7 @@ export class ClipboardFeatureController {
         ocrCompleted = true;
       }
     } catch (error) {
-      console.error('UniClipboard failed to recognize text in the current image.');
+      logger.error('UniClipboard failed to recognize text in the current image.');
     } finally {
       if (ocrPixelMap !== null) {
         try {
@@ -3416,7 +3941,7 @@ export class ClipboardFeatureController {
         return imageInfo.size.width / imageInfo.size.height;
       }
     } catch (error) {
-      console.error('UniClipboard failed to read the image preview size.');
+      logger.error('UniClipboard failed to read the image preview size.');
     }
     return 1;
   }
@@ -3432,7 +3957,7 @@ export class ClipboardFeatureController {
         return imageInfo.size.width / imageInfo.size.height;
       }
     } catch (error) {
-      console.error('UniClipboard failed to read the latest image preview size.');
+      logger.error('UniClipboard failed to read the latest image preview size.');
     }
     return 1;
   }
@@ -3459,7 +3984,14 @@ export class ClipboardFeatureController {
         offset: 0,
         length: sourceStat.size
       };
-      extractor = await media.createAVMetadataExtractor();
+      if (canIUse('SystemCapability.Multimedia.Media.Core')) {
+        if (canIUse('SystemCapability.Multimedia.Media.AVMetadataExtractor')) {
+          extractor = await media.createAVMetadataExtractor();
+        }
+      }
+      if (extractor === null) {
+        return;
+      }
       extractor.fdSrc = sourceDescriptor;
       let metadata: media.AVMetadata = await extractor.fetchMetadata();
       let widthText: string | undefined = metadata.videoWidth;
@@ -3482,7 +4014,7 @@ export class ClipboardFeatureController {
         this.desktopVideoAspectRatio = width / height;
       }
     } catch (error) {
-      console.error('UniClipboard failed to read the video preview size.');
+      logger.error('UniClipboard failed to read the video preview size.');
     } finally {
       if (extractor !== null) {
         try {
@@ -3517,7 +4049,7 @@ export class ClipboardFeatureController {
       await filePreview.openPreview(context as common.UIAbilityContext, previewInfo);
       this.desktopFilePreviewState = 0;
     } catch (error) {
-      console.error('UniClipboard failed to open the file preview.');
+      logger.error('UniClipboard failed to open the file preview.');
       this.desktopFilePreviewState = 2;
     }
   }
@@ -3853,12 +4385,12 @@ export class ClipboardFeatureController {
   }
 
   public async sendServerHistoryItemToTarget(item: ServerHistoryItem, target: string): Promise<void> {
-    console.info('UniClipboard history send target: ' + target);
+    logger.info('UniClipboard history send target: ' + target);
     await this.sendServerHistoryItem(item);
   }
 
   public async sendLocalHistoryItemToTarget(item: ClipboardHistoryItem, target: string): Promise<void> {
-    console.info('UniClipboard history send target: ' + target);
+    logger.info('UniClipboard history send target: ' + target);
     await this.sendLocalHistoryItem(item);
   }
 
@@ -3952,6 +4484,7 @@ export class ClipboardFeatureController {
       this.desktopSelectedFileData = null;
       this.desktopSelectedFilePath = '';
       this.releaseDesktopAudio();
+      this.refreshCurrentLinkPreview();
       let context: common.Context | undefined = this.getUIContext().getHostContext();
       if (context !== undefined) {
         this.historyStorageService.removePayload(context, item);
@@ -4090,17 +4623,21 @@ export class ClipboardFeatureController {
       enableAlbum: true
     };
     this.connectUriState = 0;
-    try {
-      scanBarcode.startScanForResult(this.getUIContext().getHostContext(), options,
-        (error: BusinessError, result: scanBarcode.ScanResult): void => {
-          if (error) {
-            this.connectUriState = 3;
-            return;
-          }
-          this.connectUri = result.originalValue;
-          this.importConnectUri();
-        });
-    } catch (error) {
+    if (canIUse('SystemCapability.Multimedia.Scan.ScanBarcode')) {
+      try {
+        scanBarcode.startScanForResult(this.getUIContext().getHostContext(), options,
+          (error: BusinessError, result: scanBarcode.ScanResult): void => {
+            if (error) {
+              this.connectUriState = 3;
+              return;
+            }
+            this.connectUri = result.originalValue;
+            this.importConnectUri();
+          });
+      } catch (error) {
+        this.connectUriState = 3;
+      }
+    } else {
       this.connectUriState = 3;
     }
   }
@@ -4131,6 +4668,7 @@ export class ClipboardFeatureController {
       this.desktopFilePreviewState = 0;
       this.resetDesktopVideoAspectRatio();
       this.releaseDesktopAudio();
+      this.refreshCurrentLinkPreview();
       this.statusCode = 2;
     } catch (error) {
       this.statusCode = 3;
@@ -4169,6 +4707,9 @@ export class ClipboardFeatureController {
     }
     this.latestKind = result.kind;
     this.latestText = displayText;
+    if (this.desktopSelectedId.length === 0) {
+      this.refreshCurrentLinkPreview();
+    }
     this.latestImage = pixelMap;
     if (pixelMap !== null) {
       this.latestImageRevision += 1;
@@ -4263,9 +4804,29 @@ export class ClipboardFeatureController {
         this.composerText = '';
         return;
       }
+      if (!await this.requestClipboardPermission()) {
+        this.statusCode = 3;
+        return;
+      }
       this.composerText = await this.clipboardService.readText();
     } catch (error) {
       this.statusCode = 3;
+    }
+  }
+
+  private async requestClipboardPermission(): Promise<boolean> {
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context === undefined) {
+      return false;
+    }
+    let permissions: Permissions[] = ['ohos.permission.READ_PASTEBOARD'];
+    let accessManager: abilityAccessCtrl.AtManager = abilityAccessCtrl.createAtManager();
+    try {
+      let result: PermissionRequestResult = await accessManager.requestPermissionsFromUser(context, permissions);
+      return result.authResults.length > 0 &&
+        result.authResults[0] === abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED;
+    } catch (error) {
+      return false;
     }
   }
 
@@ -4276,6 +4837,11 @@ export class ClipboardFeatureController {
     this.imageReadState = 1;
     this.imageSendState = 0;
     try {
+      if (!await this.requestClipboardPermission()) {
+        this.imageReadState = 4;
+        this.statusCode = 3;
+        return;
+      }
       let pixelMap: image.PixelMap | null = await this.clipboardService.readImage();
       this.composerImage = pixelMap;
       if (pixelMap !== null) {
@@ -4320,15 +4886,15 @@ export class ClipboardFeatureController {
           let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
           this.latestContentId = await client.putText(text);
           delivered = true;
-          console.info('UniClipboard text sent through desktop relay');
+          logger.info('UniClipboard text sent through desktop relay');
         } catch (error) {
-          console.warn('UniClipboard desktop relay unavailable, trying P2P');
+          logger.warn('UniClipboard desktop relay unavailable, trying P2P');
         }
       }
       if (!delivered && this.spaceJoined) {
         try {
           let acceptedCount: number = await this.spaceNodeService.sendText(text);
-          console.info('UniClipboard P2P accepted peer count: ' + acceptedCount.toString());
+          logger.info('UniClipboard P2P accepted peer count: ' + acceptedCount.toString());
           if (acceptedCount > 0) {
             this.spacePeerConnected = true;
             this.latestContentId = '';
@@ -4353,6 +4919,7 @@ export class ClipboardFeatureController {
       this.latestImage = null;
       if (this.desktopSelectedId.length === 0) {
         this.releaseDesktopAudio();
+        this.refreshCurrentLinkPreview();
       }
       this.addHistory(text, 'sent');
       this.composerText = '';
@@ -4399,16 +4966,16 @@ export class ClipboardFeatureController {
           this.latestContentId = await client.putImage(data);
           this.latestText = 'image.png';
           delivered = true;
-          console.info('UniClipboard image sent through desktop relay');
+          logger.info('UniClipboard image sent through desktop relay');
         } catch (error) {
-          console.warn('UniClipboard desktop image relay unavailable, trying P2P');
+          logger.warn('UniClipboard desktop image relay unavailable, trying P2P');
         }
       }
       if (!delivered && this.spaceJoined) {
         try {
           let data: Uint8Array = await this.clipboardService.encodeSpaceImage(pixelMap);
           let acceptedCount: number = await this.spaceNodeService.sendImage(data);
-          console.info('UniClipboard P2P image accepted peer count: ' + acceptedCount.toString());
+          logger.info('UniClipboard P2P image accepted peer count: ' + acceptedCount.toString());
           if (acceptedCount > 0) {
             this.spacePeerConnected = true;
             this.latestContentId = '';
@@ -4433,6 +5000,7 @@ export class ClipboardFeatureController {
       this.latestImage = pixelMap;
       if (this.desktopSelectedId.length === 0) {
         this.releaseDesktopAudio();
+        this.clearLinkPreview();
       }
       this.latestImageRevision += 1;
       this.composerImage = null;
@@ -4539,9 +5107,9 @@ export class ClipboardFeatureController {
             sourceUri, sourceSize, this.composerFileName);
           this.pendingFileTransferId = '';
           delivered = true;
-          console.info('UniClipboard file sent through desktop relay');
+          logger.info('UniClipboard file sent through desktop relay');
         } catch (error) {
-          console.warn('UniClipboard desktop file relay unavailable, trying P2P');
+          logger.warn('UniClipboard desktop file relay unavailable, trying P2P');
         }
       }
       if (!delivered && this.spaceJoined) {
@@ -4578,6 +5146,7 @@ export class ClipboardFeatureController {
       this.resetDesktopVideoAspectRatio();
       if (this.desktopSelectedId.length === 0) {
         this.releaseDesktopAudio();
+        this.clearLinkPreview();
       }
       this.addHistory(this.composerFileName, 'sent', 'File', null, null, sourceUri,
         this.composerFileHistoryId);
@@ -4645,6 +5214,8 @@ export class ClipboardFeatureController {
     } catch (error) {
       this.realtimeActive = false;
       this.statusCode = 3;
+      this.reportError('sync', 'failed to start the realtime connection: ' + this.errorDetail(error),
+        $r('app.string.error_toast_sync'));
     }
   }
 
@@ -4664,9 +5235,10 @@ export class ClipboardFeatureController {
     }
   }
 
-  public async consumeRealtimeEvents(): Promise<void> {
-    await this.consumeMobileSyncEvents();
-    await this.consumeSpaceTextEvents();
+  public async consumeRealtimeEvents(): Promise<number> {
+    let activityCount: number = 0;
+    activityCount += await this.consumeMobileSyncEvents();
+    activityCount += await this.consumeSpaceTextEvents();
     this.realtimeTick += 1;
     if (this.spaceInvitationExpiresAtMs > 0 && Date.now() >= this.spaceInvitationExpiresAtMs) {
       this.spaceIssuedInvitationCode = '';
@@ -4683,12 +5255,13 @@ export class ClipboardFeatureController {
       this.startRealtime();
     }
     if (!this.realtimeActive || this.sseEventBusy) {
-      return;
+      return activityCount;
     }
     this.sseEventBusy = true;
     try {
       let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
       let events: SyncEvent[] = client.drainRealtimeEvents();
+      activityCount += events.length;
       let shouldPull: boolean = false;
       let disconnected: boolean = false;
       for (let index: number = 0; index < events.length; index++) {
@@ -4704,7 +5277,8 @@ export class ClipboardFeatureController {
       if (disconnected) {
         this.realtimeActive = false;
         this.statusCode = 3;
-        return;
+        this.reportError('sync', 'realtime connection was disconnected by the server.');
+        return activityCount;
       }
       if (shouldPull) {
         await this.pullLatestFromRealtime(client);
@@ -4712,14 +5286,16 @@ export class ClipboardFeatureController {
     } catch (error) {
       this.realtimeActive = false;
       this.statusCode = 3;
+      this.reportError('sync', 'failed to consume realtime events: ' + this.errorDetail(error));
     } finally {
       this.sseEventBusy = false;
     }
+    return activityCount;
   }
 
-  public async consumeSpaceTextEvents(): Promise<void> {
+  public async consumeSpaceTextEvents(): Promise<number> {
     if (!this.spaceJoined) {
-      return;
+      return 0;
     }
     if (this.spaceDevices.length === 0) {
       await this.refreshSpaceDevices();
@@ -4732,6 +5308,7 @@ export class ClipboardFeatureController {
       this.latestImage = null;
       if (this.desktopSelectedId.length === 0) {
         this.releaseDesktopAudio();
+        this.refreshCurrentLinkPreview();
       }
       this.latestContentId = event.snapshotHash;
       this.addHistory(event.text, 'received', 'Text', null, null, '', event.snapshotHash,
@@ -4759,6 +5336,7 @@ export class ClipboardFeatureController {
         this.latestText = 'image.jpg';
         if (this.desktopSelectedId.length === 0) {
           this.releaseDesktopAudio();
+          this.clearLinkPreview();
         }
         this.latestContentId = event.snapshotHash;
         this.addHistory('image.jpg', 'received', 'Image', pixelMap, null, '', event.snapshotHash,
@@ -4795,6 +5373,7 @@ export class ClipboardFeatureController {
       this.resetDesktopVideoAspectRatio();
       if (this.desktopSelectedId.length === 0) {
         this.releaseDesktopAudio();
+        this.clearLinkPreview();
       }
       this.latestImage = null;
       this.latestContentId = event.snapshotHash;
@@ -4827,6 +5406,7 @@ export class ClipboardFeatureController {
     if (events.length > 0 || imageEvents.length > 0 || fileEvents.length > 0) {
       this.animateLatestContent();
     }
+    return events.length + imageEvents.length + fileEvents.length + fileStatusEvents.length;
   }
 
   public async pullLatestFromRealtime(client: MobileSyncClient): Promise<void> {

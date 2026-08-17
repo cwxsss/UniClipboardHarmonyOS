@@ -2,7 +2,9 @@ import { common, wantAgent, WantAgent } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
 import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
 import { BusinessError } from '@kit.BasicServicesKit';
+import { Logger } from '../util/Logger';
 
+const logger: Logger = new Logger('BackgroundSync');
 const STORE_NAME: string = 'background_sync_preferences';
 const ENABLED_KEY: string = 'background_sync_enabled';
 const BUNDLE_NAME: string = 'com.uniclipboard.hmos';
@@ -15,7 +17,7 @@ export class BackgroundSyncPreferenceService {
       let store: preferences.Preferences = preferences.getPreferencesSync(context, storeOptions);
       return store.getSync(ENABLED_KEY, false) as boolean;
     } catch (error) {
-      console.error('UniClipboard failed to restore the background sync preference.');
+      logger.error('UniClipboard failed to restore the background sync preference.');
       return false;
     }
   }
@@ -27,7 +29,7 @@ export class BackgroundSyncPreferenceService {
       store.putSync(ENABLED_KEY, enabled);
       store.flushSync();
     } catch (error) {
-      console.error('UniClipboard failed to persist the background sync preference.');
+      logger.error('UniClipboard failed to persist the background sync preference.');
     }
   }
 }
@@ -61,11 +63,11 @@ export class BackgroundSyncTaskService {
         let taskModes: string[] = ['multiDeviceConnection'];
         await backgroundTaskManager.startBackgroundRunning(context, taskModes, notificationWantAgent);
         this.active = true;
-        console.info('UniClipboard background device sync started.');
+        logger.info('UniClipboard background device sync started.');
       }
     } catch (error) {
       let businessError: BusinessError = error as BusinessError;
-      console.error('UniClipboard failed to start background device sync. Code: ' +
+      logger.error('UniClipboard failed to start background device sync. Code: ' +
         businessError.code.toString() + ', message: ' + businessError.message);
       this.active = false;
     } finally {
@@ -84,10 +86,10 @@ export class BackgroundSyncTaskService {
     this.stopping = true;
     try {
       await backgroundTaskManager.stopBackgroundRunning(context);
-      console.info('UniClipboard background device sync stopped.');
+      logger.info('UniClipboard background device sync stopped.');
     } catch (error) {
       let businessError: BusinessError = error as BusinessError;
-      console.error('UniClipboard failed to stop background device sync. Code: ' +
+      logger.error('UniClipboard failed to stop background device sync. Code: ' +
         businessError.code.toString() + ', message: ' + businessError.message);
     } finally {
       this.active = false;

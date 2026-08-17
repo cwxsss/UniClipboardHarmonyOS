@@ -191,6 +191,98 @@
     {
       "name": "share_target_back",
       "value": "返回分享面板"
+    },
+    {
+      "name": "entry_pasteboard_permission_reason",
+      "value": "用于读取你主动选择发送的剪贴板文本或图片"
+    },
+    {
+      "name": "camera_permission_reason",
+      "value": "用于扫描另一台设备显示的光学传输二维码"
+    },
+    {
+      "name": "optical_transfer_action",
+      "value": "光学传输"
+    },
+    {
+      "name": "optical_transfer_title",
+      "value": "光学传输"
+    },
+    {
+      "name": "optical_transfer_subtitle",
+      "value": "无需网络，通过屏幕和相机传输"
+    },
+    {
+      "name": "optical_send_tab",
+      "value": "发送"
+    },
+    {
+      "name": "optical_receive_tab",
+      "value": "接收"
+    },
+    {
+      "name": "optical_send_note",
+      "value": "优先发送已选择的文件、图片或编辑框文本；没有待发送内容时使用最新内容。请保持屏幕常亮并让接收设备对准二维码。"
+    },
+    {
+      "name": "optical_receive_note",
+      "value": "将取景框对准另一台设备上的动态二维码。漏扫的帧无需重传，收集到足够帧后会自动恢复并校验内容。"
+    },
+    {
+      "name": "optical_start_send",
+      "value": "开始光学发送"
+    },
+    {
+      "name": "optical_restart_send",
+      "value": "重新开始"
+    },
+    {
+      "name": "optical_start_receive",
+      "value": "打开相机接收"
+    },
+    {
+      "name": "optical_preparing",
+      "value": "正在准备内容…"
+    },
+    {
+      "name": "optical_send_ready",
+      "value": "准备好后将显示连续变化的二维码"
+    },
+    {
+      "name": "optical_no_content",
+      "value": "没有可发送的内容，或二维码生成失败"
+    },
+    {
+      "name": "optical_too_large",
+      "value": "当前版本最多支持 4 MB，请选择更小的内容"
+    },
+    {
+      "name": "optical_frames_sent",
+      "value": "已显示帧"
+    },
+    {
+      "name": "optical_frames_received",
+      "value": "已接收帧"
+    },
+    {
+      "name": "optical_requesting_camera",
+      "value": "正在请求相机权限…"
+    },
+    {
+      "name": "optical_receive_ready",
+      "value": "打开相机后即可搜索光学传输流"
+    },
+    {
+      "name": "optical_receive_complete",
+      "value": "接收完成"
+    },
+    {
+      "name": "optical_camera_denied",
+      "value": "需要相机权限才能接收，请授权后重试"
+    },
+    {
+      "name": "optical_receive_failed",
+      "value": "接收或完整性校验失败，请重新扫描"
     }
   ]
 }

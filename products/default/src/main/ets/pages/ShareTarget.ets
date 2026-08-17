@@ -9,7 +9,7 @@ import {
   IconStyleMode,
   ScrollEffectType
 } from '@kit.UIDesignKit';
-import { NativeSpaceDevice } from 'common';
+import { Logger, NativeSpaceDevice } from 'common';
 import { ClipboardFeatureController } from 'clipboard_feature';
 import {
   SHARE_KIND_FILE,
@@ -21,6 +21,9 @@ import {
   SHARE_STATE_NOT_JOINED,
   ShareTargetController
 } from '../viewmodel/ShareTargetController';
+
+import { Api26Material } from '../components/Api26Material';
+const logger: Logger = new Logger('ShareTargetPage');
 
 @Entry
 @Component
@@ -36,9 +39,11 @@ struct ShareTarget {
   private contentScroller: Scroller = new Scroller();
 
   aboutToAppear(): void {
-    this.configureMaterial();
     this.configureLayout();
-    ClipboardFeatureController.getInstance().prepareSharedHistory(this.getUIContext());
+    let featureController: ClipboardFeatureController = ClipboardFeatureController.getInstance();
+    featureController.prepareSharedHistory(this.getUIContext());
+    featureController.restoreAppearanceVisualSettings();
+    this.materialLevel = featureController.appearanceMaterialLevel;
     this.initialize();
   }
 
@@ -46,13 +51,6 @@ struct ShareTarget {
     if (this.wideScreenListener !== null) {
       this.wideScreenListener.off('change');
       this.wideScreenListener = null;
-    }
-  }
-
-  private configureMaterial(): void {
-    let materialTypes: Array<hdsMaterial.MaterialType> = hdsMaterial.getSystemMaterialTypes();
-    if (materialTypes.indexOf(hdsMaterial.MaterialType.IMMERSIVE) >= 0) {
-      this.materialLevel = hdsMaterial.MaterialLevel.EXQUISITE;
     }
   }
 
@@ -81,7 +79,7 @@ struct ShareTarget {
       try {
         await this.session.terminateSelfWithResult({ resultCode: resultCode });
       } catch (error) {
-        console.error('UniClipboard failed to close the share detail page.');
+        logger.error('UniClipboard failed to close the share detail page.');
       }
       return;
     }
@@ -89,9 +87,9 @@ struct ShareTarget {
       return;
     }
     try {
-      await this.hostWindow.loadContent('pages/Index');
+      await this.hostWindow.setUIContent('pages/Index');
     } catch (error) {
-      console.error('UniClipboard failed to restore the main page after sharing.');
+      logger.error('UniClipboard failed to restore the main page after sharing.');
     }
   }
 
@@ -118,7 +116,7 @@ struct ShareTarget {
       }
       await this.controller.setHeaderImage(deviceId, result.photoUris[0], hostContext);
     } catch (error) {
-      console.error('UniClipboard failed to choose a device header image.');
+      logger.error('UniClipboard failed to choose a device header image.');
     }
   }
 
@@ -175,6 +173,7 @@ struct ShareTarget {
         .justifyContent(FlexAlign.Center)
         .borderRadius($r('sys.float.corner_radius_level6'))
         .backgroundColor($r('app.color.accent_soft'))
+        .attributeModifier(Api26Material.accentSurface())
         Column({ space: 4 }) {
           Text(this.contentLabel())
             .fontSize($r('sys.float.Body_S'))
@@ -202,6 +201,7 @@ struct ShareTarget {
     .padding($r('sys.float.padding_level8'))
     .borderRadius($r('sys.float.corner_radius_level8'))
     .backgroundColor($r('sys.color.comp_background_list_card'))
+    .attributeModifier(Api26Material.panel())
     .clip(true)
   }
 
@@ -213,16 +213,16 @@ struct ShareTarget {
           LoadingProgress()
             .width(22)
             .height(22)
-            .color($r('app.color.on_accent'))
+            .color(Api26Material.accentTextColor())
         } else {
           SymbolGlyph($r('sys.symbol.nearby_devices'))
             .fontSize(23)
-            .fontColor([$r('app.color.on_accent')])
+            .fontColor([Api26Material.accentTextColor()])
         }
         Text($r('app.string.share_target_all_devices'))
           .fontSize($r('sys.float.Body_L'))
           .fontWeight(FontWeight.Medium)
-          .fontColor($r('app.color.on_accent'))
+          .fontColor(Api26Material.accentTextColor())
           .maxLines(1)
       }
     }
@@ -231,6 +231,7 @@ struct ShareTarget {
     .backgroundColor($r('app.color.accent'))
     .borderRadius($r('sys.float.corner_radius_level8'))
     .enabled(!this.controller.sending && this.hasOnlineDevice())
+    .attributeModifier(Api26Material.accent())
     .onClick((): void => {
       this.sendTo('');
     })
@@ -274,6 +275,7 @@ struct ShareTarget {
             $r('app.float.device_card_header_height_compact'))
           .justifyContent(FlexAlign.Center)
           .backgroundColor(device.online ? $r('app.color.accent') : $r('sys.color.comp_background_tertiary'))
+          .attributeModifier(Api26Material.accentSurface())
         }
         Column() {
           Row({ space: 12 }) {
@@ -309,6 +311,7 @@ struct ShareTarget {
             .height(52)
             .backgroundColor($r('app.color.on_accent'))
             .enabled(device.online && !this.controller.sending)
+            .attributeModifier(Api26Material.accent())
             .onClick((): void => {
               this.sendTo(device.deviceId);
             })
@@ -331,6 +334,7 @@ struct ShareTarget {
       .margin({ top: 16, right: 16 })
       .backgroundColor($r('app.color.card_image_overlay'))
       .accessibilityText($r('app.string.share_target_customize_header'))
+      .attributeModifier(Api26Material.accent())
       .onClick((): void => {
         this.chooseHeaderImage(device.deviceId);
       })
@@ -343,6 +347,7 @@ struct ShareTarget {
     .clickEffect({ level: ClickEffectLevel.MIDDLE })
     .opacity(device.online ? 1 : 0.52)
     .enabled(!this.controller.sending)
+    .attributeModifier(Api26Material.interactive())
     .onClick((): void => {
       if (device.online) {
         this.sendTo(device.deviceId);
@@ -489,9 +494,10 @@ struct ShareTarget {
         .textAlign(TextAlign.Center)
       Button($r('app.string.share_target_retry'), { type: ButtonType.Normal })
         .height(44)
-        .fontColor($r('app.color.on_accent'))
+        .fontColor(Api26Material.accentTextColor())
         .backgroundColor($r('app.color.accent'))
         .borderRadius($r('sys.float.corner_radius_level8'))
+        .attributeModifier(Api26Material.accent())
         .onClick((): void => {
           this.initialize();
         })
@@ -519,6 +525,7 @@ struct ShareTarget {
         .fontColor($r('sys.color.font_primary'))
         .backgroundColor($r('sys.color.comp_background_primary'))
         .borderRadius($r('sys.float.corner_radius_level8'))
+        .attributeModifier(Api26Material.accent())
         .onClick((): void => {
           this.closeWithResult(systemShare.ShareAbilityResultCode.BACK);
         })
@@ -600,6 +607,7 @@ struct ShareTarget {
     .mode(NavigationMode.Stack)
     .bindToScrollable([this.contentScroller])
     .backgroundColor($r('sys.color.background_secondary'))
+    .attributeModifier(Api26Material.panel())
     .ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM],
       [LayoutSafeAreaEdge.TOP, LayoutSafeAreaEdge.BOTTOM])
     .width('100%')

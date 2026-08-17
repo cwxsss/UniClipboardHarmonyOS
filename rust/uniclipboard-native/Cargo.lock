@@ -7374,6 +7374,7 @@ dependencies = [
  "uc-bootstrap",
  "uc-content-hash",
  "uc-core",
+ "uc-infra",
  "uc-mobile",
  "uc-mobile-proto",
 ]

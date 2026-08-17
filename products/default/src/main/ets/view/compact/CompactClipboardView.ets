@@ -67,7 +67,12 @@ import {
   FEEDBACK_EMAIL
 } from 'clipboard_feature';
 import { ConnectionDiagnosticsSheet } from '../../components/ConnectionDiagnosticsSheet';
+import { LinkPreviewCard } from '../../components/LinkPreviewCard';
+import { AppearanceVisualSettingsPanel } from '../../components/AppearanceVisualSettingsPanel';
+import { OpticalTransferPanel } from '../../components/OpticalTransferPanel';
 
+import { Api26Material } from '../../components/Api26Material';
+import { HdrImage } from '../../components/HdrImage';
 @Component
 export struct CompactClipboardView {
   @State controller: ClipboardFeatureController = ClipboardFeatureController.getInstance();
@@ -75,8 +80,15 @@ export struct CompactClipboardView {
   @State showFeedbackSheet: boolean = false;
   @State showConnectionDiagnosticsSheet: boolean = false;
   @State showHistoryTagSheet: boolean = false;
+  @State showOpticalTransferSheet: boolean = false;
   @State historyTagItemId: string = '';
   @State historyTagDraft: string = '';
+  @State connectionDetailVisible: boolean = false;
+  @State connectionDetailKind: number = 0;
+  @StorageLink('appearanceBackgroundImage') appearanceBackgroundImage: string = '';
+  @StorageLink('appearanceBackgroundOpacity') appearanceBackgroundOpacity: number = 0.4;
+  @StorageLink('appearanceBackgroundBlur') appearanceBackgroundBlur: number = 8;
+  @StorageLink('appearanceComponentMaterialStyle') appearanceComponentMaterialStyle: number = 2;
   @Prop avoidAreaRectHeight: number = 0;
   @Prop navigationRectHeight: number = 0;
 
@@ -100,6 +112,45 @@ export struct CompactClipboardView {
     }
     this.showConnectionDiagnosticsSheet = true;
     this.controller.refreshConnectionDiagnostics();
+  }
+
+  @Builder
+  private opticalTransferSheet() {
+    OpticalTransferPanel({
+      onClose: (): void => {
+        this.showOpticalTransferSheet = false;
+      }
+    })
+  }
+
+  private connectionDetailGeometryId(): string {
+    return this.connectionDetailKind === 1 ? 'uniclipboard-space-connection-card' :
+      'uniclipboard-more-connections-card';
+  }
+
+  private openConnectionDetail(kind: number): void {
+    if (this.connectionDetailVisible) {
+      return;
+    }
+    this.connectionDetailKind = kind;
+    this.getUIContext().animateTo({
+      duration: 420,
+      curve: Curve.Friction
+    }, (): void => {
+      this.connectionDetailVisible = true;
+    });
+  }
+
+  private closeConnectionDetail(): void {
+    if (!this.connectionDetailVisible) {
+      return;
+    }
+    this.getUIContext().animateTo({
+      duration: 420,
+      curve: Curve.Friction
+    }, (): void => {
+      this.connectionDetailVisible = false;
+    });
   }
 
   private titleBarConnectionIcon(connected: boolean): IconType {
@@ -157,6 +208,7 @@ export struct CompactClipboardView {
         .fontColor($r('app.color.text_primary'))
         .backgroundColor($r('app.color.surface_muted'))
         .borderRadius($r('app.float.corner_radius_level10'))
+        .attributeModifier(Api26Material.input())
         .onChange((value: string): void => {
           this.historyTagDraft = value;
         })
@@ -166,14 +218,16 @@ export struct CompactClipboardView {
           .height(44)
           .fontColor($r('app.color.text_primary'))
           .backgroundColor($r('app.color.surface_muted'))
+          .attributeModifier(Api26Material.interactive())
           .onClick((): void => {
             this.showHistoryTagSheet = false;
           })
         Button($r('app.string.history_tag_save_action'), { type: ButtonType.Normal })
           .layoutWeight(1)
           .height(44)
-          .fontColor($r('app.color.on_accent'))
+          .fontColor(Api26Material.accentTextColor())
           .backgroundColor(this.controller.accentColor())
+          .attributeModifier(Api26Material.accent())
           .onClick((): void => {
             this.controller.setHistoryTags(this.historyTagItemId, this.historyTagDraft);
             this.showHistoryTagSheet = false;
@@ -228,6 +282,7 @@ export struct CompactClipboardView {
           .fontColor($r('app.color.text_primary'))
           .backgroundColor($r('app.color.surface_muted'))
           .borderRadius($r('app.float.corner_radius_level10'))
+          .attributeModifier(Api26Material.interactive())
           .onClick((): void => {
             this.controller.initializeSpaceNode();
           })
@@ -267,6 +322,7 @@ export struct CompactClipboardView {
         .padding(14)
         .borderRadius($r('app.float.corner_radius_level10'))
         .backgroundColor($r('app.color.surface_muted'))
+        .attributeModifier(Api26Material.subtle())
         if (this.controller.spaceJoinState === 1 && !this.controller.spaceSwitchOpen) {
           Text($r('app.string.space_switch_success'))
             .fontSize(12)
@@ -283,6 +339,7 @@ export struct CompactClipboardView {
             this.controller.accentColor())
           .borderRadius($r('app.float.corner_radius_level10'))
           .enabled(!this.controller.spaceInvitationBusy)
+          .attributeModifier(Api26Material.accent())
           .onClick((): void => {
             this.controller.mobileInvitationOpen = !this.controller.mobileInvitationOpen;
           })
@@ -302,6 +359,7 @@ export struct CompactClipboardView {
           .backgroundColor($r('app.color.surface_muted'))
           .borderRadius($r('app.float.corner_radius_level10'))
           .enabled(!this.controller.spaceJoinBusy)
+          .attributeModifier(Api26Material.interactive())
           .onClick((): void => {
             this.getUIContext().animateTo({
               duration: 380,
@@ -324,6 +382,7 @@ export struct CompactClipboardView {
             .padding(3)
             .borderRadius($r('app.float.corner_radius_level10'))
             .backgroundColor($r('app.color.surface_muted'))
+            .attributeModifier(Api26Material.subtle())
             if (this.controller.spaceActionMode === 0) {
               this.desktopCreateSpaceForm()
             } else {
@@ -342,6 +401,7 @@ export struct CompactClipboardView {
         .padding(3)
         .borderRadius($r('app.float.corner_radius_level10'))
         .backgroundColor($r('app.color.surface_muted'))
+        .attributeModifier(Api26Material.subtle())
         if (this.controller.spaceActionMode === 0) {
           Text($r('app.string.space_create_note'))
             .fontSize(12)
@@ -361,6 +421,7 @@ export struct CompactClipboardView {
             .onFocus((): void => {
               this.controller.spaceCreateDeviceNameRecommended = false;
             })
+            .attributeModifier(Api26Material.input())
             .onChange((value: string): void => {
               this.controller.spaceCreateDeviceName = value;
               this.controller.spaceCreateDeviceNameRecommended = false;
@@ -376,6 +437,7 @@ export struct CompactClipboardView {
             .fontColor($r('app.color.text_primary'))
             .backgroundColor($r('app.color.surface_muted'))
             .borderRadius($r('app.float.corner_radius_level10'))
+            .attributeModifier(Api26Material.input())
             .onChange((value: string): void => {
               this.controller.spaceCreatePassphrase = value;
               this.controller.spaceCreateState = 0;
@@ -390,6 +452,7 @@ export struct CompactClipboardView {
             .fontColor($r('app.color.text_primary'))
             .backgroundColor($r('app.color.surface_muted'))
             .borderRadius($r('app.float.corner_radius_level10'))
+            .attributeModifier(Api26Material.input())
             .onChange((value: string): void => {
               this.controller.spaceCreatePassphraseConfirm = value;
               this.controller.spaceCreateState = 0;
@@ -410,10 +473,11 @@ export struct CompactClipboardView {
             .height(50)
             .width('100%')
             .fontSize($r('app.float.font_body_large'))
-            .fontColor($r('app.color.on_accent'))
+            .fontColor(Api26Material.accentTextColor())
             .backgroundColor(this.controller.accentColor())
             .borderRadius($r('app.float.corner_radius_level10'))
             .enabled(this.controller.canCreateSpace())
+            .attributeModifier(Api26Material.accent())
             .onClick((): void => {
               this.controller.createCurrentSpace();
             })
@@ -424,6 +488,7 @@ export struct CompactClipboardView {
           .fontColor($r('app.color.text_primary'))
           .backgroundColor($r('app.color.surface_muted'))
           .borderRadius($r('app.float.corner_radius_level10'))
+          .attributeModifier(Api26Material.interactive())
           .onClick((): void => {
             this.controller.scanSpaceInvitation();
           })
@@ -452,6 +517,7 @@ export struct CompactClipboardView {
           .fontColor($r('app.color.text_primary'))
           .backgroundColor($r('app.color.surface_muted'))
           .borderRadius($r('app.float.corner_radius_level10'))
+          .attributeModifier(Api26Material.input())
           .onChange((value: string): void => {
             this.controller.spaceJoinDeviceName = value;
             this.controller.spaceJoinState = 0;
@@ -465,6 +531,7 @@ export struct CompactClipboardView {
           .fontColor($r('app.color.text_primary'))
           .backgroundColor($r('app.color.surface_muted'))
           .borderRadius($r('app.float.corner_radius_level10'))
+          .attributeModifier(Api26Material.input())
           .onChange((value: string): void => {
             this.controller.spaceInvitationCode = value.toUpperCase();
             this.controller.spaceJoinState = 0;
@@ -479,6 +546,7 @@ export struct CompactClipboardView {
           .fontColor($r('app.color.text_primary'))
           .backgroundColor($r('app.color.surface_muted'))
           .borderRadius($r('app.float.corner_radius_level10'))
+          .attributeModifier(Api26Material.input())
           .onChange((value: string): void => {
             this.controller.spacePassphrase = value;
             this.controller.spaceJoinState = 0;
@@ -499,10 +567,11 @@ export struct CompactClipboardView {
             .height(50)
             .width('100%')
             .fontSize($r('app.float.font_body_large'))
-            .fontColor($r('app.color.on_accent'))
+            .fontColor(Api26Material.accentTextColor())
             .backgroundColor(this.controller.accentColor())
             .borderRadius($r('app.float.corner_radius_level10'))
             .enabled(this.controller.canJoinSpace())
+            .attributeModifier(Api26Material.accent())
             .onClick((): void => {
               this.controller.joinCurrentSpace();
             })
@@ -513,6 +582,7 @@ export struct CompactClipboardView {
     .padding($r('app.float.padding_level8'))
     .borderRadius($r('app.float.corner_radius_level8'))
     .backgroundColor($r('app.color.surface'))
+    .attributeModifier(Api26Material.panel())
   }
 
 
@@ -688,10 +758,11 @@ export struct CompactClipboardView {
         { type: ButtonType.Normal })
           .height(36)
           .fontSize(13)
-          .fontColor($r('app.color.on_accent'))
+          .fontColor(Api26Material.accentTextColor())
           .backgroundColor(this.controller.accentColor())
           .borderRadius($r('app.float.corner_radius_level10'))
           .enabled(this.controller.currentImageRecognitionState() !== 1)
+          .attributeModifier(Api26Material.accent())
           .onClick((): void => {
             this.controller.recognizeCurrentImage();
           })
@@ -711,6 +782,7 @@ export struct CompactClipboardView {
               .fontColor(this.controller.accentColor())
               .backgroundColor($r('app.color.surface'))
               .borderRadius($r('app.float.corner_radius_level10'))
+              .attributeModifier(Api26Material.accent())
               .onClick((): void => {
                 this.controller.copyImageRecognizedText();
               })
@@ -726,6 +798,7 @@ export struct CompactClipboardView {
             .padding(12)
             .borderRadius($r('app.float.corner_radius_level4'))
             .backgroundColor($r('app.color.surface'))
+            .attributeModifier(Api26Material.panel())
         }
         if (this.controller.currentImageSmartActions().length > 0) {
           Text($r('app.string.image_intelligence_actions_title'))
@@ -753,6 +826,7 @@ export struct CompactClipboardView {
                 .fontColor($r('app.color.text_primary'))
                 .backgroundColor($r('app.color.surface'))
                 .borderRadius($r('app.float.corner_radius_level10'))
+                .attributeModifier(Api26Material.interactive())
                 .onClick((): void => {
                   this.controller.copyImageSmartAction(action);
                 })
@@ -761,9 +835,10 @@ export struct CompactClipboardView {
                   $r('app.string.image_intelligence_open'), { type: ButtonType.Normal })
                   .height(32)
                   .fontSize(12)
-                  .fontColor($r('app.color.on_accent'))
+                  .fontColor(Api26Material.accentTextColor())
                   .backgroundColor(this.controller.accentColor())
                   .borderRadius($r('app.float.corner_radius_level10'))
+                  .attributeModifier(Api26Material.accent())
                   .onClick((): void => {
                     this.controller.openImageSmartAction(action);
                   })
@@ -773,6 +848,7 @@ export struct CompactClipboardView {
             .padding(10)
             .borderRadius($r('app.float.corner_radius_level4'))
             .backgroundColor($r('app.color.surface_muted'))
+            .attributeModifier(Api26Material.subtle())
           }, (action: ImageSmartAction): string => action.kind + ':' + action.value)
         }
       } else if (this.controller.currentImageRecognitionState() === 3) {
@@ -791,6 +867,7 @@ export struct CompactClipboardView {
     .padding(14)
     .borderRadius($r('app.float.corner_radius_level8'))
     .backgroundColor($r('app.color.surface_muted'))
+    .attributeModifier(Api26Material.subtle())
   }
 
 
@@ -807,8 +884,10 @@ export struct CompactClipboardView {
           .aspectRatio(this.controller.latestImageAspectRatio())
           .constraintSize({ maxHeight: 380 })
           .objectFit(ImageFit.Contain)
+          .attributeModifier(HdrImage.touchContent(this.controller.latestImage))
           .borderRadius($r('app.float.corner_radius_level4'))
           .backgroundColor($r('app.color.surface_muted'))
+          .attributeModifier(Api26Material.subtle())
       } else {
         Image(this.controller.latestImage)
           .id('latest-image-odd')
@@ -816,8 +895,10 @@ export struct CompactClipboardView {
           .aspectRatio(this.controller.latestImageAspectRatio())
           .constraintSize({ maxHeight: 380 })
           .objectFit(ImageFit.Contain)
+          .attributeModifier(HdrImage.touchContent(this.controller.latestImage))
           .borderRadius($r('app.float.corner_radius_level4'))
           .backgroundColor($r('app.color.surface_muted'))
+          .attributeModifier(Api26Material.subtle())
       }
       Text(this.controller.latestText)
         .fontSize($r('app.float.font_body_medium'))
@@ -867,6 +948,7 @@ export struct CompactClipboardView {
         .padding({ left: 22, right: 22 })
         .borderRadius($r('app.float.corner_radius_level8'))
         .backgroundColor($r('app.color.surface_muted'))
+        .attributeModifier(Api26Material.subtle())
       }
       Text(this.controller.desktopFileName())
         .fontSize($r('app.float.font_body_large'))
@@ -879,10 +961,11 @@ export struct CompactClipboardView {
         Button(this.controller.desktopFilePreviewState === 1 ? $r('app.string.file_preview_opening') :
           $r('app.string.file_preview_action'), { type: ButtonType.Normal })
           .height(40)
-          .fontColor($r('app.color.on_accent'))
+          .fontColor(Api26Material.accentTextColor())
           .backgroundColor(this.controller.accentColor())
           .borderRadius($r('app.float.corner_radius_level10'))
           .enabled(this.controller.desktopFilePreviewUri().length > 0 && this.controller.desktopFilePreviewState !== 1)
+          .attributeModifier(Api26Material.accent())
           .onClick((): void => {
             this.controller.openDesktopFilePreview();
           })
@@ -894,6 +977,8 @@ export struct CompactClipboardView {
         }
       }
       .width('100%')
+    } else if (this.controller.currentTextLooksLikeLink()) {
+      LinkPreviewCard()
     } else {
       Text(this.controller.latestText.length > 0 ? this.controller.latestText : $r('app.string.latest_empty'))
         .fontSize(16)
@@ -906,6 +991,7 @@ export struct CompactClipboardView {
         .padding(16)
         .borderRadius($r('app.float.corner_radius_level8'))
         .backgroundColor($r('app.color.surface_muted'))
+        .attributeModifier(Api26Material.subtle())
     }
   }
 
@@ -927,6 +1013,7 @@ export struct CompactClipboardView {
               .padding({ left: 8, right: 8, top: 2, bottom: 2 })
               .borderRadius($r('app.float.corner_radius_level2'))
               .backgroundColor(this.controller.accentSoftColor())
+              .attributeModifier(Api26Material.accentSurface())
             Blank()
           }
           this.mobileLatestContent()
@@ -936,10 +1023,11 @@ export struct CompactClipboardView {
               .layoutWeight(1)
               .height(46)
               .fontSize(14)
-              .fontColor($r('app.color.on_accent'))
+              .fontColor(Api26Material.accentTextColor())
               .backgroundColor(this.controller.accentColor())
               .borderRadius($r('app.float.corner_radius_level10'))
               .enabled(!this.controller.busy)
+              .attributeModifier(Api26Material.accent())
               .onClick(() => {
                 this.controller.pullLatest();
               })
@@ -952,15 +1040,36 @@ export struct CompactClipboardView {
               .backgroundColor($r('app.color.surface_muted'))
               .borderRadius($r('app.float.corner_radius_level10'))
               .enabled(this.controller.latestCopyable())
+              .attributeModifier(Api26Material.interactive())
               .onClick(() => {
                 this.controller.copyLatest();
               })
           }
+          Button({ type: ButtonType.Normal }) {
+            Row({ space: 8 }) {
+              SymbolGlyph($r('sys.symbol.qrcode'))
+                .fontSize(20)
+                .fontColor([this.controller.accentColor()])
+              Text($r('app.string.optical_transfer_action'))
+                .fontSize(14)
+                .fontWeight(FontWeight.Medium)
+                .fontColor(this.controller.accentColor())
+            }
+          }
+            .width('100%')
+            .height(42)
+            .backgroundColor(this.controller.accentSoftColor())
+            .borderRadius($r('app.float.corner_radius_level10'))
+            .attributeModifier(Api26Material.accent())
+            .onClick((): void => {
+              this.showOpticalTransferSheet = true;
+            })
         }
         .width('100%')
         .padding($r('app.float.padding_level8'))
         .borderRadius($r('app.float.corner_radius_level8'))
         .backgroundColor($r('app.color.surface'))
+        .attributeModifier(Api26Material.panel())
         .scale({ x: this.controller.latestContentPulse, y: this.controller.latestContentPulse })
 
         Column({ space: 12 }) {
@@ -977,6 +1086,7 @@ export struct CompactClipboardView {
             .backgroundColor($r('app.color.surface_muted'))
             .borderRadius($r('app.float.corner_radius_level8'))
             .padding(14)
+            .attributeModifier(Api26Material.input())
             .onChange((value: string) => {
               this.controller.composerText = value;
             })
@@ -1004,10 +1114,11 @@ export struct CompactClipboardView {
               .layoutWeight(1)
               .height(46)
               .fontSize(14)
-              .fontColor($r('app.color.on_accent'))
+              .fontColor(Api26Material.accentTextColor())
               .backgroundColor(this.controller.accentColor())
               .borderRadius($r('app.float.corner_radius_level10'))
               .enabled(!this.controller.busy && this.controller.composerText.trim().length > 0)
+              .attributeModifier(Api26Material.accent())
               .onClick(() => {
                 this.controller.sendText();
               })
@@ -1027,16 +1138,20 @@ export struct CompactClipboardView {
                 .width('100%')
                 .height(220)
                 .objectFit(ImageFit.Contain)
+                .attributeModifier(HdrImage.touchContent(this.controller.composerImage))
                 .borderRadius($r('app.float.corner_radius_level4'))
                 .backgroundColor($r('app.color.surface_muted'))
+                .attributeModifier(Api26Material.subtle())
             } else {
               Image(this.controller.composerImage)
                 .id('composer-image-odd')
                 .width('100%')
                 .height(220)
                 .objectFit(ImageFit.Contain)
+                .attributeModifier(HdrImage.touchContent(this.controller.composerImage))
                 .borderRadius($r('app.float.corner_radius_level4'))
                 .backgroundColor($r('app.color.surface_muted'))
+                .attributeModifier(Api26Material.subtle())
             }
           } else {
             Text($r('app.string.image_empty'))
@@ -1047,6 +1162,7 @@ export struct CompactClipboardView {
               .padding(14)
               .borderRadius($r('app.float.corner_radius_level8'))
               .backgroundColor($r('app.color.surface_muted'))
+              .attributeModifier(Api26Material.subtle())
           }
           Row({ space: 10 }) {
             PasteButton({
@@ -1075,10 +1191,11 @@ export struct CompactClipboardView {
               .layoutWeight(1)
               .height(46)
               .fontSize(14)
-              .fontColor($r('app.color.on_accent'))
+              .fontColor(Api26Material.accentTextColor())
               .backgroundColor(this.controller.accentColor())
               .borderRadius($r('app.float.corner_radius_level10'))
               .enabled(!this.controller.busy && this.controller.composerImage !== null)
+              .attributeModifier(Api26Material.accent())
               .onClick(() => {
                 this.controller.sendImage();
               })
@@ -1128,6 +1245,7 @@ export struct CompactClipboardView {
         .padding($r('app.float.padding_level8'))
         .borderRadius($r('app.float.corner_radius_level8'))
         .backgroundColor($r('app.color.surface'))
+        .attributeModifier(Api26Material.panel())
 
         Column({ space: 10 }) {
           Row() {
@@ -1143,6 +1261,7 @@ export struct CompactClipboardView {
               .backgroundColor(this.controller.accentSoftColor())
               .borderRadius($r('app.float.corner_radius_level10'))
               .enabled(!this.controller.historyLoading)
+              .attributeModifier(Api26Material.accent())
               .onClick(() => {
                 this.controller.loadServerHistory(true);
               })
@@ -1155,6 +1274,7 @@ export struct CompactClipboardView {
             .fontColor($r('app.color.text_primary'))
             .backgroundColor($r('app.color.surface_muted'))
             .borderRadius($r('app.float.corner_radius_level10'))
+            .attributeModifier(Api26Material.input())
             .onChange((value: string) => {
               this.controller.historySearchText = value;
             })
@@ -1167,6 +1287,7 @@ export struct CompactClipboardView {
               .backgroundColor($r('app.color.surface_muted'))
               .borderRadius($r('app.float.corner_radius_level10'))
               .enabled(!this.controller.historyLoading)
+              .attributeModifier(Api26Material.interactive())
               .onClick(() => {
                 this.controller.loadServerHistory(true);
               })
@@ -1180,6 +1301,7 @@ export struct CompactClipboardView {
                 $r('app.color.surface_muted'))
               .borderRadius($r('app.float.corner_radius_level10'))
               .enabled(!this.controller.historyLoading)
+              .attributeModifier(Api26Material.accent())
               .onClick(() => {
                 this.controller.historyStarredOnly = !this.controller.historyStarredOnly;
                 this.controller.loadServerHistory(true);
@@ -1227,6 +1349,7 @@ export struct CompactClipboardView {
                     .backgroundColor($r('app.color.surface_muted'))
                     .borderRadius($r('app.float.corner_radius_level4'))
                     .enabled(!this.controller.historyMutationBusy)
+                    .attributeModifier(Api26Material.accent())
                     .onClick(() => {
                       this.controller.toggleHistoryStarred(item);
                     })
@@ -1239,6 +1362,7 @@ export struct CompactClipboardView {
                     .backgroundColor($r('app.color.surface_muted'))
                     .borderRadius($r('app.float.corner_radius_level4'))
                     .enabled(!this.controller.historyMutationBusy)
+                    .attributeModifier(Api26Material.accent())
                     .onClick(() => {
                       this.controller.toggleHistoryPinned(item);
                     })
@@ -1250,6 +1374,7 @@ export struct CompactClipboardView {
                     .backgroundColor($r('app.color.surface_muted'))
                     .borderRadius($r('app.float.corner_radius_level4'))
                     .enabled(!this.controller.historyMutationBusy)
+                    .attributeModifier(Api26Material.interactive())
                     .onClick(() => {
                       this.controller.confirmDeleteHistory(item);
                     })
@@ -1257,10 +1382,13 @@ export struct CompactClipboardView {
                 .width('100%')
               }
               .width('100%')
-              .padding({ top: 10, bottom: 10 })
-              .border({ width: { bottom: 1 }, color: $r('app.color.divider') })
+              .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+              .borderRadius($r('app.float.corner_radius_level8'))
+              .backgroundColor($r('app.color.surface_muted'))
+              .border({ width: 1, color: $r('app.color.divider') })
               .clickEffect({ level: ClickEffectLevel.MIDDLE })
               .bindContextMenu(this.historyServerContextMenu(item), ResponseType.LongPress)
+              .attributeModifier(Api26Material.interactive())
             }, (item: ServerHistoryItem) => item.id)
             Button(this.controller.historyEnd ? $r('app.string.server_history_end') :
               $r('app.string.server_history_load_more'), { type: ButtonType.Normal })
@@ -1271,6 +1399,7 @@ export struct CompactClipboardView {
               .backgroundColor($r('app.color.surface_muted'))
               .borderRadius($r('app.float.corner_radius_level10'))
               .enabled(!this.controller.historyLoading && !this.controller.historyEnd)
+              .attributeModifier(Api26Material.interactive())
               .onClick(() => {
                 this.controller.loadServerHistory(false);
               })
@@ -1280,6 +1409,7 @@ export struct CompactClipboardView {
         .padding($r('app.float.padding_level8'))
         .borderRadius($r('app.float.corner_radius_level8'))
         .backgroundColor($r('app.color.surface'))
+        .attributeModifier(Api26Material.panel())
 
         Column({ space: 10 }) {
           Row() {
@@ -1295,6 +1425,7 @@ export struct CompactClipboardView {
               .fontColor(this.controller.accentColor())
               .backgroundColor(this.controller.accentSoftColor())
               .borderRadius($r('app.float.corner_radius_level10'))
+              .attributeModifier(Api26Material.accent())
               .onClick((): void => {
                 this.controller.toggleHistorySelectionMode();
               })
@@ -1310,6 +1441,7 @@ export struct CompactClipboardView {
               .backgroundColor(!this.controller.historySnippetOnly ? this.controller.accentSoftColor() :
                 $r('app.color.surface_muted'))
               .borderRadius($r('app.float.corner_radius_level10'))
+              .attributeModifier(Api26Material.accent())
               .onClick((): void => {
                 this.controller.clearHistoryLibraryFilters();
               })
@@ -1322,6 +1454,7 @@ export struct CompactClipboardView {
               .backgroundColor(this.controller.historySnippetOnly ? this.controller.accentSoftColor() :
                 $r('app.color.surface_muted'))
               .borderRadius($r('app.float.corner_radius_level10'))
+              .attributeModifier(Api26Material.accent())
               .onClick((): void => {
                 this.controller.historySnippetOnly = true;
               })
@@ -1342,6 +1475,7 @@ export struct CompactClipboardView {
                 .backgroundColor(this.controller.historyDeviceFilter === deviceName ?
                   this.controller.accentSoftColor() : $r('app.color.surface_muted'))
                 .borderRadius($r('app.float.corner_radius_level10'))
+                .attributeModifier(Api26Material.accent())
                 .onClick((): void => {
                   this.controller.applyHistoryDeviceFilter(deviceName);
                 })
@@ -1362,6 +1496,7 @@ export struct CompactClipboardView {
                 .backgroundColor(this.controller.desktopCustomTagFilter === tag ?
                   this.controller.accentSoftColor() : $r('app.color.surface_muted'))
                 .borderRadius($r('app.float.corner_radius_level10'))
+                .attributeModifier(Api26Material.accent())
                 .onClick((): void => {
                   this.controller.applyHistoryTagFilter(tag);
                 })
@@ -1376,6 +1511,7 @@ export struct CompactClipboardView {
                 .fontColor(this.controller.accentColor())
                 .backgroundColor(this.controller.accentSoftColor())
                 .borderRadius($r('app.float.corner_radius_level10'))
+                .attributeModifier(Api26Material.accent())
                 .onClick((): void => {
                   this.controller.selectAllFilteredHistory();
                 })
@@ -1387,6 +1523,7 @@ export struct CompactClipboardView {
                 .backgroundColor(this.controller.accentSoftColor())
                 .enabled(this.controller.historySelectedIds.length > 0)
                 .borderRadius($r('app.float.corner_radius_level10'))
+                .attributeModifier(Api26Material.accent())
                 .onClick((): void => {
                   this.controller.batchToggleSelectedStarred();
                 })
@@ -1398,6 +1535,7 @@ export struct CompactClipboardView {
                 .backgroundColor(this.controller.accentSoftColor())
                 .enabled(this.controller.historySelectedIds.length > 0)
                 .borderRadius($r('app.float.corner_radius_level10'))
+                .attributeModifier(Api26Material.interactive())
                 .onClick((): void => {
                   this.controller.batchDeleteSelectedHistory();
                 })
@@ -1430,6 +1568,7 @@ export struct CompactClipboardView {
                 .justifyContent(FlexAlign.Center)
                 .borderRadius($r('app.float.corner_radius_level10'))
                 .backgroundColor($r('app.color.surface_muted'))
+                .attributeModifier(Api26Material.subtle())
                 Column({ space: 4 }) {
                   Text(item.text)
                     .fontSize($r('app.float.font_body_large'))
@@ -1476,10 +1615,13 @@ export struct CompactClipboardView {
                 .layoutWeight(1)
               }
               .width('100%')
-              .padding({ top: 10, bottom: 10 })
-              .border({ width: { bottom: 1 }, color: $r('app.color.divider') })
+              .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+              .borderRadius($r('app.float.corner_radius_level8'))
+              .backgroundColor($r('app.color.surface_muted'))
+              .border({ width: 1, color: $r('app.color.divider') })
               .clickEffect({ level: ClickEffectLevel.MIDDLE })
               .bindContextMenu(this.historyLocalContextMenu(item), ResponseType.LongPress)
+              .attributeModifier(Api26Material.interactive())
               .onClick((): void => {
                 if (this.controller.historySelectionMode) {
                   this.controller.toggleHistorySelection(item.id);
@@ -1494,6 +1636,7 @@ export struct CompactClipboardView {
         .padding($r('app.float.padding_level8'))
         .borderRadius($r('app.float.corner_radius_level8'))
         .backgroundColor($r('app.color.surface'))
+        .attributeModifier(Api26Material.panel())
         .scale({ x: this.controller.historyPulse, y: this.controller.historyPulse })
       }
       .width('100%')
@@ -1534,6 +1677,7 @@ export struct CompactClipboardView {
       color: this.controller.appearanceMode === mode ? this.controller.accentColor() : $r('app.color.divider')
     })
     .clickEffect({ level: ClickEffectLevel.MIDDLE })
+    .attributeModifier(Api26Material.navigation(this.controller.appearanceMode === mode))
     .onClick((): void => {
       this.controller.selectAppearanceMode(mode);
     })
@@ -1576,6 +1720,7 @@ export struct CompactClipboardView {
       color: this.controller.appearanceThemeId === option.id ? this.controller.accentColor() : $r('app.color.divider')
     })
     .clickEffect({ level: ClickEffectLevel.MIDDLE })
+    .attributeModifier(Api26Material.navigation(this.controller.appearanceThemeId === option.id))
     .onClick((): void => {
       this.controller.selectAppearanceTheme(option.id);
     })
@@ -1597,6 +1742,7 @@ export struct CompactClipboardView {
         .justifyContent(FlexAlign.Center)
         .borderRadius($r('app.float.corner_radius_level4'))
         .backgroundColor(this.controller.accentSoftColor())
+        .attributeModifier(Api26Material.accentSurface())
         Column({ space: 4 }) {
           Text($r('app.string.appearance_title'))
             .fontSize($r('app.float.font_subtitle_large'))
@@ -1645,11 +1791,15 @@ export struct CompactClipboardView {
         .width('100%')
       }
       .width('100%')
+      Divider()
+        .color($r('app.color.divider'))
+      AppearanceVisualSettingsPanel({ compact: true })
     }
     .width('100%')
     .padding($r('app.float.padding_level8'))
     .borderRadius($r('app.float.corner_radius_level8'))
     .backgroundColor($r('app.color.surface'))
+    .attributeModifier(Api26Material.panel())
   }
 
 
@@ -1719,6 +1869,7 @@ export struct CompactClipboardView {
           .fontColor($r('app.color.text_primary'))
           .backgroundColor($r('app.color.surface_muted'))
           .borderRadius($r('app.float.corner_radius_level8'))
+          .attributeModifier(Api26Material.input())
           .onChange((value: string): void => {
             this.controller.mobileSyncPort = value;
           })
@@ -1729,6 +1880,7 @@ export struct CompactClipboardView {
           .backgroundColor($r('app.color.surface_muted'))
           .borderRadius($r('app.float.corner_radius_level8'))
           .enabled(!this.controller.mobileSyncBusy)
+          .attributeModifier(Api26Material.interactive())
           .onClick((): void => {
             this.controller.toggleMobileSyncServer(this.controller.mobileSyncEnabled);
           })
@@ -1748,6 +1900,7 @@ export struct CompactClipboardView {
             .padding(10)
             .borderRadius($r('app.float.corner_radius_level4'))
             .backgroundColor($r('app.color.surface_muted'))
+            .attributeModifier(Api26Material.subtle())
         }, (url: string): string => url)
       } else {
         Text($r('app.string.mobile_sync_no_address'))
@@ -1764,10 +1917,11 @@ export struct CompactClipboardView {
         Button($r('app.string.mobile_sync_add_device'), { type: ButtonType.Normal })
           .height(36)
           .fontSize(12)
-          .fontColor($r('app.color.on_accent'))
+          .fontColor(Api26Material.accentTextColor())
           .backgroundColor(this.controller.accentColor())
           .borderRadius($r('app.float.corner_radius_level8'))
           .enabled(this.controller.mobileSyncRunning && !this.controller.mobileSyncBusy)
+          .attributeModifier(Api26Material.accent())
           .onClick((): void => {
             this.controller.mobileSyncAddOpen = !this.controller.mobileSyncAddOpen;
             this.controller.mobileSyncCredential = null;
@@ -1798,6 +1952,7 @@ export struct CompactClipboardView {
               .justifyContent(FlexAlign.Center)
               .borderRadius($r('app.float.corner_radius_level4'))
               .backgroundColor(this.controller.accentSoftColor())
+              .attributeModifier(Api26Material.accentSurface())
               Row()
                 .width(10)
                 .height(10)
@@ -1829,6 +1984,7 @@ export struct CompactClipboardView {
               .backgroundColor($r('app.color.surface_muted'))
               .borderRadius($r('app.float.corner_radius_level4'))
               .enabled(!this.controller.desktopDeviceMutationBusy)
+              .attributeModifier(Api26Material.interactive())
               .onClick((): void => {
                 this.controller.revokeMobileSyncDevice(device);
               })
@@ -1837,6 +1993,7 @@ export struct CompactClipboardView {
           .padding(8)
           .borderRadius($r('app.float.corner_radius_level4'))
           .backgroundColor($r('app.color.surface_muted'))
+          .attributeModifier(Api26Material.subtle())
         }, (device: NativeMobileSyncDevice): string => device.deviceId)
       }
       if (this.controller.mobileSyncAddOpen && this.controller.mobileSyncCredential === null) {
@@ -1861,6 +2018,7 @@ export struct CompactClipboardView {
             .fontSize(14)
             .backgroundColor($r('app.color.surface_muted'))
             .borderRadius($r('app.float.corner_radius_level8'))
+            .attributeModifier(Api26Material.input())
             .onChange((value: string): void => {
               this.controller.mobileSyncDeviceName = value;
             })
@@ -1878,6 +2036,7 @@ export struct CompactClipboardView {
               .fontSize(14)
               .backgroundColor($r('app.color.surface_muted'))
               .borderRadius($r('app.float.corner_radius_level8'))
+              .attributeModifier(Api26Material.input())
               .onChange((value: string): void => {
                 this.controller.mobileSyncCustomUsername = value;
               })
@@ -1888,6 +2047,7 @@ export struct CompactClipboardView {
               .fontSize(14)
               .backgroundColor($r('app.color.surface_muted'))
               .borderRadius($r('app.float.corner_radius_level8'))
+              .attributeModifier(Api26Material.input())
               .onChange((value: string): void => {
                 this.controller.mobileSyncCustomPassword = value;
               })
@@ -1896,10 +2056,11 @@ export struct CompactClipboardView {
             $r('app.string.mobile_sync_create'), { type: ButtonType.Normal })
             .width('100%')
             .height(44)
-            .fontColor($r('app.color.on_accent'))
+            .fontColor(Api26Material.accentTextColor())
             .backgroundColor(this.controller.accentColor())
             .borderRadius($r('app.float.corner_radius_level8'))
             .enabled(this.controller.mobileSyncDeviceName.trim().length > 0 && !this.controller.mobileSyncBusy)
+            .attributeModifier(Api26Material.accent())
             .onClick((): void => {
               this.controller.createMobileSyncDevice();
             })
@@ -1908,6 +2069,7 @@ export struct CompactClipboardView {
         .padding(12)
         .borderRadius($r('app.float.corner_radius_level8'))
         .backgroundColor($r('app.color.surface_muted'))
+        .attributeModifier(Api26Material.subtle())
       }
       if (this.controller.mobileSyncCredential !== null) {
         Column({ space: 10 }) {
@@ -1973,6 +2135,287 @@ export struct CompactClipboardView {
     .padding($r('app.float.padding_level8'))
     .borderRadius($r('app.float.corner_radius_level8'))
     .backgroundColor($r('app.color.surface'))
+    .attributeModifier(Api26Material.panel())
+  }
+
+
+  @Builder
+  private compactSpaceConnectionHeroCard() {
+    Stack({ alignContent: Alignment.TopStart }) {
+      Stack({ alignContent: Alignment.Center }) {
+        Row()
+          .width(206)
+          .height(206)
+          .borderRadius(103)
+          .backgroundColor(this.controller.accentSoftColor())
+        Row()
+          .width(156)
+          .height(156)
+          .borderRadius(78)
+          .border({ width: 2, color: this.controller.accentMediumColor() })
+        Row() {
+          SymbolGlyph($r('sys.symbol.lock_shield_fill'))
+            .fontSize(54)
+            .fontColor([this.controller.accentColor(), this.controller.accentSecondaryColor()])
+        }
+        .width(112)
+        .height(112)
+        .justifyContent(FlexAlign.Center)
+        .borderRadius(56)
+        .backgroundColor($r('app.color.surface'))
+      }
+      .width('100%')
+      .height(188)
+      .translate({ y: 4 })
+      Column({ space: 5 }) {
+        Blank()
+        Text($r('app.string.device_space_connection_eyebrow'))
+          .fontSize(14)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(this.controller.accentColor())
+          .width('100%')
+        Text($r('app.string.device_space_connection_title'))
+          .fontSize(32)
+          .fontWeight(FontWeight.Bold)
+          .fontColor($r('app.color.text_primary'))
+          .maxLines(1)
+          .width('100%')
+        Row({ space: 12 }) {
+          Text(this.controller.spaceJoined ?
+            (this.controller.spacePeerConnected ? $r('app.string.space_peer_online') :
+              $r('app.string.space_peer_waiting')) :
+            $r('app.string.device_space_connection_not_joined'))
+            .fontSize(14)
+            .fontColor($r('app.color.text_secondary'))
+            .maxLines(2)
+            .layoutWeight(1)
+          Row() {
+            SymbolGlyph($r('sys.symbol.arrow_right'))
+              .fontSize(23)
+              .fontColor([this.controller.accentColor()])
+          }
+          .width(52)
+          .height(52)
+          .justifyContent(FlexAlign.Center)
+          .borderRadius(26)
+          .backgroundColor(this.controller.accentSoftColor())
+          .attributeModifier(Api26Material.accentSurface())
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+      }
+      .width('100%')
+      .height('100%')
+      .padding(24)
+      .alignItems(HorizontalAlign.Start)
+    }
+    .width('100%')
+    .height(304)
+    .borderRadius($r('app.float.corner_radius_level8'))
+    .clip(true)
+    .renderGroup(true)
+    .backgroundColor(Api26Material.cardBackgroundColor())
+    .border({ width: 1, color: this.controller.accentMediumColor() })
+    .geometryTransition('uniclipboard-space-connection-card', { follow: true })
+    .transition(TransitionEffect.opacity(0.99).animation({ duration: 420, curve: Curve.Friction }))
+    .id('compact-space-connection-card')
+    .clickEffect({ level: ClickEffectLevel.MIDDLE })
+    .attributeModifier(Api26Material.interactive())
+    .onClick((): void => {
+      this.openConnectionDetail(1);
+    })
+  }
+
+
+  @Builder
+  private compactMoreConnectionsHeroCard() {
+    Stack({ alignContent: Alignment.TopStart }) {
+      Stack({ alignContent: Alignment.Center }) {
+        Row()
+          .width(206)
+          .height(206)
+          .borderRadius(103)
+          .backgroundColor(this.controller.accentSoftColor())
+        Row()
+          .width(156)
+          .height(156)
+          .borderRadius(78)
+          .border({ width: 2, color: this.controller.accentMediumColor() })
+        Row() {
+          SymbolGlyph($r('sys.symbol.ellipsis_circle'))
+            .fontSize(54)
+            .fontColor([this.controller.accentSecondaryColor(), this.controller.accentColor()])
+        }
+        .width(112)
+        .height(112)
+        .justifyContent(FlexAlign.Center)
+        .borderRadius(56)
+        .backgroundColor($r('app.color.surface'))
+      }
+      .width('100%')
+      .height(188)
+      .translate({ y: 4 })
+      Column({ space: 5 }) {
+        Blank()
+        Text($r('app.string.device_more_connections_eyebrow'))
+          .fontSize(14)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(this.controller.accentSecondaryColor())
+          .width('100%')
+        Text($r('app.string.device_more_connections_title'))
+          .fontSize(30)
+          .fontWeight(FontWeight.Bold)
+          .fontColor($r('app.color.text_primary'))
+          .maxLines(1)
+          .width('100%')
+        Row({ space: 12 }) {
+          Text($r('app.string.device_more_connections_note'))
+            .fontSize(14)
+            .fontColor($r('app.color.text_secondary'))
+            .maxLines(2)
+            .layoutWeight(1)
+          Row() {
+            SymbolGlyph($r('sys.symbol.arrow_right'))
+              .fontSize(23)
+              .fontColor([this.controller.accentColor()])
+          }
+          .width(52)
+          .height(52)
+          .justifyContent(FlexAlign.Center)
+          .borderRadius(26)
+          .backgroundColor(this.controller.accentSoftColor())
+          .attributeModifier(Api26Material.accentSurface())
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+      }
+      .width('100%')
+      .height('100%')
+      .padding(24)
+      .alignItems(HorizontalAlign.Start)
+    }
+    .width('100%')
+    .height(304)
+    .borderRadius($r('app.float.corner_radius_level8'))
+    .clip(true)
+    .renderGroup(true)
+    .backgroundColor(Api26Material.cardBackgroundColor())
+    .border({ width: 1, color: this.controller.accentMediumColor() })
+    .geometryTransition('uniclipboard-more-connections-card', { follow: true })
+    .transition(TransitionEffect.opacity(0.99).animation({ duration: 420, curve: Curve.Friction }))
+    .id('compact-more-connections-card')
+    .clickEffect({ level: ClickEffectLevel.MIDDLE })
+    .attributeModifier(Api26Material.interactive())
+    .onClick((): void => {
+      this.openConnectionDetail(2);
+    })
+  }
+
+
+  @Builder
+  private compactConnectionDetailPage() {
+    Stack({ alignContent: Alignment.Center }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor($r('app.color.page_background'))
+      if (this.appearanceBackgroundImage.length > 0) {
+        Image(this.appearanceBackgroundImage)
+          .width('100%')
+          .height('100%')
+          .objectFit(ImageFit.Cover)
+          .opacity(this.appearanceBackgroundOpacity)
+          .blur(this.appearanceBackgroundBlur)
+      }
+      Column() {
+      Row() {
+        Row() {
+          SymbolGlyph($r('sys.symbol.arrow_left'))
+            .fontSize(23)
+            .fontColor([this.controller.accentColor()])
+        }
+        .width(48)
+        .height(48)
+        .justifyContent(FlexAlign.Center)
+        .borderRadius(24)
+        .backgroundColor(Api26Material.cardBackgroundColor())
+        .border({ width: 1, color: this.controller.accentMediumColor() })
+        .clickEffect({ level: ClickEffectLevel.MIDDLE })
+        .attributeModifier(Api26Material.interactive())
+        .onClick((): void => {
+          this.closeConnectionDetail();
+        })
+      }
+      .width(48)
+      .height(48)
+      .position({ x: 18, y: 14 + this.avoidAreaRectHeight })
+      .zIndex(10)
+      Column({ space: 10 }) {
+        Row() {
+          SymbolGlyph(this.connectionDetailKind === 1 ? $r('sys.symbol.lock_shield_fill') :
+            $r('sys.symbol.ellipsis_circle'))
+            .fontSize(46)
+            .fontColor([this.controller.accentColor(), this.controller.accentSecondaryColor()])
+        }
+        .width(94)
+        .height(94)
+        .justifyContent(FlexAlign.Center)
+        .borderRadius(47)
+        .backgroundColor(this.controller.accentSoftColor())
+        .attributeModifier(Api26Material.accentSurface())
+        Text(this.connectionDetailKind === 1 ? $r('app.string.device_space_connection_title') :
+          $r('app.string.device_more_connections_title'))
+          .fontSize(30)
+          .fontWeight(FontWeight.Bold)
+          .fontColor($r('app.color.text_primary'))
+        Text(this.connectionDetailKind === 1 ?
+          (this.controller.spaceJoined ?
+            (this.controller.spacePeerConnected ? $r('app.string.space_peer_online') :
+              $r('app.string.space_peer_waiting')) :
+            $r('app.string.device_space_connection_not_joined')) :
+          $r('app.string.device_more_connections_note'))
+          .fontSize(13)
+          .fontColor($r('app.color.text_secondary'))
+          .textAlign(TextAlign.Center)
+          .maxLines(2)
+      }
+      .width('100%')
+      .height(204)
+      .justifyContent(FlexAlign.Center)
+      .margin({ left: 16, right: 16, top: 14 + this.avoidAreaRectHeight })
+      Scroll() {
+        Column({ space: 12 }) {
+          if (this.connectionDetailKind === 1) {
+            this.spaceJoinCard()
+          } else {
+            this.mobileSpaceRelayCard()
+            this.mobileSyncManagementCard()
+            this.mobileLegacyConnectionCard()
+          }
+        }
+        .width('100%')
+        .padding({
+          left: 16,
+          right: 16,
+          top: 20,
+          bottom: 32 + this.navigationRectHeight
+        })
+      }
+      .layoutWeight(1)
+      .width('100%')
+      .scrollBar(BarState.Off)
+      .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
+      .borderRadius({ topLeft: 28, topRight: 28 })
+      .backgroundColor(this.controller.pageBackgroundColor())
+      }
+      .width('100%')
+      .height('100%')
+    }
+    .width('100%')
+    .height('100%')
+    .geometryTransition(this.connectionDetailGeometryId())
+    .transition(TransitionEffect.opacity(0.99).animation({ duration: 420, curve: Curve.Friction }))
+    .id('compact-connection-detail-cover')
   }
 
 
@@ -1991,6 +2434,7 @@ export struct CompactClipboardView {
           .padding({ left: 8, right: 8, top: 3, bottom: 3 })
           .borderRadius($r('app.float.corner_radius_level10'))
           .backgroundColor(this.controller.accentSoftColor())
+          .attributeModifier(Api26Material.accentSurface())
       }
       .width('100%')
       Text($r('app.string.mobile_space_connection_note'))
@@ -2012,9 +2456,94 @@ export struct CompactClipboardView {
       .padding(10)
       .borderRadius($r('app.float.corner_radius_level4'))
       .backgroundColor(this.controller.accentSoftColor())
+      .attributeModifier(Api26Material.accentSurface())
     }
     .width('100%')
     .padding({ left: 4, right: 4 })
+  }
+
+
+  @Builder
+  private mobileSpaceRelayCard() {
+    Column({ space: 12 }) {
+      Row({ space: 12 }) {
+        Column({ space: 4 }) {
+          Text($r('app.string.space_relay_settings_title'))
+            .fontSize($r('app.float.font_body_large'))
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('app.color.text_primary'))
+          Text($r('app.string.space_relay_allow_note'))
+            .fontSize($r('app.float.font_body_small'))
+            .lineHeight(18)
+            .fontColor($r('app.color.text_secondary'))
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+        Toggle({ type: ToggleType.Switch, isOn: this.controller.spaceRelayFallbackEnabled })
+          .selectedColor(this.controller.accentColor())
+          .enabled(!this.controller.spaceRelaySettingsBusy)
+          .onChange((enabled: boolean): void => {
+            this.controller.spaceRelayFallbackEnabled = enabled;
+            this.controller.spaceRelaySettingsChanged();
+          })
+      }
+      .width('100%')
+      Text($r('app.string.space_relay_settings_note'))
+        .fontSize($r('app.float.font_body_small'))
+        .lineHeight(18)
+        .fontColor($r('app.color.text_secondary'))
+        .width('100%')
+      Text($r('app.string.space_relay_urls_label'))
+        .fontSize($r('app.float.font_body_medium'))
+        .fontColor($r('app.color.text_secondary'))
+        .width('100%')
+      TextArea({
+        placeholder: $r('app.string.space_relay_urls_placeholder'),
+        text: this.controller.spaceRelayUrlsText
+      })
+        .height(96)
+        .fontSize($r('app.float.font_body_medium'))
+        .fontColor($r('app.color.text_primary'))
+        .placeholderColor($r('app.color.text_secondary'))
+        .backgroundColor($r('app.color.surface_muted'))
+        .borderRadius($r('app.float.corner_radius_level8'))
+        .padding(12)
+        .attributeModifier(Api26Material.input())
+        .onChange((value: string): void => {
+          this.controller.spaceRelayUrlsText = value;
+          this.controller.spaceRelaySettingsChanged();
+        })
+      Button(this.controller.spaceRelaySettingsBusy ? $r('app.string.space_relay_saving_action') :
+        (this.controller.spaceRelaySettingsState === 2 ? $r('app.string.space_relay_retry_action') :
+          $r('app.string.space_relay_save_action')), { type: ButtonType.Normal })
+        .height(46)
+        .width('100%')
+        .fontSize($r('app.float.font_body_large'))
+        .fontColor(Api26Material.accentTextColor())
+        .backgroundColor(this.controller.accentColor())
+        .borderRadius($r('app.float.corner_radius_level10'))
+        .enabled(!this.controller.spaceRelaySettingsBusy)
+        .attributeModifier(Api26Material.accent())
+        .onClick((): void => {
+          this.controller.saveSpaceNetworkSettings();
+        })
+      if (this.controller.spaceRelaySettingsState === 1) {
+        Text($r('app.string.space_relay_saved'))
+          .fontSize($r('app.float.font_body_small'))
+          .fontColor($r('app.color.success'))
+          .width('100%')
+      } else if (this.controller.spaceRelaySettingsState === 2) {
+        Text($r('app.string.space_relay_save_failed'))
+          .fontSize($r('app.float.font_body_small'))
+          .fontColor($r('app.color.danger'))
+          .width('100%')
+      }
+    }
+    .width('100%')
+    .padding($r('app.float.padding_level8'))
+    .borderRadius($r('app.float.corner_radius_level8'))
+    .backgroundColor($r('app.color.surface'))
+    .attributeModifier(Api26Material.panel())
   }
 
 
@@ -2049,6 +2578,7 @@ export struct CompactClipboardView {
         .fontColor($r('app.color.text_primary'))
         .backgroundColor($r('app.color.surface_muted'))
         .borderRadius($r('app.float.corner_radius_level10'))
+        .attributeModifier(Api26Material.interactive())
         .onClick((): void => {
           this.getUIContext().animateTo({
             duration: 380,
@@ -2075,6 +2605,7 @@ export struct CompactClipboardView {
           .backgroundColor($r('app.color.surface_muted'))
           .borderRadius($r('app.float.corner_radius_level8'))
           .padding(12)
+          .attributeModifier(Api26Material.input())
           .onChange((value: string): void => {
             this.controller.connectUri = value;
             this.controller.connectUriState = 0;
@@ -2102,6 +2633,7 @@ export struct CompactClipboardView {
           .fontColor($r('app.color.text_primary'))
           .backgroundColor($r('app.color.surface_muted'))
           .borderRadius($r('app.float.corner_radius_level10'))
+          .attributeModifier(Api26Material.interactive())
           .onClick((): void => {
             this.controller.scanConnectUri();
           })
@@ -2113,6 +2645,7 @@ export struct CompactClipboardView {
           .backgroundColor($r('app.color.surface_muted'))
           .borderRadius($r('app.float.corner_radius_level10'))
           .enabled(this.controller.connectUri.trim().length > 0)
+          .attributeModifier(Api26Material.interactive())
           .onClick((): void => {
             this.controller.importConnectUri();
           })
@@ -2134,6 +2667,7 @@ export struct CompactClipboardView {
           .fontColor($r('app.color.text_primary'))
           .backgroundColor($r('app.color.surface_muted'))
           .borderRadius($r('app.float.corner_radius_level10'))
+          .attributeModifier(Api26Material.input())
           .onChange((value: string): void => {
             this.controller.serverUrl = value;
             this.controller.connectionChanged();
@@ -2149,6 +2683,7 @@ export struct CompactClipboardView {
           .fontColor($r('app.color.text_primary'))
           .backgroundColor($r('app.color.surface_muted'))
           .borderRadius($r('app.float.corner_radius_level10'))
+          .attributeModifier(Api26Material.input())
           .onChange((value: string): void => {
             this.controller.username = value;
             this.controller.connectionChanged();
@@ -2165,6 +2700,7 @@ export struct CompactClipboardView {
           .fontColor($r('app.color.text_primary'))
           .backgroundColor($r('app.color.surface_muted'))
           .borderRadius($r('app.float.corner_radius_level10'))
+          .attributeModifier(Api26Material.input())
           .onChange((value: string): void => {
             this.controller.password = value;
             this.controller.connectionChanged();
@@ -2173,11 +2709,12 @@ export struct CompactClipboardView {
           .height(50)
           .width('100%')
           .fontSize($r('app.float.font_body_large'))
-          .fontColor($r('app.color.on_accent'))
+          .fontColor(Api26Material.accentTextColor())
           .backgroundColor(this.controller.accentColor())
           .borderRadius($r('app.float.corner_radius_level10'))
           .margin({ top: 12 })
           .enabled(this.controller.hasConfig() && !this.controller.busy)
+          .attributeModifier(Api26Material.accent())
           .onClick((): void => {
             this.controller.testConnection();
           })
@@ -2190,6 +2727,7 @@ export struct CompactClipboardView {
           .backgroundColor($r('app.color.surface_muted'))
           .borderRadius($r('app.float.corner_radius_level10'))
           .enabled(this.controller.hasConfig())
+          .attributeModifier(Api26Material.interactive())
           .onClick((): void => {
             this.controller.toggleRealtime();
           })
@@ -2211,6 +2749,7 @@ export struct CompactClipboardView {
     .padding($r('app.float.padding_level8'))
     .borderRadius($r('app.float.corner_radius_level8'))
     .backgroundColor($r('app.color.surface'))
+    .attributeModifier(Api26Material.panel())
   }
 
 
@@ -2218,6 +2757,10 @@ export struct CompactClipboardView {
   private compactDevicePage() {
     Scroll(this.controller.devicesScroller) {
       Column({ space: 12 }) {
+        this.compactSpaceConnectionHeroCard()
+
+        this.compactMoreConnectionsHeroCard()
+
         Column({ space: 12 }) {
           Row() {
             Column({ space: 4 }) {
@@ -2238,6 +2781,7 @@ export struct CompactClipboardView {
               .padding({ left: 9, right: 9, top: 3, bottom: 3 })
               .borderRadius($r('app.float.corner_radius_level10'))
               .backgroundColor($r('app.color.surface_muted'))
+              .attributeModifier(Api26Material.subtle())
           }
           .width('100%')
           if (this.controller.spaceJoined) {
@@ -2251,6 +2795,7 @@ export struct CompactClipboardView {
                 .borderRadius($r('app.float.corner_radius_level10'))
                 .enabled(!this.controller.spaceDeviceRefreshBusy && !this.controller.spaceConnectBusy &&
                   !this.controller.desktopDeviceMutationBusy)
+                .attributeModifier(Api26Material.interactive())
                 .onClick((): void => {
                   this.controller.refreshSpaceDevices();
                 })
@@ -2259,10 +2804,11 @@ export struct CompactClipboardView {
                 .layoutWeight(1)
                 .height(42)
                 .fontSize($r('app.float.font_body_small'))
-                .fontColor($r('app.color.on_accent'))
+                .fontColor(Api26Material.accentTextColor())
                 .backgroundColor(this.controller.accentColor())
                 .borderRadius($r('app.float.corner_radius_level10'))
                 .enabled(!this.controller.spaceConnectBusy && !this.controller.desktopDeviceMutationBusy)
+                .attributeModifier(Api26Material.accent())
                 .onClick((): void => {
                   this.controller.connectAllSpaceDevices();
                 })
@@ -2298,38 +2844,8 @@ export struct CompactClipboardView {
         .padding($r('app.float.padding_level8'))
         .borderRadius($r('app.float.corner_radius_level8'))
         .backgroundColor($r('app.color.surface'))
+        .attributeModifier(Api26Material.panel())
 
-        Column({ space: 12 }) {
-          Row() {
-            Text($r('app.string.mobile_sync_registered_devices'))
-              .fontSize($r('app.float.font_subtitle_large'))
-              .fontWeight(FontWeight.Medium)
-              .fontColor($r('app.color.text_primary'))
-            Blank()
-            Text(this.controller.mobileSyncDevices.length.toString())
-              .fontSize($r('app.float.font_body_small'))
-              .fontColor($r('app.color.text_secondary'))
-              .padding({ left: 9, right: 9, top: 3, bottom: 3 })
-              .borderRadius($r('app.float.corner_radius_level10'))
-              .backgroundColor($r('app.color.surface_muted'))
-          }
-          .width('100%')
-          if (this.controller.mobileSyncDevices.length === 0) {
-            Text($r('app.string.mobile_sync_no_devices'))
-              .fontSize($r('app.float.font_body_small'))
-              .fontColor($r('app.color.text_secondary'))
-              .width('100%')
-              .padding({ top: 8, bottom: 8 })
-          } else {
-            ForEach(this.controller.mobileSyncDevices, (device: NativeMobileSyncDevice) => {
-              this.desktopMobileDeviceRow(device)
-            }, (device: NativeMobileSyncDevice): string => device.deviceId)
-          }
-        }
-        .width('100%')
-        .padding($r('app.float.padding_level8'))
-        .borderRadius($r('app.float.corner_radius_level8'))
-        .backgroundColor($r('app.color.surface'))
       }
       .width('100%')
       .padding({
@@ -2343,6 +2859,15 @@ export struct CompactClipboardView {
     .edgeEffect(EdgeEffect.Spring, { alwaysEnabled: true })
     .width('100%')
     .height('100%')
+    .bindContentCover(this.connectionDetailVisible, this.compactConnectionDetailPage(), {
+      modalTransition: ModalTransition.NONE,
+      onWillDismiss: (_action: DismissContentCoverAction): void => {
+        this.closeConnectionDetail();
+      },
+      onDisappear: (): void => {
+        this.connectionDetailVisible = false;
+      }
+    })
   }
 
 
@@ -2394,6 +2919,7 @@ export struct CompactClipboardView {
     .padding($r('app.float.padding_level8'))
     .borderRadius($r('app.float.corner_radius_level8'))
     .backgroundColor($r('app.color.surface'))
+    .attributeModifier(Api26Material.panel())
   }
 
 
@@ -2408,6 +2934,7 @@ export struct CompactClipboardView {
       .backgroundColor(this.controller.historyRetentionDays === days ? this.controller.accentSoftColor() :
         $r('app.color.surface_muted'))
       .borderRadius($r('app.float.corner_radius_level10'))
+      .attributeModifier(Api26Material.accent())
       .onClick((): void => {
         this.controller.setHistoryRetentionDays(days);
       })
@@ -2420,10 +2947,6 @@ export struct CompactClipboardView {
       Column({ space: 12 }) {
         this.compactAppearanceCard()
 
-        this.mobileSpaceConnectionGuide()
-
-        this.spaceJoinCard()
-
         Column() {
           this.backgroundSyncSwitchRow()
         }
@@ -2431,12 +2954,9 @@ export struct CompactClipboardView {
         .padding({ left: 18, right: 18 })
         .borderRadius($r('app.float.corner_radius_level8'))
         .backgroundColor($r('app.color.surface'))
+        .attributeModifier(Api26Material.panel())
 
         this.compactHistoryLibrarySettings()
-
-        this.mobileSyncManagementCard()
-
-        this.mobileLegacyConnectionCard()
       }
       .width('100%')
       .padding({
@@ -2490,6 +3010,7 @@ export struct CompactClipboardView {
     .justifyContent(FlexAlign.Center)
     .borderRadius($r('app.float.corner_radius_level8'))
     .backgroundColor(this.controller.accentSoftColor())
+    .attributeModifier(Api26Material.accentSurface())
   }
 
 
@@ -2520,6 +3041,7 @@ export struct CompactClipboardView {
         .borderRadius($r('app.float.corner_radius_level8'))
         .border({ width: 1, color: $r('app.color.divider') })
         .padding(16)
+        .attributeModifier(Api26Material.input())
         .onChange((value: string): void => {
           this.controller.feedbackText = value;
         })
@@ -2543,16 +3065,18 @@ export struct CompactClipboardView {
       .padding({ left: 16, right: 16 })
       .borderRadius($r('app.float.corner_radius_level8'))
       .backgroundColor(this.controller.accentSoftColor())
+      .attributeModifier(Api26Material.accent())
       Button($r('app.string.feedback_write_clipboard_action'), { type: ButtonType.Normal })
         .width('100%')
         .height(50)
         .fontSize($r('app.float.font_body_large'))
         .fontWeight(FontWeight.Medium)
-        .fontColor($r('app.color.on_accent'))
+        .fontColor(Api26Material.accentTextColor())
         .backgroundColor(this.controller.accentColor())
         .borderRadius($r('app.float.corner_radius_level10'))
         .margin({ top: 24 })
         .enabled(this.controller.feedbackText.trim().length > 0)
+        .attributeModifier(Api26Material.accent())
         .onClick((): void => {
           this.submitFeedback();
         })
@@ -2617,14 +3141,14 @@ export struct CompactClipboardView {
         },
         systemMaterialEffect: {
           materialType: hdsMaterial.MaterialType.IMMERSIVE,
-          materialLevel: hdsMaterial.MaterialLevel.ADAPTIVE
+          materialLevel: this.controller.appearanceMaterialLevel
         }
       }
     })
     .titleMode(HdsNavigationTitleMode.MODAL)
     .hideBackButton(true)
     .mode(NavigationMode.Stack)
-    .backgroundColor($r('app.color.page_background'))
+    .backgroundColor(this.controller.pageBackgroundColor())
   }
 
 
@@ -2648,6 +3172,7 @@ export struct CompactClipboardView {
         .padding({ left: 12, right: 12, top: 5, bottom: 5 })
         .borderRadius($r('app.float.corner_radius_level10'))
         .backgroundColor(this.controller.accentSoftColor())
+        .attributeModifier(Api26Material.accentSurface())
         .margin({ top: 8 })
       Text($r('app.string.about_tagline'))
         .fontSize($r('app.float.font_subtitle_large'))
@@ -2682,10 +3207,11 @@ export struct CompactClipboardView {
         .height(48)
         .fontSize($r('app.float.font_body_large'))
         .fontWeight(FontWeight.Medium)
-        .fontColor($r('app.color.on_accent'))
+        .fontColor(Api26Material.accentTextColor())
         .backgroundColor(this.controller.accentColor())
         .borderRadius($r('app.float.corner_radius_level10'))
         .margin({ top: 22 })
+        .attributeModifier(Api26Material.accent())
         .onClick((): void => {
           this.openFeedbackFromAbout();
         })
@@ -2736,14 +3262,14 @@ export struct CompactClipboardView {
         },
         systemMaterialEffect: {
           materialType: hdsMaterial.MaterialType.IMMERSIVE,
-          materialLevel: this.controller.aboutMaterialLevel
+          materialLevel: this.controller.appearanceMaterialLevel
         }
       }
     })
     .titleMode(HdsNavigationTitleMode.MODAL)
     .hideBackButton(true)
     .bindToScrollable([this.controller.aboutScroller])
-    .backgroundColor($r('app.color.page_background'))
+    .backgroundColor(this.controller.pageBackgroundColor())
   }
 
 
@@ -2800,7 +3326,7 @@ export struct CompactClipboardView {
         },
         systemMaterialEffect: {
           materialType: hdsMaterial.MaterialType.IMMERSIVE,
-          materialLevel: hdsMaterial.MaterialLevel.ADAPTIVE
+          materialLevel: this.controller.appearanceMaterialLevel
         }
       }
     })
@@ -2808,7 +3334,7 @@ export struct CompactClipboardView {
     .hideBackButton(true)
     .titleMode(HdsNavigationTitleMode.MINI)
     .mode(NavigationMode.Stack)
-    .backgroundColor($r('app.color.page_background'))
+    .backgroundColor(this.controller.pageBackgroundColor())
     .ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM],
       [LayoutSafeAreaEdge.TOP, LayoutSafeAreaEdge.BOTTOM])
   }
@@ -2867,7 +3393,7 @@ export struct CompactClipboardView {
         },
         systemMaterialEffect: {
           materialType: hdsMaterial.MaterialType.IMMERSIVE,
-          materialLevel: hdsMaterial.MaterialLevel.ADAPTIVE
+          materialLevel: this.controller.appearanceMaterialLevel
         }
       }
     })
@@ -2875,7 +3401,7 @@ export struct CompactClipboardView {
     .hideBackButton(true)
     .titleMode(HdsNavigationTitleMode.MINI)
     .mode(NavigationMode.Stack)
-    .backgroundColor($r('app.color.page_background'))
+    .backgroundColor(this.controller.pageBackgroundColor())
     .ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM],
       [LayoutSafeAreaEdge.TOP, LayoutSafeAreaEdge.BOTTOM])
   }
@@ -2933,7 +3459,7 @@ export struct CompactClipboardView {
         },
         systemMaterialEffect: {
           materialType: hdsMaterial.MaterialType.IMMERSIVE,
-          materialLevel: hdsMaterial.MaterialLevel.ADAPTIVE
+          materialLevel: this.controller.appearanceMaterialLevel
         }
       }
     })
@@ -2941,7 +3467,7 @@ export struct CompactClipboardView {
     .hideBackButton(true)
     .titleMode(HdsNavigationTitleMode.MINI)
     .mode(NavigationMode.Stack)
-    .backgroundColor($r('app.color.page_background'))
+    .backgroundColor(this.controller.pageBackgroundColor())
     .ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM],
       [LayoutSafeAreaEdge.TOP, LayoutSafeAreaEdge.BOTTOM])
   }
@@ -2978,7 +3504,7 @@ export struct CompactClipboardView {
       gradientMask: { maskColor: $r('app.color.navigation_mask'), maskHeight: 92 },
       systemMaterialEffect: {
         materialType: hdsMaterial.MaterialType.IMMERSIVE,
-        materialLevel: hdsMaterial.MaterialLevel.ADAPTIVE
+        materialLevel: this.controller.appearanceMaterialLevel
       }
     })
     .onChange((index: number): void => {
@@ -2986,7 +3512,7 @@ export struct CompactClipboardView {
     })
     .width('100%')
     .height('100%')
-    .backgroundColor($r('app.color.page_background'))
+    .backgroundColor(this.controller.pageBackgroundColor())
     .ignoreLayoutSafeArea([LayoutSafeAreaType.SYSTEM],
       [LayoutSafeAreaEdge.TOP, LayoutSafeAreaEdge.BOTTOM])
   }
@@ -3070,6 +3596,7 @@ export struct CompactClipboardView {
           .backgroundColor($r('app.color.surface_muted'))
           .borderRadius($r('app.float.corner_radius_level10'))
           .enabled(!this.controller.busy && this.controller.fileTransferState !== 1)
+          .attributeModifier(Api26Material.interactive())
           .onClick((): void => {
             this.controller.selectFile();
           })
@@ -3078,10 +3605,11 @@ export struct CompactClipboardView {
           .layoutWeight(1)
           .height(46)
           .fontSize($r('app.float.font_body_medium'))
-          .fontColor($r('app.color.on_accent'))
+          .fontColor(Api26Material.accentTextColor())
           .backgroundColor(this.controller.accentColor())
           .borderRadius($r('app.float.corner_radius_level10'))
           .enabled(!this.controller.busy && this.controller.composerFileUri.length > 0 && this.controller.spaceJoined)
+          .attributeModifier(Api26Material.accent())
           .onClick((): void => {
             this.controller.sendFile();
           })
@@ -3151,11 +3679,12 @@ export struct CompactClipboardView {
       Button(this.controller.desktopAudioState === 3 ? $r('app.string.audio_pause_action') :
         $r('app.string.audio_play_action'), { type: ButtonType.Normal })
         .height(42)
-        .fontColor($r('app.color.on_accent'))
+        .fontColor(Api26Material.accentTextColor())
         .backgroundColor(this.controller.accentColor())
         .borderRadius($r('app.float.corner_radius_level10'))
         .enabled(this.controller.desktopAudioState !== 1 && this.controller.desktopAudioState !== 5 &&
           this.controller.desktopFileSourcePath().length > 0)
+        .attributeModifier(Api26Material.accent())
         .onClick((): void => {
           this.controller.toggleDesktopAudioPlayback();
         })
@@ -3220,6 +3749,7 @@ export struct CompactClipboardView {
     .padding(24)
     .borderRadius($r('app.float.corner_radius_level8'))
     .backgroundColor($r('app.color.surface_muted'))
+    .attributeModifier(Api26Material.subtle())
     .onAppear((): void => {
       this.controller.prepareDesktopAudio();
     })
@@ -3353,6 +3883,7 @@ export struct CompactClipboardView {
         .padding(7)
         .borderRadius($r('app.float.corner_radius_level10'))
         .backgroundColor($r('app.color.surface_muted'))
+        .attributeModifier(Api26Material.interactive())
         .onClick((): void => {
           this.controller.desktopGestureShareHintDismissed = true;
         })
@@ -3361,6 +3892,7 @@ export struct CompactClipboardView {
     .padding({ left: 12, right: 8, top: 8, bottom: 8 })
     .borderRadius($r('app.float.corner_radius_level8'))
     .backgroundColor(this.controller.accentSoftColor())
+    .attributeModifier(Api26Material.accentSurface())
   }
 
 
@@ -3374,6 +3906,7 @@ export struct CompactClipboardView {
         $r('app.color.text_secondary'))
       .backgroundColor(this.controller.spaceActionMode === mode ? this.controller.accentSoftColor() : Color.Transparent)
       .borderRadius($r('app.float.corner_radius_level10'))
+      .attributeModifier(Api26Material.navigation(this.controller.spaceActionMode === mode))
       .onClick((): void => {
         this.controller.spaceActionMode = mode;
         this.controller.spaceCreateState = 0;
@@ -3407,6 +3940,7 @@ export struct CompactClipboardView {
         .onFocus((): void => {
           this.controller.spaceCreateDeviceNameRecommended = false;
         })
+        .attributeModifier(Api26Material.input())
         .onChange((value: string): void => {
           this.controller.spaceCreateDeviceName = value;
           this.controller.spaceCreateDeviceNameRecommended = false;
@@ -3418,6 +3952,7 @@ export struct CompactClipboardView {
         .height(44)
         .backgroundColor($r('app.color.surface_muted'))
         .borderRadius($r('app.float.corner_radius_level10'))
+        .attributeModifier(Api26Material.input())
         .onChange((value: string): void => {
           this.controller.spaceCreatePassphrase = value;
           this.controller.spaceCreateState = 0;
@@ -3428,6 +3963,7 @@ export struct CompactClipboardView {
         .height(44)
         .backgroundColor($r('app.color.surface_muted'))
         .borderRadius($r('app.float.corner_radius_level10'))
+        .attributeModifier(Api26Material.input())
         .onChange((value: string): void => {
           this.controller.spaceCreatePassphraseConfirm = value;
           this.controller.spaceCreateState = 0;
@@ -3448,10 +3984,11 @@ export struct CompactClipboardView {
           $r('app.string.space_create_action')), { type: ButtonType.Normal })
         .width('100%')
         .height(44)
-        .fontColor($r('app.color.on_accent'))
+        .fontColor(Api26Material.accentTextColor())
         .backgroundColor(this.controller.accentColor())
         .borderRadius($r('app.float.corner_radius_level10'))
         .enabled(this.controller.canCreateSpace())
+        .attributeModifier(Api26Material.accent())
         .onClick((): void => {
           this.controller.createCurrentSpace();
         })
@@ -3475,6 +4012,7 @@ export struct CompactClipboardView {
         .fontColor($r('app.color.text_primary'))
         .backgroundColor($r('app.color.surface_muted'))
         .borderRadius($r('app.float.corner_radius_level10'))
+        .attributeModifier(Api26Material.interactive())
         .onClick((): void => {
           this.controller.scanSpaceInvitation();
         })
@@ -3484,6 +4022,7 @@ export struct CompactClipboardView {
           .height(46)
           .backgroundColor($r('app.color.surface_muted'))
           .borderRadius($r('app.float.corner_radius_level10'))
+          .attributeModifier(Api26Material.input())
           .onChange((value: string): void => {
             this.controller.spaceJoinDeviceName = value;
             this.controller.spaceJoinState = 0;
@@ -3494,6 +4033,7 @@ export struct CompactClipboardView {
         .height(46)
         .backgroundColor($r('app.color.surface_muted'))
         .borderRadius($r('app.float.corner_radius_level10'))
+        .attributeModifier(Api26Material.input())
         .onChange((value: string): void => {
           this.controller.spaceInvitationCode = value.toUpperCase();
           this.controller.spaceJoinState = 0;
@@ -3504,6 +4044,7 @@ export struct CompactClipboardView {
         .height(46)
         .backgroundColor($r('app.color.surface_muted'))
         .borderRadius($r('app.float.corner_radius_level10'))
+        .attributeModifier(Api26Material.input())
         .onChange((value: string): void => {
           this.controller.spacePassphrase = value;
           this.controller.spaceJoinState = 0;
@@ -3522,10 +4063,11 @@ export struct CompactClipboardView {
           $r('app.string.space_join_action')), { type: ButtonType.Normal })
         .width('100%')
         .height(44)
-        .fontColor($r('app.color.on_accent'))
+        .fontColor(Api26Material.accentTextColor())
         .backgroundColor(this.controller.accentColor())
         .borderRadius($r('app.float.corner_radius_level10'))
         .enabled(this.controller.canJoinSpace())
+        .attributeModifier(Api26Material.accent())
         .onClick((): void => {
           this.controller.joinCurrentSpace();
         })
@@ -3554,6 +4096,7 @@ export struct CompactClipboardView {
         .fontSize(12)
         .backgroundColor($r('app.color.surface'))
         .borderRadius($r('app.float.corner_radius_level4'))
+        .attributeModifier(Api26Material.input())
         .onChange((value: string): void => {
           this.controller.spaceCreatePassphrase = value;
           this.controller.spaceCreateState = 0;
@@ -3614,9 +4157,10 @@ export struct CompactClipboardView {
           .width('100%')
           .height(42)
           .fontSize($r('app.float.font_body_medium'))
-          .fontColor($r('app.color.on_accent'))
+          .fontColor(Api26Material.accentTextColor())
           .backgroundColor(this.controller.accentColor())
           .borderRadius($r('app.float.corner_radius_level10'))
+          .attributeModifier(Api26Material.accent())
           .onClick((): void => {
             this.controller.shareCurrentSpaceInvitation();
           })
@@ -3637,6 +4181,7 @@ export struct CompactClipboardView {
         .backgroundColor($r('app.color.surface'))
         .borderRadius($r('app.float.corner_radius_level10'))
         .enabled(this.controller.canIssueSpaceInvitation())
+        .attributeModifier(Api26Material.interactive())
         .onClick((): void => {
           this.controller.issueCurrentSpaceInvitation();
         })
@@ -3645,6 +4190,7 @@ export struct CompactClipboardView {
     .padding(14)
     .borderRadius($r('app.float.corner_radius_level10'))
     .backgroundColor($r('app.color.surface_muted'))
+    .attributeModifier(Api26Material.subtle())
   }
 
 
@@ -3778,6 +4324,7 @@ export struct CompactClipboardView {
     .borderRadius($r('app.float.corner_radius_level8'))
     .border({ width: 1, color: $r('app.color.divider') })
     .backgroundColor($r('app.color.surface'))
+    .attributeModifier(Api26Material.panel())
   }
 
 
@@ -3793,6 +4340,7 @@ export struct CompactClipboardView {
         .justifyContent(FlexAlign.Center)
         .borderRadius($r('app.float.corner_radius_level8'))
         .backgroundColor(this.controller.accentSoftColor())
+        .attributeModifier(Api26Material.accentSurface())
         Column({ space: 3 }) {
           Text(this.controller.desktopSelectedSpaceDeviceName)
             .fontSize($r('app.float.font_body_large'))
@@ -3815,6 +4363,7 @@ export struct CompactClipboardView {
           .fontColor(this.controller.accentColor())
           .backgroundColor(Color.Transparent)
           .enabled(this.controller.desktopDeviceSyncState === 2 && !this.controller.desktopDeviceSyncSaving)
+          .attributeModifier(Api26Material.accent())
           .onClick((): void => {
             this.controller.resetDesktopDeviceSyncPreferences();
           })
@@ -3883,6 +4432,7 @@ export struct CompactClipboardView {
     .padding(14)
     .borderRadius($r('app.float.corner_radius_level8'))
     .backgroundColor($r('app.color.surface_muted'))
+    .attributeModifier(Api26Material.subtle())
   }
 
 
@@ -3898,6 +4448,7 @@ export struct CompactClipboardView {
         .justifyContent(FlexAlign.Center)
         .borderRadius(13)
         .backgroundColor(this.controller.accentSoftColor())
+        .attributeModifier(Api26Material.accentSurface())
         Row()
           .width(10)
           .height(10)
@@ -3937,6 +4488,7 @@ export struct CompactClipboardView {
           .backgroundColor($r('app.color.surface'))
           .borderRadius($r('app.float.corner_radius_level4'))
           .enabled(!device.online && !this.controller.spaceConnectBusy && !this.controller.desktopDeviceMutationBusy)
+          .attributeModifier(Api26Material.interactive())
           .onClick((): void => {
             this.controller.connectSpaceDevice(device);
           })
@@ -3954,6 +4506,7 @@ export struct CompactClipboardView {
         this.controller.accentColor() : Color.Transparent
     })
     .clickEffect({ level: ClickEffectLevel.MIDDLE })
+    .attributeModifier(Api26Material.interactive())
     .onClick((): void => {
       this.controller.selectDesktopSpaceDevice(device);
     })
@@ -3975,6 +4528,7 @@ export struct CompactClipboardView {
         .justifyContent(FlexAlign.Center)
         .borderRadius(13)
         .backgroundColor(this.controller.accentSoftColor())
+        .attributeModifier(Api26Material.accentSurface())
         Row()
           .width(10)
           .height(10)
@@ -4012,16 +4566,46 @@ export struct CompactClipboardView {
     .padding({ left: 10, right: 12 })
     .borderRadius($r('app.float.corner_radius_level10'))
     .backgroundColor($r('app.color.surface_muted'))
+    .attributeModifier(Api26Material.subtle())
     .bindContextMenu(this.desktopMobileDeviceContextMenu(device), ResponseType.LongPress)
   }
 
 
+  @Builder
+  private componentMaterialNavigation() {
+    if (this.appearanceComponentMaterialStyle < 0) {
+      this.compactNavigation()
+    } else if (this.appearanceComponentMaterialStyle === 0) {
+      this.compactNavigation()
+    } else if (this.appearanceComponentMaterialStyle === 1) {
+      this.compactNavigation()
+    } else if (this.appearanceComponentMaterialStyle === 2) {
+      this.compactNavigation()
+    } else if (this.appearanceComponentMaterialStyle === 3) {
+      this.compactNavigation()
+    } else {
+      this.compactNavigation()
+    }
+  }
+
   build() {
     Stack() {
+      Column()
+        .width(1)
+        .height(1)
+        .opacity(0)
+        .hitTestBehavior(HitTestMode.None)
+        .bindSheet($$this.showOpticalTransferSheet, this.opticalTransferSheet(), {
+          detents: [SheetSize.LARGE],
+          preferType: SheetType.BOTTOM,
+          dragBar: false,
+          showClose: false,
+          backgroundColor: $r('app.color.page_background')
+        })
       Stack() {
         Stack() {
           Stack() {
-            this.compactNavigation()
+            this.componentMaterialNavigation()
           }
           .width('100%')
           .height('100%')
@@ -4065,7 +4649,7 @@ export struct CompactClipboardView {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor($r('app.color.page_background'))
+    .backgroundColor(this.controller.pageBackgroundColor())
     .bindSheet($$this.showConnectionDiagnosticsSheet, this.connectionDiagnosticsSheet(), {
       detents: [SheetSize.MEDIUM],
       preferType: SheetType.CENTER,

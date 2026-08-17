@@ -17,6 +17,7 @@ uc-application = { path = "../space-core/crates/uc-application" }
 uc-bootstrap = { path = "../space-core/crates/uc-bootstrap", features = ["blobs"] }
 uc-core = { path = "../space-core/crates/uc-core" }
 uc-content-hash = { path = "../space-core/crates/uc-content-hash" }
+uc-infra = { path = "../space-core/crates/uc-infra" }
 tokio = { version = "1", features = ["rt", "sync", "time", "net", "io-util"] }
 
 [build-dependencies]

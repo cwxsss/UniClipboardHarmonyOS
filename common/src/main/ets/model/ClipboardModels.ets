@@ -12,13 +12,16 @@ export class LinkPreview {
   description: string = '';
   siteName: string = '';
   imageUrl: string = '';
+  keywords: string[] = [];
 
-  constructor(url: string, title: string, description: string, siteName: string, imageUrl: string) {
+  constructor(url: string, title: string, description: string, siteName: string, imageUrl: string,
+    keywords: string[] = []) {
     this.url = url;
     this.title = title;
     this.description = description;
     this.siteName = siteName;
     this.imageUrl = imageUrl;
+    this.keywords = keywords;
   }
 }
 

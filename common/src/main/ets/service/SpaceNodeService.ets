@@ -8,6 +8,7 @@ import {
   NativeSpaceImageEvent,
   NativeSpaceInvitation,
   NativeSpaceMemberSyncPreferences,
+  NativeSpaceNetworkSettings,
   NativeSpaceStatus,
   NativeSpaceTextEvent,
   connectSpaceDevice,
@@ -19,9 +20,11 @@ import {
   drainSpaceTextEvents,
   getSpaceDevices,
   getSpaceMemberSyncPreferences,
+  getSpaceNetworkSettings,
   getSpaceStatus,
   issueSpaceInvitation,
   joinSpace,
+  probeSpaceRelayUrl,
   replaceSpace,
   resetSpaceMemberSyncPreferences,
   sendSpaceFile,
@@ -32,12 +35,17 @@ import {
   sendSpaceText,
   sendSpaceTextToDevice,
   startSpaceNode,
+  stopSpaceNode,
   switchSpace,
+  updateSpaceNetworkSettings,
   updateSpaceMemberSendPreferences,
   wakeSpaceConnections,
   revokeSpaceMember
 } from 'uniclipboard_native';
 import { fileIo } from '@kit.CoreFileKit';
+import { Logger } from '../util/Logger';
+
+const logger: Logger = new Logger('SpaceNode');
 
 export class SpaceNodeService {
   private async reconnectTarget(deviceId: string): Promise<void> {
@@ -63,10 +71,10 @@ export class SpaceNodeService {
           onlinePeerCount += 1;
         }
       } catch (error) {
-        console.warn('UniClipboard failed to reconnect space device: ' + device.deviceId);
+        logger.warn('UniClipboard failed to reconnect space device: ' + device.deviceId);
       }
     }
-    console.info('UniClipboard reconnected space peer count: ' + onlinePeerCount.toString());
+    logger.info('UniClipboard reconnected space peer count: ' + onlinePeerCount.toString());
     return onlinePeerCount;
   }
 
@@ -76,6 +84,23 @@ export class SpaceNodeService {
 
   async status(): Promise<NativeSpaceStatus> {
     return await getSpaceStatus();
+  }
+
+  async networkSettings(): Promise<NativeSpaceNetworkSettings> {
+    return await getSpaceNetworkSettings();
+  }
+
+  async updateNetworkSettings(allowRelayFallback: boolean,
+    customRelayUrls: string[]): Promise<NativeSpaceNetworkSettings> {
+    return await updateSpaceNetworkSettings(allowRelayFallback, customRelayUrls);
+  }
+
+  async probeRelayUrl(url: string): Promise<number> {
+    return await probeSpaceRelayUrl(url);
+  }
+
+  async stop(): Promise<void> {
+    await stopSpaceNode();
   }
 
   async devices(): Promise<NativeSpaceDevice[]> {

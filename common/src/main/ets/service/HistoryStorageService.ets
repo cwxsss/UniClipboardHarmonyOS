@@ -337,7 +337,10 @@ export class HistoryStorageService {
       try {
         let source: image.ImageSource = image.createImageSource(file.fd);
         try {
-          return await source.createPixelMap();
+          let options: image.DecodingOptions = {
+            desiredDynamicRange: image.DecodingDynamicRange.AUTO
+          };
+          return await source.createPixelMap(options);
         } finally {
           await source.release();
         }
