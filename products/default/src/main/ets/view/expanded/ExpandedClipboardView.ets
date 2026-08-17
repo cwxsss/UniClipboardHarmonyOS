@@ -1331,6 +1331,16 @@ export struct ExpandedClipboardView {
         .backgroundColor(this.controller.accentSoftColor())
         .attributeModifier(Api26Material.accentSurface())
         .margin({ top: 8 })
+      Row({ space: 5 }) {
+        Text($r('app.string.about_engine_version_label'))
+          .fontSize(12)
+          .fontColor($r('app.color.text_secondary'))
+        Text(this.controller.engineVersion)
+          .fontSize(12)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.text_primary'))
+      }
+      .margin({ top: 8 })
       Text($r('app.string.about_tagline'))
         .fontSize($r('app.float.font_subtitle_large'))
         .fontWeight(FontWeight.Medium)
@@ -4756,6 +4766,19 @@ export struct ExpandedClipboardView {
         .padding({ bottom: 14 })
       this.desktopAboutInfoRow($r('app.string.about_version_label'),
         $r('app.string.desktop_version'))
+      Row() {
+        Text($r('app.string.about_engine_version_label'))
+          .fontSize(14)
+          .fontColor($r('app.color.text_secondary'))
+        Blank()
+        Text(this.controller.engineVersion)
+          .fontSize(14)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.text_primary'))
+      }
+      .width('100%')
+      .height(56)
+      .border({ width: { top: 1 }, color: $r('app.color.divider') })
       this.desktopAboutInfoRow($r('app.string.about_platform_label'),
         $r('app.string.about_platform_value'))
       this.desktopAboutInfoRow($r('app.string.about_devices_label'),

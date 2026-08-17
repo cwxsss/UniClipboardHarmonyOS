@@ -29,6 +29,7 @@ export {
 } from './src/main/ets/service/BackgroundSyncService';
 
 export { ConfigStorageService } from './src/main/ets/service/ConfigStorageService';
+export { EngineVersionService } from './src/main/ets/service/EngineVersionService';
 export { Logger } from './src/main/ets/util/Logger';
 export { HistoryLibrarySettings, HistoryStorageService } from './src/main/ets/service/HistoryStorageService';
 export { LinkPreviewService } from './src/main/ets/service/LinkPreviewService';

@@ -51,6 +51,7 @@ import {
   HistoryLibrarySettings,
   LinkPreviewService,
   Logger,
+  EngineVersionService,
   MobileSyncClient,
   MobileSyncServerService,
   NativeProtocolService,
@@ -169,6 +170,7 @@ export class ClipboardFeatureController {
   public isWideScreen: boolean = false;
   public isLargeScreen: boolean = false;
   public statusCode: number = 0;
+  public engineVersion: string = EngineVersionService.getVersion();
   public recentErrors: AppErrorRecord[] = [];
   private serverHistoryDataSourceInstance: HistoryDataSource<ServerHistoryItem> =
     new HistoryDataSource<ServerHistoryItem>();

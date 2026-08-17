@@ -184,6 +184,7 @@
     { "name": "about_feature_native_note", "value": "Made for phones, tablets, and 2-in-1 devices" },
     { "name": "about_product_info", "value": "Product information" },
     { "name": "about_version_label", "value": "Current version" },
+    { "name": "about_engine_version_label", "value": "Engine version" },
     { "name": "about_platform_label", "value": "Platform" },
     { "name": "about_platform_value", "value": "HarmonyOS" },
     { "name": "about_devices_label", "value": "Device types" },

@@ -3174,6 +3174,16 @@ export struct CompactClipboardView {
         .backgroundColor(this.controller.accentSoftColor())
         .attributeModifier(Api26Material.accentSurface())
         .margin({ top: 8 })
+      Row({ space: 5 }) {
+        Text($r('app.string.about_engine_version_label'))
+          .fontSize(12)
+          .fontColor($r('app.color.text_secondary'))
+        Text(this.controller.engineVersion)
+          .fontSize(12)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.text_primary'))
+      }
+      .margin({ top: 8 })
       Text($r('app.string.about_tagline'))
         .fontSize($r('app.float.font_subtitle_large'))
         .fontWeight(FontWeight.Medium)

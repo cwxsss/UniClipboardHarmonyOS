@@ -737,6 +737,10 @@
       "value": "当前版本"
     },
     {
+      "name": "about_engine_version_label",
+      "value": "Engine 版本"
+    },
+    {
       "name": "about_platform_label",
       "value": "运行平台"
     },
