@@ -29,6 +29,13 @@ export {
 } from './src/main/ets/service/BackgroundSyncService';
 
 export { ConfigStorageService } from './src/main/ets/service/ConfigStorageService';
+export {
+  EngineHostAdapter,
+  EngineHostCallbacks,
+  EngineHostResult
+} from './src/main/ets/engine/EngineHostAdapter';
+export { EngineClipboardObserver } from './src/main/ets/engine/EngineClipboardHost';
+export { EngineHostError, EngineHostErrorCategory } from './src/main/ets/engine/EngineHostError';
 export { EngineVersionService } from './src/main/ets/service/EngineVersionService';
 export { Logger } from './src/main/ets/util/Logger';
 export { HistoryLibrarySettings, HistoryStorageService } from './src/main/ets/service/HistoryStorageService';

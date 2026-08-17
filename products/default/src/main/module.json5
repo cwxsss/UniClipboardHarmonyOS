@@ -41,7 +41,7 @@
           "when": "inuse"
         }
       },
-    /*  {
+      {
         "name": "ohos.permission.READ_PASTEBOARD",
         "reason": "$string:entry_pasteboard_permission_reason",
         "usedScene": {
@@ -50,7 +50,7 @@
           ],
           "when": "inuse"
         }
-      }*/
+      }
     ],
     "abilities": [
       {
