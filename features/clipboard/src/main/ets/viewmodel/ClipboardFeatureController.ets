@@ -1884,6 +1884,17 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
 
   private buildRedactedConnectionDiagnosticLog(): string {
     let generatedAt: string = new Date().toISOString();
+    let recentErrorLog: string = 'recent_errors_begin\n';
+    if (this.recentErrors.length === 0) {
+      recentErrorLog += 'none\n';
+    } else {
+      for (let index: number = 0; index < this.recentErrors.length; index++) {
+        let record: AppErrorRecord = this.recentErrors[index];
+        recentErrorLog += record.timeLabel + '|' + this.redactDiagnosticText(record.source) + '|' +
+          this.redactDiagnosticText(record.message) + '\n';
+      }
+    }
+    recentErrorLog += 'recent_errors_end\n';
     return 'UniClipboard connection diagnostics\n' +
       'redaction=enabled\n' +
       'generated_at=' + generatedAt + '\n' +
@@ -1902,7 +1913,17 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       'background_sync=' + (this.backgroundSyncEnabled ? 'enabled' : 'disabled') + '\n' +
       'last_failure=' + this.connectionDiagnosticLastFailure + '\n' +
       'last_failure_at_ms=' + this.connectionDiagnosticLastFailureAtMs.toString() + '\n' +
+      recentErrorLog +
       'redacted_fields=device_ids,device_names,addresses,urls,credentials,clipboard_content\n';
+  }
+
+  private redactDiagnosticText(value: string): string {
+    let redacted: string = value.replace(/https?:\/\/[^\s]+/gi, '[redacted-url]');
+    redacted = redacted.replace(/(password|token|secret|authorization)=?[^\s]*/gi, '$1=[redacted]');
+    if (redacted.length > 512) {
+      return redacted.substring(0, 512) + '...';
+    }
+    return redacted;
   }
 
   public async exportRedactedConnectionDiagnostics(): Promise<void> {
@@ -4986,21 +5007,22 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       }
       if (!delivered && this.spaceJoined) {
         try {
-          let data: Uint8Array = await this.clipboardService.encodePng(pixelMap);
-          let report: EngineSendReport = await engineRuntimeService.sendImage(data, 'image/png', []);
+          let data: Uint8Array = await this.clipboardService.encodeSpaceImage(pixelMap);
+          let report: EngineSendReport = await engineRuntimeService.sendImage(data, 'image/jpeg', []);
           logger.info('UniClipboard official Engine image accepted peer count: ' +
             report.totalAccepted.toString());
           if (report.totalAccepted > 0 || report.totalPending > 0) {
             this.spacePeerConnected = true;
             this.latestContentId = report.entryId;
-            this.latestText = 'image.png';
+            this.latestText = 'image.jpg';
             delivered = true;
           } else if (!mobilePublished) {
             throw new Error('no online space peer accepted the clipboard image');
           }
         } catch (error) {
+          logger.error('UniClipboard official Engine image send failed: ' + this.errorDetail(error));
           if (!mobilePublished) {
-            throw new Error('space image delivery failed');
+            throw new Error('space image delivery failed: ' + this.errorDetail(error));
           }
         }
       }
@@ -5027,6 +5049,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       }
       this.statusCode = 3;
       this.imageSendState = 3;
+      this.reportError('image', 'image send failed: ' + this.errorDetail(error));
     } finally {
       this.busy = false;
     }

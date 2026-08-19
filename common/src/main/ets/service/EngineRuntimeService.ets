@@ -1,5 +1,6 @@
 import { bundleManager, common } from '@kit.AbilityKit';
 import engine from '@uniclipboard/engine';
+import { createNapiBuffer } from 'uniclipboard_native';
 import {
   EngineHostAdapter,
   EngineHostCallbacks
@@ -251,7 +252,10 @@ interface EngineCompatibilityNativeHandle {
   issueInvitation(): Promise<EngineCompatibilityNativeInvitation>;
   joinSpace(invitationCode: string, deviceName: string | null, passphrase: string,
     preserveUnreadableHistory: boolean): Promise<EngineCompatibilityNativeSpaceJoined>;
-  sendImage(bytes: Uint8Array, mimeType: string, targetDevices: string[]):
+  // The helper returns an actual N-API Buffer even though its ArkTS type is
+  // declared as ArrayBuffer because the generated bridge declaration cannot
+  // express the native Buffer class.
+  sendImage(bytes: ArrayBuffer, mimeType: string, targetDevices: string[]):
     Promise<EngineCompatibilityNativeSendReport>;
   sendFiles(fileHandles: string[], targetDevices: string[]): Promise<EngineCompatibilityNativeSendReport>;
   captureCurrentClipboard(): Promise<string | null>;
@@ -359,7 +363,9 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
           result.totalDuplicate, result.totalOffline, result.totalErrored, result.totalPending);
       },
       async (bytes: Uint8Array, mimeType: string, targetDevices: string[]): Promise<EngineSendReport> => {
-        let result: EngineCompatibilityNativeSendReport = await compatibilityHandle.sendImage(bytes, mimeType, targetDevices);
+        let nativeBytes: ArrayBuffer = createNapiBuffer(bytes);
+        let result: EngineCompatibilityNativeSendReport = await compatibilityHandle.sendImage(nativeBytes,
+          mimeType, targetDevices);
         return new EngineSendReport(result.entryId, result.atMs, result.totalAccepted,
           result.totalDuplicate, result.totalOffline, result.totalErrored, result.totalPending);
       },

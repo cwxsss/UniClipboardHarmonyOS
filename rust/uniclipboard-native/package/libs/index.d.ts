@@ -21,6 +21,9 @@ export interface NativeClipboardContent {
   data: Uint8Array
 }
 
+/** Create a native N-API Buffer from ArkTS bytes for the engine bridge. */
+export declare function createNapiBuffer(data: Uint8Array): ArrayBuffer
+
 export interface NativeCreateSpaceResult {
   spaceId: string
   selfDeviceId: string

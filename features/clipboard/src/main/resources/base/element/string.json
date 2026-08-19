@@ -1707,6 +1707,7 @@
     { "name": "history_merge_duplicates_note", "value": "相同内容只保留一条，并累计出现次数。" },
     { "name": "connection_diagnostics_title", "value": "连接诊断" },
     { "name": "connection_diagnostics_subtitle", "value": "检查当前传输路径、网络环境与应用权限" },
+    { "name": "connection_diagnostics_open_action", "value": "查看并导出日志" },
     { "name": "connection_diagnostics_refreshing", "value": "正在重新探测连接…" },
     { "name": "connection_diagnostics_transport_label", "value": "连接方式" },
     { "name": "connection_diagnostics_transport_direct", "value": "直连" },

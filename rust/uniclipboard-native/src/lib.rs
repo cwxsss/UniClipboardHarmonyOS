@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use napi_derive_ohos::napi;
-use napi_ohos::bindgen_prelude::Uint8Array;
+use napi_ohos::bindgen_prelude::{Buffer, Uint8Array};
 use napi_ohos::{Error, Result, Status};
 use uc_mobile::{
     ClipboardKind, ClipboardMeta, HistoryPatch, MobileSyncClient, PlatformBridge, ProbeResult,
@@ -72,6 +72,13 @@ const SPACE_FILE_HEADER_BYTES: usize = 27;
 const SPACE_DEVICE_PROFILE_MIME: &str = "application/x-uniclipboard-device-profile";
 const SPACE_FILE_MIME: &str = "application/x-uniclipboard-file";
 const SPACE_BACKGROUND_VERIFY_INTERVAL: Duration = Duration::from_secs(15);
+
+/// Copy ArkTS bytes into a real N-API Buffer for consumers that use
+/// napi_get_buffer_info rather than accepting a generic Uint8Array.
+#[napi]
+pub fn create_napi_buffer(data: Uint8Array) -> Buffer {
+    Buffer::from(data.to_vec())
+}
 
 struct HarmonyPlatformBridge;
 

@@ -447,6 +447,7 @@
     { "name": "history_merge_duplicates_note", "value": "Keep one item for identical content and track how often it appears." },
     { "name": "connection_diagnostics_title", "value": "Connection diagnostics" },
     { "name": "connection_diagnostics_subtitle", "value": "Check the current transfer path, network, and app permissions" },
+    { "name": "connection_diagnostics_open_action", "value": "View and export log" },
     { "name": "connection_diagnostics_refreshing", "value": "Testing the connection again…" },
     { "name": "connection_diagnostics_transport_label", "value": "Connection path" },
     { "name": "connection_diagnostics_transport_direct", "value": "Direct" },

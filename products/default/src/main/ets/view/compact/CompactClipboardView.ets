@@ -1820,6 +1820,58 @@ export struct CompactClipboardView {
 
 
   @Builder
+  private compactDiagnosticsCard() {
+    Column({ space: 10 }) {
+      Row({ space: 12 }) {
+        Column() {
+          SymbolGlyph($r('sys.symbol.connection'))
+            .fontSize(24)
+            .fontWeight(FontWeight.Medium)
+            .fontColor([this.controller.accentColor()])
+        }
+        .width(44)
+        .height(44)
+        .justifyContent(FlexAlign.Center)
+        .borderRadius($r('app.float.corner_radius_level4'))
+        .backgroundColor(this.controller.accentSoftColor())
+        .attributeModifier(Api26Material.accentSurface())
+        Column({ space: 4 }) {
+          Text($r('app.string.connection_diagnostics_title'))
+            .fontSize($r('app.float.font_subtitle_large'))
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('app.color.text_primary'))
+          Text($r('app.string.connection_diagnostics_subtitle'))
+            .width('100%')
+            .fontSize(12)
+            .lineHeight(18)
+            .fontColor($r('app.color.text_secondary'))
+            .maxLines(2)
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+      }
+      .width('100%')
+      Button($r('app.string.connection_diagnostics_open_action'), { type: ButtonType.Normal })
+        .height(44)
+        .width('100%')
+        .fontSize($r('app.float.font_body_medium'))
+        .fontColor(Api26Material.accentTextColor())
+        .backgroundColor(this.controller.accentColor())
+        .borderRadius($r('app.float.corner_radius_level10'))
+        .attributeModifier(Api26Material.accent())
+        .onClick((): void => {
+          this.openConnectionDiagnostics();
+        })
+    }
+    .width('100%')
+    .padding($r('app.float.padding_level8'))
+    .borderRadius($r('app.float.corner_radius_level8'))
+    .backgroundColor($r('app.color.surface'))
+    .attributeModifier(Api26Material.panel())
+  }
+
+
+  @Builder
   private backgroundSyncSwitchRow() {
     Row({ space: 16 }) {
       Column({ space: 4 }) {
@@ -2962,6 +3014,7 @@ export struct CompactClipboardView {
     Scroll(this.controller.settingsScroller) {
       Column({ space: 12 }) {
         this.compactAppearanceCard()
+        this.compactDiagnosticsCard()
 
         Column() {
           this.backgroundSyncSwitchRow()

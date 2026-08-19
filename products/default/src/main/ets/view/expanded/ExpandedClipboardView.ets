@@ -4272,9 +4272,40 @@ export struct ExpandedClipboardView {
         this.controller.spaceDeviceName.length > 0 ? this.controller.spaceDeviceName : $r('app.string.space_joined_device'))
       this.backgroundSyncSwitchRow()
       this.historyLibrarySettingsRows()
+      this.desktopDiagnosticsSettings()
     }
     .width('100%')
     .padding({ left: 24, right: 24 })
+    .borderRadius($r('app.float.corner_radius_level8'))
+    .border({ width: 1, color: $r('app.color.divider') })
+  }
+
+
+  @Builder
+  private desktopDiagnosticsSettings() {
+    Column({ space: 10 }) {
+      Text($r('app.string.connection_diagnostics_title'))
+        .fontSize(18)
+        .fontWeight(FontWeight.Medium)
+        .fontColor($r('app.color.text_primary'))
+        .width('100%')
+      Text($r('app.string.connection_diagnostics_subtitle'))
+        .fontSize(12)
+        .lineHeight(18)
+        .fontColor($r('app.color.text_secondary'))
+        .width('100%')
+      Button($r('app.string.connection_diagnostics_open_action'), { type: ButtonType.Normal })
+        .height(44)
+        .fontColor(Api26Material.accentTextColor())
+        .backgroundColor(this.controller.accentColor())
+        .borderRadius($r('app.float.corner_radius_level10'))
+        .attributeModifier(Api26Material.accent())
+        .onClick((): void => {
+          this.openConnectionDiagnostics();
+        })
+    }
+    .width('100%')
+    .padding(22)
     .borderRadius($r('app.float.corner_radius_level8'))
     .border({ width: 1, color: $r('app.color.divider') })
   }
