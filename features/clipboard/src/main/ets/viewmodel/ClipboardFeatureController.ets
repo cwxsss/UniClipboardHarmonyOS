@@ -69,17 +69,7 @@ import {
   NativeProtocolService,
   ReceivedNotificationService,
   SpaceNodeService,
-  NativeCreateSpaceResult,
-  NativeJoinSpaceResult,
-  NativeSpaceFileEvent,
-  NativeSpaceFileSendResult,
-  NativeSpaceFileStatusEvent,
-  NativeSpaceImageEvent,
-  NativeSpaceInvitation,
   NativeSpaceMemberSyncPreferences,
-  NativeSpaceNetworkSettings,
-  NativeSpaceStatus,
-  NativeSpaceTextEvent,
   NativeMobileSyncCredential,
   NativeMobileSyncDevice,
   NativeMobileSyncInboundEvent,
@@ -242,6 +232,9 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   public spaceJoinDeviceName: string = '';
   public spaceJoinBusy: boolean = false;
   public spaceJoinState: number = 0;
+  // 0 means no migration report, 1 means records migrated, and 2 means
+  // unreadable records were preserved for manual follow-up.
+  public spaceMigrationState: number = 0;
   public spaceSwitchOpen: boolean = false;
   public spaceActionMode: number = 0;
   public spaceCreateDeviceName: string = '';
@@ -370,6 +363,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   public historySearchTimerId: number = -1;
   public sseEventBusy: boolean = false;
   public spaceDeviceRefreshBusy: boolean = false;
+  private spaceDeviceRefreshQueued: boolean = false;
   public historyResetPending: boolean = false;
   public historyRestoreStarted: boolean = false;
   public historyRestored: boolean = false;
@@ -1323,6 +1317,9 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       let requestedDeviceName: string | null = switching ? null : deviceName;
       let result: EngineSpaceJoined = await engineRuntimeService.joinSpace(
         this.spaceInvitationCode.trim(), requestedDeviceName, this.spacePassphrase, true);
+      let hasMigratedRecords: boolean = this.hasMigrationRecords(result.migratedRecords);
+      let hasPreservedUnreadableRecords: boolean = this.hasMigrationRecords(result.preservedUnreadableRecords);
+      this.spaceMigrationState = hasPreservedUnreadableRecords ? 2 : (hasMigratedRecords ? 1 : 0);
       this.setSpaceJoined(result.spaceId.length > 0);
       this.spacePeerConnected = false;
       if (!switching) {
@@ -1334,6 +1331,12 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       this.spacePassphrase = '';
       this.spaceJoinDeviceName = '';
       this.spaceJoinState = 1;
+      if (hasPreservedUnreadableRecords) {
+        this.reportError('space', 'Engine preserved unreadable records during space migration.',
+          $r('app.string.space_migration_preserved_warning'));
+      } else if (hasMigratedRecords) {
+        this.showFeedbackToast($r('app.string.space_migration_success'));
+      }
       await this.refreshSpaceDevices();
       if (switching) {
         this.spaceSwitchOpen = false;
@@ -1613,6 +1616,14 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     return JSON.stringify(error);
   }
 
+  private hasMigrationRecords(value: string | undefined): boolean {
+    if (value === undefined) {
+      return false;
+    }
+    let normalized: string = value.trim();
+    return normalized.length > 0 && normalized !== '0' && normalized !== '[]' && normalized !== '{}';
+  }
+
   private padTimeUnit(value: number): string {
     return value < 10 ? '0' + value.toString() : value.toString();
   }
@@ -1804,7 +1815,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     }
     if (this.spaceNodeState === 2 && this.spaceJoined) {
       try {
-        this.spaceNodeService.wakeConnections();
+        await engineRuntimeService.recoverNetwork();
         let devices: EngineRuntimeDevice[] = await engineRuntimeService.queryDevices();
         let target: EngineRuntimeDevice | null = this.applyConnectionDiagnosticDevices(devices);
         if (target === null) {
@@ -2104,7 +2115,11 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   }
 
   public async refreshSpaceDevices(): Promise<void> {
-    if (!this.spaceJoined || this.spaceNodeState !== 2 || this.spaceDeviceRefreshBusy) {
+    if (!this.spaceJoined || this.spaceNodeState !== 2) {
+      return;
+    }
+    if (this.spaceDeviceRefreshBusy) {
+      this.spaceDeviceRefreshQueued = true;
       return;
     }
     this.spaceDeviceRefreshBusy = true;
@@ -2121,6 +2136,15 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       this.recordConnectionDiagnosticFailure('space_probe_failed');
     } finally {
       this.spaceDeviceRefreshBusy = false;
+      if (this.spaceDeviceRefreshQueued && this.spaceJoined && this.spaceNodeState === 2) {
+        this.spaceDeviceRefreshQueued = false;
+        setTimeout((): void => {
+          this.refreshSpaceDevices().catch((): void => {
+          });
+        }, 0);
+      } else {
+        this.spaceDeviceRefreshQueued = false;
+      }
     }
   }
 
@@ -2133,6 +2157,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     this.spaceConnectingDeviceId = device.deviceId;
     this.spaceConnectState = 1;
     try {
+      await engineRuntimeService.recoverNetwork();
       await this.refreshSpaceDevices();
       this.spaceConnectState = device.online ? 2 : 3;
       if (device.online) {
@@ -2161,6 +2186,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     this.spaceConnectState = 1;
     let anyOnline: boolean = false;
     try {
+      await engineRuntimeService.recoverNetwork();
       await this.refreshSpaceDevices();
       for (let index: number = 0; index < this.spaceDevices.length; index++) {
         let device: EngineRuntimeDevice = this.spaceDevices[index];
@@ -2192,9 +2218,9 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     this.desktopRefreshBusy = true;
     try {
       if (this.spaceJoined) {
-        this.spaceNodeService.wakeConnections();
+        await engineRuntimeService.recoverNetwork();
         await this.connectAllSpaceDevices();
-        await this.consumeSpaceTextEvents();
+        await this.pollOfficialEngineInbound();
       }
       if (this.hasConfig()) {
         await this.loadServerHistory(true);
@@ -5221,7 +5247,6 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   public async consumeRealtimeEvents(): Promise<number> {
     let activityCount: number = 0;
     activityCount += await this.consumeMobileSyncEvents();
-    activityCount += await this.consumeSpaceTextEvents();
     this.realtimeTick += 1;
     if (this.spaceJoined) {
       activityCount += await this.pollOfficialEngineInbound();
@@ -5568,124 +5593,6 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     } finally {
       fileIo.closeSync(source.fd);
     }
-  }
-
-  public async consumeSpaceTextEvents(): Promise<number> {
-    // EngineRuntimeService owns the official event stream. The legacy native
-    // event queues are deliberately not consumed by the product UI.
-    return 0;
-    /*
-    if (this.spaceDevices.length === 0) {
-      await this.refreshSpaceDevices();
-    }
-    let events: NativeSpaceTextEvent[] = this.spaceNodeService.drainTextEvents();
-    for (let index: number = 0; index < events.length; index++) {
-      let event: NativeSpaceTextEvent = events[index];
-      this.latestText = event.text;
-      this.latestKind = 'Text';
-      this.latestImage = null;
-      if (this.desktopSelectedId.length === 0) {
-        this.releaseDesktopAudio();
-        this.refreshCurrentLinkPreview();
-      }
-      this.latestContentId = event.snapshotHash;
-      this.addHistory(event.text, 'received', 'Text', null, null, '', event.snapshotHash,
-        this.sourceLabelForDevice(event.fromDeviceId));
-      try {
-        await this.clipboardService.writeText(event.text);
-        this.notifyReceivedContent('Text', event.text, null, 0,
-          this.sourceLabelForDevice(event.fromDeviceId));
-      } catch (error) {
-        this.statusCode = 3;
-      }
-    }
-    if (events.length > 0 && this.statusCode !== 3) {
-      this.spacePeerConnected = true;
-      this.statusCode = 2;
-    }
-    let imageEvents: NativeSpaceImageEvent[] = this.spaceNodeService.drainImageEvents();
-    for (let index: number = 0; index < imageEvents.length; index++) {
-      let event: NativeSpaceImageEvent = imageEvents[index];
-      try {
-        let pixelMap: image.PixelMap = await this.clipboardService.decodeImage(event.data);
-        this.latestImage = pixelMap;
-        this.latestImageRevision += 1;
-        this.latestKind = 'Image';
-        this.latestText = 'image.jpg';
-        if (this.desktopSelectedId.length === 0) {
-          this.releaseDesktopAudio();
-          this.clearLinkPreview();
-        }
-        this.latestContentId = event.snapshotHash;
-        this.addHistory('image.jpg', 'received', 'Image', pixelMap, null, '', event.snapshotHash,
-          this.sourceLabelForDevice(event.fromDeviceId));
-        await this.clipboardService.writeImage(pixelMap);
-        this.notifyReceivedContent('Image', 'image.jpg', pixelMap, 0,
-          this.sourceLabelForDevice(event.fromDeviceId));
-      } catch (error) {
-        this.statusCode = 3;
-      }
-    }
-    if (imageEvents.length > 0 && this.statusCode !== 3) {
-      this.spacePeerConnected = true;
-      this.statusCode = 2;
-    }
-    let fileEvents: NativeSpaceFileEvent[] = this.spaceNodeService.drainFileEvents();
-    for (let index: number = 0; index < fileEvents.length; index++) {
-      let event: NativeSpaceFileEvent = fileEvents[index];
-      let filePreview: image.PixelMap | null = null;
-      if (this.isImageFileName(event.fileName) && event.data.length > 0) {
-        try {
-          filePreview = await this.clipboardService.decodeImage(event.data);
-        } catch (error) {
-          filePreview = null;
-        }
-      }
-      this.latestKind = 'File';
-      this.latestText = event.fileName;
-      this.latestFileName = event.fileName;
-      this.latestFileData = event.data;
-      this.latestFilePath = event.localPath;
-      this.latestFileRevision += 1;
-      this.desktopFilePreviewState = 0;
-      this.resetDesktopVideoAspectRatio();
-      if (this.desktopSelectedId.length === 0) {
-        this.releaseDesktopAudio();
-        this.clearLinkPreview();
-      }
-      this.latestImage = null;
-      this.latestContentId = event.snapshotHash;
-      this.addHistory(event.fileName, 'received', 'File', null,
-        event.data.length > 0 ? event.data : null, event.localPath, event.snapshotHash,
-        this.sourceLabelForDevice(event.fromDeviceId));
-      this.notifyReceivedContent('File', event.fileName, filePreview, event.data.length,
-        this.sourceLabelForDevice(event.fromDeviceId));
-    }
-    if (fileEvents.length > 0) {
-      this.spacePeerConnected = true;
-      this.statusCode = 2;
-    }
-    let fileStatusEvents: NativeSpaceFileStatusEvent[] = this.spaceNodeService.drainFileStatusEvents();
-    for (let index: number = 0; index < fileStatusEvents.length; index++) {
-      let event: NativeSpaceFileStatusEvent = fileStatusEvents[index];
-      if (event.transferId !== this.pendingFileTransferId) {
-        continue;
-      }
-      if (event.status === 'completed') {
-        this.fileTransferState = 6;
-        this.pendingFileTransferId = '';
-        this.statusCode = 2;
-      } else if (event.status === 'failed' || event.status === 'cancelled') {
-        this.fileTransferState = 4;
-        this.pendingFileTransferId = '';
-        this.statusCode = 3;
-      }
-    }
-    if (events.length > 0 || imageEvents.length > 0 || fileEvents.length > 0) {
-      this.animateLatestContent();
-    }
-    return events.length + imageEvents.length + fileEvents.length + fileStatusEvents.length;
-    */
   }
 
   public async pullLatestFromRealtime(client: MobileSyncClient): Promise<void> {

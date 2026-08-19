@@ -265,6 +265,7 @@ export interface EngineRuntimeHandle {
   lifecycleState(): Promise<string>;
   suspend(): Promise<void>;
   resume(): Promise<void>;
+  recoverNetwork(): Promise<void>;
   nextEvent(timeoutMs: number): Promise<EngineRuntimeEvent | null>;
   shutdown(deadlineMs: number): Promise<void>;
   createSpace(deviceName: string | null, passphrase: string): Promise<EngineSpaceCreated>;
@@ -312,6 +313,7 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
       (): Promise<string> => rawHandle.lifecycleState(),
       (): Promise<void> => rawHandle.suspend(),
       (): Promise<void> => rawHandle.resume(),
+      (): Promise<void> => rawHandle.recoverNetwork(),
       async (timeoutMs: number): Promise<EngineRuntimeEvent | null> => {
         let rawEvent = await rawHandle.nextEvent(timeoutMs);
         if (rawEvent === null) {
@@ -392,6 +394,7 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
   private lifecycleStateCallback: () => Promise<string>;
   private suspendCallback: () => Promise<void>;
   private resumeCallback: () => Promise<void>;
+  private recoverNetworkCallback: () => Promise<void>;
   private nextEventCallback: (timeoutMs: number) => Promise<EngineRuntimeEvent | null>;
   private shutdownCallback: (deadlineMs: number) => Promise<void>;
   private createSpaceCallback: (deviceName: string | null, passphrase: string) => Promise<EngineSpaceCreated>;
@@ -414,6 +417,7 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
 
   constructor(lifecycleStateCallback: () => Promise<string>, suspendCallback: () => Promise<void>,
     resumeCallback: () => Promise<void>,
+    recoverNetworkCallback: () => Promise<void>,
     nextEventCallback: (timeoutMs: number) => Promise<EngineRuntimeEvent | null>,
     shutdownCallback: (deadlineMs: number) => Promise<void>,
     createSpaceCallback: (deviceName: string | null, passphrase: string) => Promise<EngineSpaceCreated>,
@@ -435,6 +439,7 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
     this.lifecycleStateCallback = lifecycleStateCallback;
     this.suspendCallback = suspendCallback;
     this.resumeCallback = resumeCallback;
+    this.recoverNetworkCallback = recoverNetworkCallback;
     this.nextEventCallback = nextEventCallback;
     this.shutdownCallback = shutdownCallback;
     this.createSpaceCallback = createSpaceCallback;
@@ -463,6 +468,10 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
 
   async resume(): Promise<void> {
     await this.resumeCallback();
+  }
+
+  async recoverNetwork(): Promise<void> {
+    await this.recoverNetworkCallback();
   }
 
   async nextEvent(timeoutMs: number): Promise<EngineRuntimeEvent | null> {
@@ -697,6 +706,11 @@ export class EngineRuntimeService implements EngineClipboardObserver {
     return await this.executeFeature('recover_session',
       (handle: EngineRuntimeHandle): Promise<EngineSessionRecovery> =>
         handle.recoverSession(allowSecureStorageUnlock));
+  }
+
+  async recoverNetwork(): Promise<void> {
+    await this.executeFeature('recover_network',
+      (handle: EngineRuntimeHandle): Promise<void> => handle.recoverNetwork());
   }
 
   async issueInvitation(): Promise<EngineInvitationIssued> {

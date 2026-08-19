@@ -87,6 +87,8 @@
     { "name": "space_joining_action", "value": "Joining…" },
     { "name": "space_join_success", "value": "Joined the space" },
     { "name": "space_join_failed", "value": "Could not join. Check the code, passphrase, and desktop device network." },
+    { "name": "space_migration_success", "value": "Space data migration completed." },
+    { "name": "space_migration_preserved_warning", "value": "The space was joined, but some older records could not be read. They were preserved and not silently deleted. Keep the old device or a backup before handling them." },
     { "name": "space_joined_device", "value": "This HarmonyOS device" },
     { "name": "space_switch_open", "value": "Manage or choose space" },
     { "name": "space_switch_cancel", "value": "Cancel selection" },

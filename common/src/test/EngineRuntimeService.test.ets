@@ -96,6 +96,7 @@ class TestRuntimeHost implements EngineRuntimeHost {
 class TestRuntimeHandle implements EngineRuntimeHandle {
   suspendCount: number = 0;
   resumeCount: number = 0;
+  recoverNetworkCount: number = 0;
   shutdownCount: number = 0;
   nextEventCount: number = 0;
   private eventResolver: ((event: EngineRuntimeEvent | null) => void) | null = null;
@@ -110,6 +111,10 @@ class TestRuntimeHandle implements EngineRuntimeHandle {
 
   async resume(): Promise<void> {
     this.resumeCount += 1;
+  }
+
+  async recoverNetwork(): Promise<void> {
+    this.recoverNetworkCount += 1;
   }
 
   nextEvent(timeoutMs: number): Promise<EngineRuntimeEvent | null> {
@@ -266,9 +271,11 @@ export default function engineRuntimeServiceTest(): void {
 
       let invitation: EngineInvitationIssued = await service.issueInvitation();
       let report: EngineSendReport = await service.sendText('hello', []);
+      await service.recoverNetwork();
 
       expect(invitation.invitationCode).assertEqual('invitation');
       expect(report.totalAccepted).assertEqual(1);
+      expect(backend.handle.recoverNetworkCount).assertEqual(1);
       await service.shutdown();
     });
   });

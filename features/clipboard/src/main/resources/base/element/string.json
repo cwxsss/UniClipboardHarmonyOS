@@ -349,6 +349,14 @@
       "value": "加入失败，请检查邀请代码、空间口令和桌面设备网络状态。"
     },
     {
+      "name": "space_migration_success",
+      "value": "空间数据迁移已完成。"
+    },
+    {
+      "name": "space_migration_preserved_warning",
+      "value": "空间已加入，但部分旧数据无法读取，原数据已保留且未被静默删除。请保留旧设备或备份后再处理。"
+    },
+    {
       "name": "space_joined_device",
       "value": "当前 HarmonyOS 设备"
     },
