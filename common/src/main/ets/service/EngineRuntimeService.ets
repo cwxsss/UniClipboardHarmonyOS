@@ -1,7 +1,20 @@
 import { bundleManager, common } from '@kit.AbilityKit';
 import { util } from '@kit.ArkTS';
 import engine from '@uniclipboard/engine';
-import { createNapiBuffer } from 'uniclipboard_native';
+import type {
+  OhContentTypes,
+  OhContentTypesPatch,
+  OhHistoryEntryDetail,
+  OhHistoryEntryResource,
+  OhHistoryEntrySummary,
+  OhInvitationIssued,
+  OhJoinedSpace,
+  OhJoinSpaceStatus,
+  OhMemberSyncPreferences,
+  OhMemberSyncPreferencesPatch,
+  OhSendReport
+} from '@uniclipboard/engine';
+import nativeApi from 'uniclipboard_native';
 import {
   EngineHostAdapter,
   EngineHostCallbacks
@@ -60,6 +73,17 @@ export interface EngineRuntimeEventObserver {
   onEngineRuntimeEvent(event: EngineRuntimeEvent): void;
 }
 
+export interface EngineClipboardTextDecoder {
+  decode(bytes: Uint8Array): string;
+}
+
+class SystemEngineClipboardTextDecoder implements EngineClipboardTextDecoder {
+  decode(bytes: Uint8Array): string {
+    let decoder: util.TextDecoder = util.TextDecoder.create('utf-8', { fatal: false, ignoreBOM: true });
+    return decoder.decodeToString(bytes);
+  }
+}
+
 export class EngineRuntimeError extends Error {
   category: string;
   operation: string;
@@ -85,7 +109,7 @@ export class EngineRuntimeStartConfig {
   }
 }
 
-// These result classes isolate the rc.3 native surface from pages and view models.
+// These result classes isolate the native surface from pages and view models.
 export class EngineSpaceCreated {
   spaceId: string;
   selfDeviceId: string;
@@ -173,7 +197,95 @@ export class EngineActiveClipboard {
   }
 }
 
-// The native rc.3 binding serializes device-trust snapshots as JSON. Convert
+export class EngineHistoryEntrySummary {
+  entryId: string;
+  preview: string;
+  sizeBytes: number;
+  capturedAtMs: number;
+  contentType: string;
+  isFavorited: boolean;
+  activeTimeMs: number;
+  contentTags: string[];
+
+  constructor(entryId: string, preview: string, sizeBytes: number, capturedAtMs: number,
+    contentType: string, isFavorited: boolean, activeTimeMs: number, contentTags: string[]) {
+    this.entryId = entryId;
+    this.preview = preview;
+    this.sizeBytes = sizeBytes;
+    this.capturedAtMs = capturedAtMs;
+    this.contentType = contentType;
+    this.isFavorited = isFavorited;
+    this.activeTimeMs = activeTimeMs;
+    this.contentTags = contentTags;
+  }
+}
+
+export class EngineHistoryEntryDetail {
+  entryId: string;
+  content: string;
+  sizeBytes: number;
+  createdAtMs: number;
+  activeTimeMs: number;
+  mimeType: string | undefined;
+
+  constructor(entryId: string, content: string, sizeBytes: number, createdAtMs: number,
+    activeTimeMs: number, mimeType: string | undefined) {
+    this.entryId = entryId;
+    this.content = content;
+    this.sizeBytes = sizeBytes;
+    this.createdAtMs = createdAtMs;
+    this.activeTimeMs = activeTimeMs;
+    this.mimeType = mimeType;
+  }
+}
+
+export class EngineHistoryEntryResource {
+  mimeType: string | undefined;
+  sizeBytes: number;
+  bytes: Uint8Array;
+
+  constructor(mimeType: string | undefined, sizeBytes: number, bytes: Uint8Array) {
+    this.mimeType = mimeType;
+    this.sizeBytes = sizeBytes;
+    this.bytes = bytes;
+  }
+}
+
+export class EngineContentTypes {
+  text: boolean;
+  image: boolean;
+  link: boolean;
+  file: boolean;
+  codeSnippet: boolean;
+  richText: boolean;
+
+  constructor(text: boolean, image: boolean, link: boolean, file: boolean,
+    codeSnippet: boolean, richText: boolean) {
+    this.text = text;
+    this.image = image;
+    this.link = link;
+    this.file = file;
+    this.codeSnippet = codeSnippet;
+    this.richText = richText;
+  }
+}
+
+export class EngineMemberSyncPreferences {
+  sendEnabled: boolean;
+  receiveEnabled: boolean;
+  sendContentTypes: EngineContentTypes;
+  receiveContentTypes: EngineContentTypes;
+
+  constructor(sendEnabled: boolean, receiveEnabled: boolean,
+    sendContentTypes: EngineContentTypes, receiveContentTypes: EngineContentTypes) {
+    this.sendEnabled = sendEnabled;
+    this.receiveEnabled = receiveEnabled;
+    this.sendContentTypes = sendContentTypes;
+    this.receiveContentTypes = receiveContentTypes;
+  }
+}
+
+// The native binding serializes device-trust snapshots as JSON. Convert
 // them here so views only see a stable ArkTS model, never native JSON.
 class EngineDeviceTrustRelationshipPayload {
   device_id: string = '';
@@ -222,59 +334,6 @@ export class EngineWorkspaceConvergence {
   }
 }
 
-// rc.3 exports these methods from libuc_ohos_napi.so, but omits them from
-// OhEngine in Index.d.ets. Keep the compatibility contract private to this
-// adapter so the rest of the product never touches the native object.
-interface EngineCompatibilityNativeInvitation {
-  invitationCode: string;
-  expiresAtMs: number;
-  availability: string;
-}
-
-interface EngineCompatibilityNativeSpaceJoined {
-  sponsorDeviceId: string;
-  sponsorIdentityFingerprint: string;
-  spaceId: string;
-  selfDeviceId: string;
-  selfIdentityFingerprint: string;
-  migratedRecords: string | undefined;
-  preservedUnreadableRecords: string | undefined;
-}
-
-interface EngineCompatibilityNativeJoinSpaceStatus {
-  status: string;
-  joinId: string;
-  joinedSpace: EngineCompatibilityNativeSpaceJoined | undefined;
-  rejectionReason: string | undefined;
-}
-
-interface EngineCompatibilityNativeSendReport {
-  entryId: string;
-  atMs: number;
-  totalAccepted: number;
-  totalDuplicate: number;
-  totalOffline: number;
-  totalErrored: number;
-  totalPending: number;
-}
-
-interface EngineCompatibilityNativeHandle {
-  issueInvitation(): Promise<EngineCompatibilityNativeInvitation>;
-  joinSpace(invitationCode: string, deviceName: string | null, passphrase: string,
-    preserveUnreadableHistory: boolean): Promise<EngineCompatibilityNativeJoinSpaceStatus>;
-  // The helper returns an actual N-API Buffer even though its ArkTS type is
-  // declared as ArrayBuffer because the generated bridge declaration cannot
-  // express the native Buffer class.
-  sendImage(bytes: ArrayBuffer, mimeType: string, targetDevices: string[]):
-    Promise<EngineCompatibilityNativeSendReport>;
-  sendFiles(fileHandles: string[], targetDevices: string[]): Promise<EngineCompatibilityNativeSendReport>;
-  captureCurrentClipboard(): Promise<string | null>;
-  restoreClipboard(entryId: string, mode: string): Promise<string>;
-  queryDeviceTrust(): Promise<string>;
-  decideDeviceTrustChange(changeId: string, choice: string,
-    confirmLocalRemoval: boolean): Promise<string>;
-}
-
 export interface EngineRuntimeHandle {
   lifecycleState(): Promise<string>;
   suspend(): Promise<void>;
@@ -292,10 +351,18 @@ export interface EngineRuntimeHandle {
   sendFiles(fileHandles: string[], targetDevices: string[]): Promise<EngineSendReport>;
   captureCurrentClipboard(): Promise<string | null>;
   queryActiveClipboard(): Promise<EngineActiveClipboard | null>;
+  listHistoryEntries(limit: number, offset: number): Promise<EngineHistoryEntrySummary[]>;
+  getHistoryEntry(entryId: string): Promise<EngineHistoryEntryDetail>;
+  deleteHistoryEntry(entryId: string): Promise<void>;
+  setHistoryEntryFavorite(entryId: string, isFavorited: boolean): Promise<void>;
+  readHistoryEntryResource(entryId: string): Promise<EngineHistoryEntryResource>;
   restoreClipboard(entryId: string, mode: string): Promise<string>;
   exportEntry(entryId: string, destinationHandle: string): Promise<void>;
   removeMember(deviceId: string): Promise<EngineWorkspaceConvergence>;
   queryDeviceTrust(): Promise<string>;
+  queryMemberSyncPreferences(deviceId: string): Promise<EngineMemberSyncPreferences>;
+  updateMemberSyncPreferences(deviceId: string, preferences: EngineMemberSyncPreferences):
+    Promise<EngineMemberSyncPreferences>;
   decideDeviceTrustChange(changeId: string, choice: string,
     confirmLocalRemoval: boolean): Promise<string>;
 }
@@ -315,6 +382,18 @@ export interface EngineRuntimeHost {
   shutdown(): void;
 }
 
+function mapContentTypes(types: OhContentTypes): EngineContentTypes {
+  return new EngineContentTypes(types.text, types.image, types.link, types.file,
+    types.codeSnippet, types.richText);
+}
+
+function mapMemberSyncPreferences(
+  preferences: OhMemberSyncPreferences): EngineMemberSyncPreferences {
+  return new EngineMemberSyncPreferences(preferences.sendEnabled, preferences.receiveEnabled,
+    mapContentTypes(preferences.sendContentTypes),
+    mapContentTypes(preferences.receiveContentTypes));
+}
+
 class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
   prepareHost(host: EngineHostCallbacks): Object {
     return engine.prepareHost(host);
@@ -322,8 +401,6 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
 
   async startEngine(config: EngineRuntimeStartConfig, preparedHost: Object): Promise<EngineRuntimeHandle> {
     let rawHandle = await engine.startEngine(config, preparedHost);
-    let nativeObject: Object = rawHandle as Object;
-    let compatibilityHandle: EngineCompatibilityNativeHandle = nativeObject as EngineCompatibilityNativeHandle;
     return new CallbackEngineRuntimeHandle(
       (): Promise<string> => rawHandle.lifecycleState(),
       (): Promise<void> => rawHandle.suspend(),
@@ -357,18 +434,18 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
         return new EngineSessionRecovery(result.unlocked, result.resumed);
       },
       async (): Promise<EngineInvitationIssued> => {
-        let result: EngineCompatibilityNativeInvitation = await compatibilityHandle.issueInvitation();
+        let result: OhInvitationIssued = await rawHandle.issueInvitation();
         return new EngineInvitationIssued(result.invitationCode, result.expiresAtMs, result.availability);
       },
       async (invitationCode: string, deviceName: string | null, passphrase: string,
         preserveUnreadableHistory: boolean): Promise<EngineSpaceJoined> => {
-        let status: EngineCompatibilityNativeJoinSpaceStatus = await compatibilityHandle.joinSpace(invitationCode, deviceName, passphrase,
+        let status: OhJoinSpaceStatus = await rawHandle.joinSpace(invitationCode, deviceName, passphrase,
           preserveUnreadableHistory);
         if (status.status !== 'active' || status.joinedSpace === undefined) {
           let reason: string = status.rejectionReason === undefined ? status.status : status.rejectionReason;
           throw new Error('join_space_' + reason);
         }
-        let result: EngineCompatibilityNativeSpaceJoined = status.joinedSpace;
+        let result: OhJoinedSpace = status.joinedSpace;
         return new EngineSpaceJoined(result.sponsorDeviceId, result.sponsorIdentityFingerprint,
           result.spaceId, result.selfDeviceId, result.selfIdentityFingerprint,
           result.migratedRecords, result.preservedUnreadableRecords);
@@ -379,18 +456,18 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
           result.totalDuplicate, result.totalOffline, result.totalErrored, result.totalPending);
       },
       async (bytes: Uint8Array, mimeType: string, targetDevices: string[]): Promise<EngineSendReport> => {
-        let nativeBytes: ArrayBuffer = createNapiBuffer(bytes);
-        let result: EngineCompatibilityNativeSendReport = await compatibilityHandle.sendImage(nativeBytes,
+        let nativeBytes: ArrayBuffer = nativeApi.createNapiBuffer(bytes);
+        let result: OhSendReport = await rawHandle.sendImage(nativeBytes,
           mimeType, targetDevices);
         return new EngineSendReport(result.entryId, result.atMs, result.totalAccepted,
           result.totalDuplicate, result.totalOffline, result.totalErrored, result.totalPending);
       },
       async (fileHandles: string[], targetDevices: string[]): Promise<EngineSendReport> => {
-        let result: EngineCompatibilityNativeSendReport = await compatibilityHandle.sendFiles(fileHandles, targetDevices);
+        let result: OhSendReport = await rawHandle.sendFiles(fileHandles, targetDevices);
         return new EngineSendReport(result.entryId, result.atMs, result.totalAccepted,
           result.totalDuplicate, result.totalOffline, result.totalErrored, result.totalPending);
       },
-      (): Promise<string | null> => compatibilityHandle.captureCurrentClipboard(),
+      (): Promise<string | null> => rawHandle.captureCurrentClipboard(),
       async (): Promise<EngineActiveClipboard | null> => {
         let result = await rawHandle.queryActiveClipboard();
         if (result === null) {
@@ -398,7 +475,28 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
         }
         return new EngineActiveClipboard(result.entryId, result.activatedBy);
       },
-      (entryId: string, mode: string): Promise<string> => compatibilityHandle.restoreClipboard(entryId, mode),
+      async (limit: number, offset: number): Promise<EngineHistoryEntrySummary[]> => {
+        let entries: OhHistoryEntrySummary[] = await rawHandle.listHistoryEntries(limit, offset);
+        return entries.map((entry: OhHistoryEntrySummary): EngineHistoryEntrySummary =>
+          new EngineHistoryEntrySummary(entry.entryId, entry.preview, entry.sizeBytes,
+            entry.capturedAtMs, entry.contentType, entry.isFavorited, entry.activeTimeMs,
+            entry.contentTags));
+      },
+      async (entryId: string): Promise<EngineHistoryEntryDetail> => {
+        let entry: OhHistoryEntryDetail = await rawHandle.getHistoryEntry(entryId);
+        return new EngineHistoryEntryDetail(entry.entryId, entry.content, entry.sizeBytes,
+          entry.createdAtMs, entry.activeTimeMs, entry.mimeType);
+      },
+      (entryId: string): Promise<void> => rawHandle.deleteHistoryEntry(entryId),
+      (entryId: string, isFavorited: boolean): Promise<void> =>
+        rawHandle.setHistoryEntryFavorite(entryId, isFavorited),
+      async (entryId: string): Promise<EngineHistoryEntryResource> => {
+        let resource: OhHistoryEntryResource = await rawHandle.readHistoryEntryResource(entryId);
+        return new EngineHistoryEntryResource(resource.mimeType, resource.sizeBytes,
+          new Uint8Array(resource.bytes));
+      },
+      (entryId: string, mode: string): Promise<string> =>
+        rawHandle.restoreClipboard(entryId, mode as 'standard' | 'plain_text' | 'file_paths'),
       (entryId: string, destinationHandle: string): Promise<void> => rawHandle.exportEntry(entryId,
         destinationHandle),
       async (deviceId: string): Promise<EngineWorkspaceConvergence> => {
@@ -406,9 +504,40 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
         return new EngineWorkspaceConvergence(result.phase, result.effectiveMemberCount,
           result.updatedAtMs);
       },
-      (): Promise<string> => compatibilityHandle.queryDeviceTrust(),
+      async (deviceId: string): Promise<EngineMemberSyncPreferences> => {
+        let result: OhMemberSyncPreferences = await rawHandle.queryMemberSyncPreferences(deviceId);
+        return mapMemberSyncPreferences(result);
+      },
+      async (deviceId: string, preferences: EngineMemberSyncPreferences): Promise<EngineMemberSyncPreferences> => {
+        let sendContentTypes: OhContentTypesPatch = {
+          text: preferences.sendContentTypes.text,
+          image: preferences.sendContentTypes.image,
+          file: preferences.sendContentTypes.file,
+          link: preferences.sendContentTypes.link,
+          codeSnippet: preferences.sendContentTypes.codeSnippet,
+          richText: preferences.sendContentTypes.richText
+        };
+        let receiveContentTypes: OhContentTypesPatch = {
+          text: preferences.receiveContentTypes.text,
+          image: preferences.receiveContentTypes.image,
+          file: preferences.receiveContentTypes.file,
+          link: preferences.receiveContentTypes.link,
+          codeSnippet: preferences.receiveContentTypes.codeSnippet,
+          richText: preferences.receiveContentTypes.richText
+        };
+        let patch: OhMemberSyncPreferencesPatch = {
+          sendEnabled: preferences.sendEnabled,
+          receiveEnabled: preferences.receiveEnabled,
+          sendContentTypes: sendContentTypes,
+          receiveContentTypes: receiveContentTypes
+        };
+        let result: OhMemberSyncPreferences = await rawHandle.updateMemberSyncPreferences(deviceId, patch);
+        return mapMemberSyncPreferences(result);
+      },
+      (): Promise<string> => rawHandle.queryDeviceTrust(),
       (changeId: string, choice: string, confirmLocalRemoval: boolean): Promise<string> =>
-        compatibilityHandle.decideDeviceTrustChange(changeId, choice, confirmLocalRemoval));
+        rawHandle.decideDeviceTrustChange(changeId,
+          choice as 'apply_change' | 'keep_current_device_group', confirmLocalRemoval));
   }
 }
 
@@ -430,9 +559,19 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
   private sendFilesCallback: (fileHandles: string[], targetDevices: string[]) => Promise<EngineSendReport>;
   private captureCurrentClipboardCallback: () => Promise<string | null>;
   private queryActiveClipboardCallback: () => Promise<EngineActiveClipboard | null>;
+  private listHistoryEntriesCallback: (limit: number, offset: number) =>
+    Promise<EngineHistoryEntrySummary[]>;
+  private getHistoryEntryCallback: (entryId: string) => Promise<EngineHistoryEntryDetail>;
+  private deleteHistoryEntryCallback: (entryId: string) => Promise<void>;
+  private setHistoryEntryFavoriteCallback: (entryId: string, isFavorited: boolean) => Promise<void>;
+  private readHistoryEntryResourceCallback: (entryId: string) => Promise<EngineHistoryEntryResource>;
   private restoreClipboardCallback: (entryId: string, mode: string) => Promise<string>;
   private exportEntryCallback: (entryId: string, destinationHandle: string) => Promise<void>;
   private removeMemberCallback: (deviceId: string) => Promise<EngineWorkspaceConvergence>;
+  private queryMemberSyncPreferencesCallback: (deviceId: string) => Promise<EngineMemberSyncPreferences>;
+  private updateMemberSyncPreferencesCallback: (deviceId: string,
+    preferences: EngineMemberSyncPreferences) =>
+    Promise<EngineMemberSyncPreferences>;
   private queryDeviceTrustCallback: () => Promise<string>;
   private decideDeviceTrustChangeCallback: (changeId: string, choice: string,
     confirmLocalRemoval: boolean) => Promise<string>;
@@ -452,9 +591,18 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
     sendFilesCallback: (fileHandles: string[], targetDevices: string[]) => Promise<EngineSendReport>,
     captureCurrentClipboardCallback: () => Promise<string | null>,
     queryActiveClipboardCallback: () => Promise<EngineActiveClipboard | null>,
+    listHistoryEntriesCallback: (limit: number, offset: number) => Promise<EngineHistoryEntrySummary[]>,
+    getHistoryEntryCallback: (entryId: string) => Promise<EngineHistoryEntryDetail>,
+    deleteHistoryEntryCallback: (entryId: string) => Promise<void>,
+    setHistoryEntryFavoriteCallback: (entryId: string, isFavorited: boolean) => Promise<void>,
+    readHistoryEntryResourceCallback: (entryId: string) => Promise<EngineHistoryEntryResource>,
     restoreClipboardCallback: (entryId: string, mode: string) => Promise<string>,
     exportEntryCallback: (entryId: string, destinationHandle: string) => Promise<void>,
     removeMemberCallback: (deviceId: string) => Promise<EngineWorkspaceConvergence>,
+    queryMemberSyncPreferencesCallback: (deviceId: string) => Promise<EngineMemberSyncPreferences>,
+    updateMemberSyncPreferencesCallback: (deviceId: string,
+      preferences: EngineMemberSyncPreferences) =>
+      Promise<EngineMemberSyncPreferences>,
     queryDeviceTrustCallback: () => Promise<string>,
     decideDeviceTrustChangeCallback: (changeId: string, choice: string,
       confirmLocalRemoval: boolean) => Promise<string>) {
@@ -473,9 +621,16 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
     this.sendFilesCallback = sendFilesCallback;
     this.captureCurrentClipboardCallback = captureCurrentClipboardCallback;
     this.queryActiveClipboardCallback = queryActiveClipboardCallback;
+    this.listHistoryEntriesCallback = listHistoryEntriesCallback;
+    this.getHistoryEntryCallback = getHistoryEntryCallback;
+    this.deleteHistoryEntryCallback = deleteHistoryEntryCallback;
+    this.setHistoryEntryFavoriteCallback = setHistoryEntryFavoriteCallback;
+    this.readHistoryEntryResourceCallback = readHistoryEntryResourceCallback;
     this.restoreClipboardCallback = restoreClipboardCallback;
     this.exportEntryCallback = exportEntryCallback;
     this.removeMemberCallback = removeMemberCallback;
+    this.queryMemberSyncPreferencesCallback = queryMemberSyncPreferencesCallback;
+    this.updateMemberSyncPreferencesCallback = updateMemberSyncPreferencesCallback;
     this.queryDeviceTrustCallback = queryDeviceTrustCallback;
     this.decideDeviceTrustChangeCallback = decideDeviceTrustChangeCallback;
   }
@@ -541,6 +696,26 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
     return await this.queryActiveClipboardCallback();
   }
 
+  async listHistoryEntries(limit: number, offset: number): Promise<EngineHistoryEntrySummary[]> {
+    return await this.listHistoryEntriesCallback(limit, offset);
+  }
+
+  async getHistoryEntry(entryId: string): Promise<EngineHistoryEntryDetail> {
+    return await this.getHistoryEntryCallback(entryId);
+  }
+
+  async deleteHistoryEntry(entryId: string): Promise<void> {
+    await this.deleteHistoryEntryCallback(entryId);
+  }
+
+  async setHistoryEntryFavorite(entryId: string, isFavorited: boolean): Promise<void> {
+    await this.setHistoryEntryFavoriteCallback(entryId, isFavorited);
+  }
+
+  async readHistoryEntryResource(entryId: string): Promise<EngineHistoryEntryResource> {
+    return await this.readHistoryEntryResourceCallback(entryId);
+  }
+
   async restoreClipboard(entryId: string, mode: string): Promise<string> {
     return await this.restoreClipboardCallback(entryId, mode);
   }
@@ -551,6 +726,15 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
 
   async removeMember(deviceId: string): Promise<EngineWorkspaceConvergence> {
     return await this.removeMemberCallback(deviceId);
+  }
+
+  async queryMemberSyncPreferences(deviceId: string): Promise<EngineMemberSyncPreferences> {
+    return await this.queryMemberSyncPreferencesCallback(deviceId);
+  }
+
+  async updateMemberSyncPreferences(deviceId: string, preferences: EngineMemberSyncPreferences):
+    Promise<EngineMemberSyncPreferences> {
+    return await this.updateMemberSyncPreferencesCallback(deviceId, preferences);
   }
 
   async queryDeviceTrust(): Promise<string> {
@@ -620,22 +804,26 @@ export class EngineRuntimeService implements EngineClipboardObserver {
   private eventPolling: boolean = false;
   private observers: EngineRuntimeObserver[] = [];
   private eventObservers: EngineRuntimeEventObserver[] = [];
+  private clipboardTextDecoder: EngineClipboardTextDecoder;
 
-  private constructor(backend: EngineRuntimeBackend, host: EngineRuntimeHost) {
+  private constructor(backend: EngineRuntimeBackend, host: EngineRuntimeHost,
+    clipboardTextDecoder: EngineClipboardTextDecoder) {
     this.backend = backend;
     this.host = host;
+    this.clipboardTextDecoder = clipboardTextDecoder;
   }
 
   static getInstance(): EngineRuntimeService {
     if (EngineRuntimeService.instance === null) {
       EngineRuntimeService.instance = new EngineRuntimeService(
-        new OfficialEngineRuntimeBackend(), new OfficialEngineRuntimeHost());
+        new OfficialEngineRuntimeBackend(), new OfficialEngineRuntimeHost(), new SystemEngineClipboardTextDecoder());
     }
     return EngineRuntimeService.instance;
   }
 
-  static createForTesting(backend: EngineRuntimeBackend, host: EngineRuntimeHost): EngineRuntimeService {
-    return new EngineRuntimeService(backend, host);
+  static createForTesting(backend: EngineRuntimeBackend, host: EngineRuntimeHost,
+    clipboardTextDecoder: EngineClipboardTextDecoder = new SystemEngineClipboardTextDecoder()): EngineRuntimeService {
+    return new EngineRuntimeService(backend, host, clipboardTextDecoder);
   }
 
   async prepareForTesting(callbacks: EngineHostCallbacks, config: EngineRuntimeStartConfig): Promise<void> {
@@ -829,6 +1017,35 @@ export class EngineRuntimeService implements EngineClipboardObserver {
       (handle: EngineRuntimeHandle): Promise<EngineActiveClipboard | null> => handle.queryActiveClipboard());
   }
 
+  async listHistoryEntries(limit: number, offset: number): Promise<EngineHistoryEntrySummary[]> {
+    return await this.executeReadOnly('list_history_entries',
+      (handle: EngineRuntimeHandle): Promise<EngineHistoryEntrySummary[]> =>
+        handle.listHistoryEntries(limit, offset));
+  }
+
+  async getHistoryEntry(entryId: string): Promise<EngineHistoryEntryDetail> {
+    return await this.executeReadOnly('get_history_entry',
+      (handle: EngineRuntimeHandle): Promise<EngineHistoryEntryDetail> =>
+        handle.getHistoryEntry(entryId));
+  }
+
+  async deleteHistoryEntry(entryId: string): Promise<void> {
+    await this.executeFeature('delete_history_entry',
+      (handle: EngineRuntimeHandle): Promise<void> => handle.deleteHistoryEntry(entryId));
+  }
+
+  async setHistoryEntryFavorite(entryId: string, isFavorited: boolean): Promise<void> {
+    await this.executeFeature('set_history_entry_favorite',
+      (handle: EngineRuntimeHandle): Promise<void> =>
+        handle.setHistoryEntryFavorite(entryId, isFavorited));
+  }
+
+  async readHistoryEntryResource(entryId: string): Promise<EngineHistoryEntryResource> {
+    return await this.executeReadOnly('read_history_entry_resource',
+      (handle: EngineRuntimeHandle): Promise<EngineHistoryEntryResource> =>
+        handle.readHistoryEntryResource(entryId));
+  }
+
   async queryDevices(): Promise<EngineRuntimeDevice[]> {
     let serialized: string = await this.executeReadOnly('query_device_trust',
       (handle: EngineRuntimeHandle): Promise<string> => handle.queryDeviceTrust());
@@ -897,6 +1114,19 @@ export class EngineRuntimeService implements EngineClipboardObserver {
       (handle: EngineRuntimeHandle): Promise<EngineWorkspaceConvergence> => handle.removeMember(deviceId));
   }
 
+  async queryMemberSyncPreferences(deviceId: string): Promise<EngineMemberSyncPreferences> {
+    return await this.executeReadOnly('query_member_sync_preferences',
+      (handle: EngineRuntimeHandle): Promise<EngineMemberSyncPreferences> =>
+        handle.queryMemberSyncPreferences(deviceId));
+  }
+
+  async updateMemberSyncPreferences(deviceId: string, preferences: EngineMemberSyncPreferences):
+    Promise<EngineMemberSyncPreferences> {
+    return await this.executeFeature('update_member_sync_preferences',
+      (handle: EngineRuntimeHandle): Promise<EngineMemberSyncPreferences> =>
+        handle.updateMemberSyncPreferences(deviceId, preferences));
+  }
+
   async queryDeviceTrust(): Promise<string> {
     return await this.executeReadOnly('query_device_trust',
       (handle: EngineRuntimeHandle): Promise<string> => handle.queryDeviceTrust());
@@ -925,6 +1155,7 @@ export class EngineRuntimeService implements EngineClipboardObserver {
         this.clipboardCaptureTask = null;
       }
     }).catch((): void => {
+      logger.warn('Clipboard automatic send task failed.');
       if (this.clipboardCaptureTask === task) {
         this.clipboardCaptureTask = null;
       }
@@ -1237,12 +1468,11 @@ export class EngineRuntimeService implements EngineClipboardObserver {
   }
 
   private extractClipboardText(snapshot: EngineClipboardSnapshot): string {
-    let decoder: util.TextDecoder = util.TextDecoder.create('utf-8', { fatal: false, ignoreBOM: true });
     for (let index: number = 0; index < snapshot.representations.length; index += 1) {
       let representation = snapshot.representations[index];
       if (representation.kind === 'inline' && representation.format === 'text/plain' &&
         representation.bytes !== undefined) {
-        return decoder.decodeToString(representation.bytes);
+        return this.clipboardTextDecoder.decode(representation.bytes);
       }
     }
     return '';

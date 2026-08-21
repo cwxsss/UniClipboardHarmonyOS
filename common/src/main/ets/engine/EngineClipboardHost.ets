@@ -68,9 +68,11 @@ export class EngineClipboardHost {
         try {
           let text: string = this.decoder.decodeToString(representation.bytes);
           let data: pasteboard.PasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, text);
-          this.systemPasteboard.setDataSync(data);
+          // setDataSync may fire the update callback before it returns. Prime
+          // the baseline first so a remote write is never captured as local.
           this.lastClipboardText = text;
           this.hasClipboardBaseline = true;
+          this.systemPasteboard.setDataSync(data);
           return;
         } catch (error) {
           throw this.accessError(error as Object, 'clipboard_write');

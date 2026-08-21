@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "release": {
     "version": "v1.1.0-rc.5",
-    "commit": "31c149c5bfb8a8edfe80c94944c8255157a3a3af",
+    "commit": "9dbca3f43447dadef163dd54b719b96acd39e7ef",
     "rustToolchain": "1.95.0",
     "cargoLockSha256": "142861493fbdb013fc5d3533a9943a4218367b3ddcd55960a59640ad4a0fc8b2"
   },
@@ -92,8 +92,8 @@
       "architectures": [
         "arm64-v8a"
       ],
-      "sha256": "7f11512c11ce119dc727427ce0927749eeeb6ce965dd7bdd35c1f4b52171ae10",
-      "size": 26952233
+      "sha256": "4171924184645fdca1ee45dddf52e6f342a1723ae17919b4cff51231aeefdbbc",
+      "size": 27150517
     },
     {
       "name": "UniClipboardEngine.har.checksum.txt",
@@ -101,7 +101,7 @@
       "architectures": [
         "arm64-v8a"
       ],
-      "sha256": "07ab261be5dcc104b10db2cb753abf571e5d2d05fa724d85fb52de6db39ced54",
+      "sha256": "de7dad600c22864154dc7478d4ae738d1225236b50a15f39e91426758a2aa63a",
       "size": 65
     },
     {
@@ -167,8 +167,8 @@
       "name": "index.d.ts",
       "platform": "harmonyos",
       "architectures": [],
-      "sha256": "7f04a1cbe2e43df6e285f78e18d3cd7182a392b4f94c5b331967970edd003b74",
-      "size": 4976
+      "sha256": "c5e80b18fc870b9626ebd856582825785e541c9a1c67310b6c18469e8f475ee7",
+      "size": 7035
     },
     {
       "name": "libuc_ohos_napi.so",
@@ -176,8 +176,8 @@
       "architectures": [
         "arm64-v8a"
       ],
-      "sha256": "85c1091e7285ffac64a82ee968e3fef60c4759d51c1f7311b4db97209be53666",
-      "size": 236453088
+      "sha256": "86a89084682def83c7ca7a0b825e366227bd204ba3abf60dd08176b20f1fe70c",
+      "size": 237863312
     },
     {
       "name": "runtime-dependencies.txt",
@@ -190,7 +190,7 @@
       "name": "source-commit.txt",
       "platform": "source",
       "architectures": [],
-      "sha256": "5babfcffd0c5c17d5a963aee0883f1db94b11d0cf161729784f0323786322ead",
+      "sha256": "b0aa32daca50cca7409c4e11e3c533609a34dc69e3a6086b190e03cb4693436e",
       "size": 41
     },
     {
@@ -199,7 +199,7 @@
       "architectures": [
         "arm64-v8a"
       ],
-      "sha256": "88f796ae02fd92bc65c20e5483a92e733fdcf3200b06cf409f22065b3f4083b9",
+      "sha256": "d269c3cd138e42de51e4628a54633ec25304d86093198554c8472bd84b897ae8",
       "size": 65
     },
     {

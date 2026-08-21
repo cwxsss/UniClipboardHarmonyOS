@@ -4,7 +4,6 @@ export {
   ServerConfig,
   ServerHistoryItem,
   SyncContent,
-  SyncEvent,
   SyncResult
 } from './src/main/ets/model/ClipboardModels';
 
@@ -39,12 +38,18 @@ export { EngineHostError, EngineHostErrorCategory } from './src/main/ets/engine/
 export { EngineVersionService } from './src/main/ets/service/EngineVersionService';
 export {
   EngineRuntimeBackend,
+  EngineClipboardTextDecoder,
   EngineInvitationIssued,
   EngineActiveClipboard,
+  EngineHistoryEntryDetail,
+  EngineHistoryEntryResource,
+  EngineHistoryEntrySummary,
   EngineRuntimeError,
   EngineRuntimeEvent,
   EngineRuntimeEventObserver,
   EngineRuntimeDevice,
+  EngineContentTypes,
+  EngineMemberSyncPreferences,
   EngineSendReport,
   EngineSpaceCreated,
   EngineSpaceJoined,
@@ -74,11 +79,8 @@ export {
   parseOpticalFrame,
   unpackOpticalEnvelope
 } from './src/main/ets/service/OpticalTransferService';
-export { MobileSyncClient } from './src/main/ets/service/MobileSyncClient';
 export { MobileSyncServerService } from './src/main/ets/service/MobileSyncServerService';
-export { NativeProtocolService } from './src/main/ets/service/NativeProtocolService';
 export { ReceivedNotificationService } from './src/main/ets/service/NotificationService';
-export { SpaceNodeService } from './src/main/ets/service/SpaceNodeService';
 
 export {
   NativeCreateSpaceResult,

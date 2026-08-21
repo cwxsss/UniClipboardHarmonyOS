@@ -24,39 +24,13 @@ import {
 } from '@kit.UIDesignKit';
 import {
   ClipboardHistoryItem,
-  ServerConfig,
   ServerHistoryItem,
-  SyncContent,
-  SyncEvent,
-  ClipboardFileSelection,
-  ClipboardService,
   APPEARANCE_MODE_DARK,
   APPEARANCE_MODE_LIGHT,
   APPEARANCE_MODE_SYSTEM,
   APPEARANCE_THEME_DEFAULT,
-  AppearanceStorageService,
-  ConfigStorageService,
-  BackgroundSyncPreferenceService,
-  HistoryStorageService,
-  MobileSyncClient,
-  MobileSyncServerService,
-  NativeProtocolService,
-  ReceivedNotificationService,
-  SpaceNodeService,
-  NativeCreateSpaceResult,
-  NativeJoinSpaceResult,
   EngineRuntimeDevice,
-  NativeSpaceFileEvent,
-  NativeSpaceFileSendResult,
-  NativeSpaceFileStatusEvent,
-  NativeSpaceImageEvent,
-  NativeSpaceInvitation,
-  NativeSpaceStatus,
-  NativeSpaceTextEvent,
-  NativeMobileSyncCredential,
-  NativeMobileSyncDevice,
-  NativeMobileSyncInboundEvent,
-  NativeMobileSyncStatus
+  NativeMobileSyncDevice
 } from 'common';
 
 import {
@@ -77,6 +51,19 @@ import { HdrImage } from '../../components/HdrImage';
 export struct ExpandedClipboardView {
   @State controller: ClipboardFeatureController = ClipboardFeatureController.getInstance();
   @StorageLink('historyRevision') historyRenderRevision: number = 0;
+  @StorageLink('desktopDeviceSyncRevision') desktopDeviceSyncRenderRevision: number = 0;
+  @StorageLink('desktopDeviceSendEnabled') desktopDeviceSendEnabled: boolean = true;
+  @StorageLink('desktopDeviceSyncText') desktopDeviceSyncText: boolean = true;
+  @StorageLink('desktopDeviceSyncImage') desktopDeviceSyncImage: boolean = true;
+  @StorageLink('desktopDeviceSyncFile') desktopDeviceSyncFile: boolean = true;
+  @StorageLink('desktopDeviceSyncLink') desktopDeviceSyncLink: boolean = true;
+  @StorageLink('desktopDeviceSyncRichText') desktopDeviceSyncRichText: boolean = true;
+  @StorageLink('desktopDeviceReceiveEnabled') desktopDeviceReceiveEnabled: boolean = true;
+  @StorageLink('desktopDeviceReceiveText') desktopDeviceReceiveText: boolean = true;
+  @StorageLink('desktopDeviceReceiveImage') desktopDeviceReceiveImage: boolean = true;
+  @StorageLink('desktopDeviceReceiveFile') desktopDeviceReceiveFile: boolean = true;
+  @StorageLink('desktopDeviceReceiveLink') desktopDeviceReceiveLink: boolean = true;
+  @StorageLink('desktopDeviceReceiveRichText') desktopDeviceReceiveRichText: boolean = true;
   @State showAboutSheet: boolean = false;
   @State showFeedbackSheet: boolean = false;
   @State showConnectionDiagnosticsSheet: boolean = false;
@@ -1795,9 +1782,11 @@ export struct ExpandedClipboardView {
       Column({ space: 7 }) {
         Row() {
           Text(item.direction === 'sent' ? $r('app.string.direction_sent') :
-            $r('app.string.direction_received'))
+            (item.direction === 'received' ? $r('app.string.direction_received') :
+              $r('app.string.direction_history')))
             .fontSize(12)
-            .fontColor(item.direction === 'sent' ? this.controller.accentColor() : $r('app.color.success'))
+            .fontColor(item.direction === 'sent' ? this.controller.accentColor() :
+              (item.direction === 'received' ? $r('app.color.success') : $r('app.color.text_secondary')))
           if (item.starred) {
             Text('★')
               .fontSize(12)
@@ -3507,14 +3496,15 @@ export struct ExpandedClipboardView {
 
 
   @Builder
-  private desktopDeviceContentTypeSwitch(title: Resource, contentType: string, checked: boolean) {
+  private desktopDeviceContentTypeSwitch(title: Resource, contentType: string) {
     Row({ space: 12 }) {
       Text(title)
         .fontSize(15)
         .fontColor($r('app.color.text_primary'))
         .layoutWeight(1)
         .maxLines(1)
-      Toggle({ type: ToggleType.Switch, isOn: checked })
+      Toggle({ type: ToggleType.Switch, isOn: this.desktopDeviceSyncChecked(contentType) })
+        .id('desktop-device-sync-' + contentType + '-' + this.desktopDeviceSyncRenderRevision.toString())
         .selectedColor(this.controller.accentColor())
         .enabled(this.controller.desktopDeviceSyncState === 2 && !this.controller.desktopDeviceSyncSaving)
         .onChange((enabled: boolean): void => {
@@ -3528,6 +3518,37 @@ export struct ExpandedClipboardView {
     .border({ width: 1, color: $r('app.color.divider') })
     .backgroundColor($r('app.color.surface_muted'))
     .attributeModifier(Api26Material.subtle())
+  }
+
+  private desktopDeviceSyncChecked(contentType: string): boolean {
+    if (contentType === 'receive_text') {
+      return this.desktopDeviceReceiveText;
+    }
+    if (contentType === 'receive_image') {
+      return this.desktopDeviceReceiveImage;
+    }
+    if (contentType === 'receive_file') {
+      return this.desktopDeviceReceiveFile;
+    }
+    if (contentType === 'receive_link') {
+      return this.desktopDeviceReceiveLink;
+    }
+    if (contentType === 'receive_rich_text') {
+      return this.desktopDeviceReceiveRichText;
+    }
+    if (contentType === 'text') {
+      return this.desktopDeviceSyncText;
+    }
+    if (contentType === 'image') {
+      return this.desktopDeviceSyncImage;
+    }
+    if (contentType === 'file') {
+      return this.desktopDeviceSyncFile;
+    }
+    if (contentType === 'link') {
+      return this.desktopDeviceSyncLink;
+    }
+    return this.desktopDeviceSyncRichText;
   }
 
 
@@ -3606,7 +3627,8 @@ export struct ExpandedClipboardView {
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
-      Toggle({ type: ToggleType.Switch, isOn: this.controller.desktopDeviceSendEnabled })
+      Toggle({ type: ToggleType.Switch, isOn: this.desktopDeviceSendEnabled })
+        .id('desktop-device-sync-send-' + this.desktopDeviceSyncRenderRevision.toString())
         .selectedColor(this.controller.accentColor())
         .enabled(this.controller.desktopDeviceSyncState === 2 && !this.controller.desktopDeviceSyncSaving)
         .onChange((enabled: boolean): void => {
@@ -3616,6 +3638,23 @@ export struct ExpandedClipboardView {
     .width('100%')
     .constraintSize({ minHeight: 88 })
     .border({ width: { top: 1, bottom: 1 }, color: $r('app.color.divider') })
+    Row({ space: 18 }) {
+      Text($r('app.string.desktop_device_receive_enabled'))
+        .fontSize(17)
+        .fontWeight(FontWeight.Medium)
+        .fontColor($r('app.color.text_primary'))
+        .layoutWeight(1)
+      Toggle({ type: ToggleType.Switch, isOn: this.desktopDeviceReceiveEnabled })
+        .id('desktop-device-sync-receive-' + this.desktopDeviceSyncRenderRevision.toString())
+        .selectedColor(this.controller.accentColor())
+        .enabled(this.controller.desktopDeviceSyncState === 2 && !this.controller.desktopDeviceSyncSaving)
+        .onChange((enabled: boolean): void => {
+          this.controller.updateDesktopDeviceSyncPreference('receive', enabled);
+        })
+    }
+    .width('100%')
+    .height(64)
+    .border({ width: { bottom: 1 }, color: $r('app.color.divider') })
     if (this.controller.desktopDeviceSyncState === 1) {
       Text($r('app.string.desktop_device_sync_loading'))
         .fontSize(12)
@@ -3633,29 +3672,46 @@ export struct ExpandedClipboardView {
             this.controller.desktopSelectedSpaceDeviceId);
         })
     }
-    Text($r('app.string.desktop_device_content_types'))
+    Text($r('app.string.desktop_device_send_types'))
       .fontSize(12)
       .fontWeight(FontWeight.Medium)
       .fontColor($r('app.color.text_secondary'))
       .width('100%')
       .padding({ top: 26, bottom: 10 })
     Row({ space: 12 }) {
-      this.desktopDeviceContentTypeSwitch($r('app.string.desktop_device_sync_text'), 'text',
-        this.controller.desktopDeviceSyncText)
-      this.desktopDeviceContentTypeSwitch($r('app.string.desktop_device_sync_image'), 'image',
-        this.controller.desktopDeviceSyncImage)
+      this.desktopDeviceContentTypeSwitch($r('app.string.desktop_device_sync_text'), 'text')
+      this.desktopDeviceContentTypeSwitch($r('app.string.desktop_device_sync_image'), 'image')
     }
     .width('100%')
     Row({ space: 12 }) {
-      this.desktopDeviceContentTypeSwitch($r('app.string.desktop_device_sync_file'), 'file',
-        this.controller.desktopDeviceSyncFile)
-      this.desktopDeviceContentTypeSwitch($r('app.string.desktop_device_sync_link'), 'link',
-        this.controller.desktopDeviceSyncLink)
+      this.desktopDeviceContentTypeSwitch($r('app.string.desktop_device_sync_file'), 'file')
+      this.desktopDeviceContentTypeSwitch($r('app.string.desktop_device_sync_link'), 'link')
     }
     .width('100%')
     Row({ space: 12 }) {
-      this.desktopDeviceContentTypeSwitch($r('app.string.desktop_device_sync_rich_text'), 'rich_text',
-        this.controller.desktopDeviceSyncRichText)
+      this.desktopDeviceContentTypeSwitch($r('app.string.desktop_device_sync_rich_text'), 'rich_text')
+      Blank().layoutWeight(1)
+    }
+    .width('100%')
+    Text($r('app.string.desktop_device_receive_types'))
+      .fontSize(12)
+      .fontWeight(FontWeight.Medium)
+      .fontColor($r('app.color.text_secondary'))
+      .width('100%')
+      .padding({ top: 26, bottom: 10 })
+    Row({ space: 12 }) {
+      this.desktopDeviceContentTypeSwitch($r('app.string.desktop_device_sync_text'), 'receive_text')
+      this.desktopDeviceContentTypeSwitch($r('app.string.desktop_device_sync_image'), 'receive_image')
+    }
+    .width('100%')
+    Row({ space: 12 }) {
+      this.desktopDeviceContentTypeSwitch($r('app.string.desktop_device_sync_file'), 'receive_file')
+      this.desktopDeviceContentTypeSwitch($r('app.string.desktop_device_sync_link'), 'receive_link')
+    }
+    .width('100%')
+    Row({ space: 12 }) {
+      this.desktopDeviceContentTypeSwitch($r('app.string.desktop_device_sync_rich_text'),
+        'receive_rich_text')
       Blank().layoutWeight(1)
     }
     .width('100%')
@@ -3900,7 +3956,6 @@ export struct ExpandedClipboardView {
         } else {
           this.desktopSpaceRelaySettings()
           this.mobileSyncManagementCard()
-          this.desktopLegacyConnectionSettings()
         }
       }
       .width('100%')

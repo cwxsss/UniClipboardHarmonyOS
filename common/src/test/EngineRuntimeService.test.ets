@@ -6,8 +6,14 @@ import {
 } from '../main/ets/engine/EngineHostAdapter';
 import {
   EngineRuntimeBackend,
+  EngineClipboardTextDecoder,
   EngineActiveClipboard,
+  EngineContentTypes,
+  EngineHistoryEntryDetail,
+  EngineHistoryEntryResource,
+  EngineHistoryEntrySummary,
   EngineInvitationIssued,
+  EngineMemberSyncPreferences,
   EngineRuntimeEvent,
   EngineRuntimeHandle,
   EngineRuntimeHost,
@@ -95,6 +101,12 @@ class TestRuntimeHost implements EngineRuntimeHost {
 
   shutdown(): void {
     this.shutdownCount += 1;
+  }
+}
+
+class TestClipboardTextDecoder implements EngineClipboardTextDecoder {
+  decode(bytes: Uint8Array): string {
+    return 'hello';
   }
 }
 
@@ -217,6 +229,24 @@ class TestRuntimeHandle implements EngineRuntimeHandle {
     return new EngineActiveClipboard('entry', 'device');
   }
 
+  async listHistoryEntries(limit: number, offset: number): Promise<EngineHistoryEntrySummary[]> {
+    return [];
+  }
+
+  async getHistoryEntry(entryId: string): Promise<EngineHistoryEntryDetail> {
+    return new EngineHistoryEntryDetail(entryId, '', 0, 0, 0, 'text/plain');
+  }
+
+  async deleteHistoryEntry(entryId: string): Promise<void> {
+  }
+
+  async setHistoryEntryFavorite(entryId: string, isFavorited: boolean): Promise<void> {
+  }
+
+  async readHistoryEntryResource(entryId: string): Promise<EngineHistoryEntryResource> {
+    return new EngineHistoryEntryResource('application/octet-stream', 0, new Uint8Array(0));
+  }
+
   async restoreClipboard(entryId: string, mode: string): Promise<string> {
     return 'restored';
   }
@@ -230,6 +260,16 @@ class TestRuntimeHandle implements EngineRuntimeHandle {
 
   async queryDeviceTrust(): Promise<string> {
     return '{}';
+  }
+
+  async queryMemberSyncPreferences(deviceId: string): Promise<EngineMemberSyncPreferences> {
+    let types: EngineContentTypes = new EngineContentTypes(true, true, true, true, true, true);
+    return new EngineMemberSyncPreferences(true, true, types, types);
+  }
+
+  async updateMemberSyncPreferences(deviceId: string,
+    preferences: EngineMemberSyncPreferences): Promise<EngineMemberSyncPreferences> {
+    return preferences;
   }
 
   async decideDeviceTrustChange(changeId: string, choice: string,
@@ -349,7 +389,8 @@ export default function engineRuntimeServiceTest(): void {
 
     it('sends observed clipboard text to the selected desktop', 0, async (): Promise<void> => {
       let backend: TestRuntimeBackend = new TestRuntimeBackend();
-      let service: EngineRuntimeService = EngineRuntimeService.createForTesting(backend, new TestRuntimeHost());
+      let service: EngineRuntimeService = EngineRuntimeService.createForTesting(
+        backend, new TestRuntimeHost(), new TestClipboardTextDecoder());
       await service.prepareForTesting(new TestHostCallbacks(), new EngineRuntimeStartConfig('1.0.0', 'test'));
       await service.start();
       service.setClipboardAutoSendTargets(['desktop-device']);
@@ -364,7 +405,11 @@ export default function engineRuntimeServiceTest(): void {
         }]
       };
 
+      expect(service.getSnapshot().state).assertEqual(EngineRuntimeState.RUNNING);
       service.onClipboardChanged(snapshot);
+      await new Promise<void>((resolve: () => void): void => {
+        setTimeout(resolve, 50);
+      });
 
       expect(backend.handle.sendTextCount).assertEqual(1);
       expect(backend.handle.lastSentText).assertEqual('hello');

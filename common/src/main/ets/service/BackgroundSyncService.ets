@@ -1,4 +1,4 @@
-import { common, wantAgent, WantAgent } from '@kit.AbilityKit';
+import { bundleManager, common, wantAgent, WantAgent } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
 import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
 import { BusinessError } from '@kit.BasicServicesKit';
@@ -7,7 +7,6 @@ import { Logger } from '../util/Logger';
 const logger: Logger = new Logger('BackgroundSync');
 const STORE_NAME: string = 'background_sync_preferences';
 const ENABLED_KEY: string = 'background_sync_enabled';
-const BUNDLE_NAME: string = 'com.uniclipboard.hmos';
 const ABILITY_NAME: string = 'EntryAbility';
 
 export class BackgroundSyncPreferenceService {
@@ -47,10 +46,12 @@ export class BackgroundSyncTaskService {
     }
     this.starting = true;
     try {
+      let bundleInfo: bundleManager.BundleInfo = bundleManager.getBundleInfoForSelfSync(
+        bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_APPLICATION);
       let wantAgentInfo: wantAgent.WantAgentInfo = {
         wants: [
           {
-            bundleName: BUNDLE_NAME,
+            bundleName: bundleInfo.name,
             abilityName: ABILITY_NAME
           }
         ],

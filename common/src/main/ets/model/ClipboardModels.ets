@@ -112,13 +112,3 @@ export class ServerHistoryItem {
     this.timestampMs = timestampMs;
   }
 }
-
-export class SyncEvent {
-  eventType: string = '';
-  detail: string = '';
-
-  constructor(eventType: string, detail: string) {
-    this.eventType = eventType;
-    this.detail = detail;
-  }
-}

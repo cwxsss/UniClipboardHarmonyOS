@@ -181,6 +181,10 @@
       "value": "已发送"
     },
     {
+      "name": "direction_history",
+      "value": "历史记录"
+    },
+    {
       "name": "server_history_title",
       "value": "桌面历史"
     },
@@ -1206,7 +1210,19 @@
     },
     {
       "name": "desktop_device_send_enabled_note",
-      "value": "开启后，本机的剪贴板内容会同步给此设备。接收方向的独立开关将在后续版本开放。"
+      "value": "分别控制本机发送到此设备，以及从此设备接收的内容。"
+    },
+    {
+      "name": "desktop_device_receive_enabled",
+      "value": "从此设备接收"
+    },
+    {
+      "name": "desktop_device_send_types",
+      "value": "发送内容"
+    },
+    {
+      "name": "desktop_device_receive_types",
+      "value": "接收内容"
     },
     {
       "name": "desktop_device_sync_loading",

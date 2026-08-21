@@ -1,6 +1,0 @@
-{
-  "layered-image": {
-    "background": "$media:uniclipboard_background",
-    "foreground": "$media:uniclipboard_foreground"
-  }
-}

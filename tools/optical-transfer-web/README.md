@@ -9,7 +9,7 @@
 ## 启动
 
 ```powershell
-cd D:\UniClipboardHarmonyOS\tools\optical-transfer-web
+cd tools\optical-transfer-web
 npm install
 npm run dev -- --port 4173
 ```

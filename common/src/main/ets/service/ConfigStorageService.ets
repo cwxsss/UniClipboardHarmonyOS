@@ -30,6 +30,15 @@ export class ConfigStorageService {
     this.writeAsset(PASSWORD_ALIAS, config.password);
   }
 
+  clear(context: common.Context): void {
+    let storeOptions: preferences.Options = { name: STORE_NAME };
+    let store: preferences.Preferences = preferences.getPreferencesSync(context, storeOptions);
+    store.deleteSync(SERVER_URL_KEY);
+    store.flushSync();
+    this.removeAsset(USERNAME_ALIAS);
+    this.removeAsset(PASSWORD_ALIAS);
+  }
+
   private encode(value: string): Uint8Array {
     let encoder: util.TextEncoder = new util.TextEncoder();
     return encoder.encodeInto(value);
@@ -64,5 +73,14 @@ export class ConfigStorageService {
     attributes.set(asset.Tag.SECRET, this.encode(value));
     attributes.set(asset.Tag.ACCESSIBILITY, asset.Accessibility.DEVICE_FIRST_UNLOCKED);
     asset.addSync(attributes);
+  }
+
+  private removeAsset(alias: string): void {
+    let query: asset.AssetMap = new Map();
+    query.set(asset.Tag.ALIAS, this.encode(alias));
+    try {
+      asset.removeSync(query);
+    } catch (error) {
+    }
   }
 }
