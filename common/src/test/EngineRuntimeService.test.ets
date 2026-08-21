@@ -102,6 +102,8 @@ class TestRuntimeHandle implements EngineRuntimeHandle {
   suspendCount: number = 0;
   resumeCount: number = 0;
   recoverNetworkCount: number = 0;
+  recoverSessionCount: number = 0;
+  deferSessionRecovery: boolean = false;
   shutdownCount: number = 0;
   nextEventCount: number = 0;
   failJoin: boolean = false;
@@ -110,6 +112,7 @@ class TestRuntimeHandle implements EngineRuntimeHandle {
   lastSendTargets: string[] = [];
   private eventResolver: ((event: EngineRuntimeEvent | null) => void) | null = null;
   private eventRejecter: ((reason: Object) => void) | null = null;
+  private recoveryResolver: ((recovery: EngineSessionRecovery) => void) | null = null;
 
   async lifecycleState(): Promise<string> {
     return 'running';
@@ -160,7 +163,22 @@ class TestRuntimeHandle implements EngineRuntimeHandle {
   }
 
   async recoverSession(allowSecureStorageUnlock: boolean): Promise<EngineSessionRecovery> {
+    this.recoverSessionCount += 1;
+    if (this.deferSessionRecovery) {
+      return await new Promise<EngineSessionRecovery>(
+        (resolve: (recovery: EngineSessionRecovery) => void): void => {
+          this.recoveryResolver = resolve;
+        });
+    }
     return new EngineSessionRecovery(true, true);
+  }
+
+  completeSessionRecovery(): void {
+    let resolver: ((recovery: EngineSessionRecovery) => void) | null = this.recoveryResolver;
+    this.recoveryResolver = null;
+    if (resolver !== null) {
+      resolver(new EngineSessionRecovery(true, true));
+    }
   }
 
   async issueInvitation(): Promise<EngineInvitationIssued> {
@@ -269,6 +287,28 @@ export default function engineRuntimeServiceTest(): void {
       expect(backend.handle.resumeCount).assertEqual(1);
       expect(backend.handle.shutdownCount).assertEqual(1);
       expect(service.getSnapshot().state).assertEqual(EngineRuntimeState.IDLE);
+    });
+
+    it('shares session recovery and waits before suspending', 0, async (): Promise<void> => {
+      let backend: TestRuntimeBackend = new TestRuntimeBackend();
+      let service: EngineRuntimeService = EngineRuntimeService.createForTesting(backend, new TestRuntimeHost());
+      await service.prepareForTesting(new TestHostCallbacks(), new EngineRuntimeStartConfig('1.0.0', 'test'));
+      await service.start();
+      backend.handle.deferSessionRecovery = true;
+
+      let firstRecovery: Promise<EngineSessionRecovery> = service.recoverSession(true);
+      let secondRecovery: Promise<EngineSessionRecovery> = service.recoverSession(true);
+      let suspension: Promise<void> = service.suspend();
+      await Promise.resolve();
+
+      expect(backend.handle.recoverSessionCount).assertEqual(1);
+      expect(backend.handle.suspendCount).assertEqual(0);
+      backend.handle.completeSessionRecovery();
+      await Promise.all([firstRecovery, secondRecovery, suspension]);
+
+      expect(backend.handle.suspendCount).assertEqual(1);
+      expect(service.getSnapshot().state).assertEqual(EngineRuntimeState.SUSPENDED);
+      await service.shutdown();
     });
 
     it('recovers after startup failure', 0, async (): Promise<void> => {

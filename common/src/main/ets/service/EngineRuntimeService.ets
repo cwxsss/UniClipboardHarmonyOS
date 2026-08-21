@@ -608,6 +608,7 @@ export class EngineRuntimeService implements EngineClipboardObserver {
   private handle: EngineRuntimeHandle | null = null;
   private prepareTask: Promise<void> | null = null;
   private startTask: Promise<void> | null = null;
+  private recoverSessionTask: Promise<EngineSessionRecovery> | null = null;
   private suspendTask: Promise<void> | null = null;
   private resumeTask: Promise<void> | null = null;
   private shutdownTask: Promise<void> | null = null;
@@ -731,6 +732,21 @@ export class EngineRuntimeService implements EngineClipboardObserver {
   }
 
   async recoverSession(allowSecureStorageUnlock: boolean): Promise<EngineSessionRecovery> {
+    let activeTask: Promise<EngineSessionRecovery> | null = this.recoverSessionTask;
+    if (activeTask === null) {
+      activeTask = this.performRecoverSession(allowSecureStorageUnlock);
+      this.recoverSessionTask = activeTask;
+    }
+    try {
+      return await activeTask;
+    } finally {
+      if (this.recoverSessionTask === activeTask) {
+        this.recoverSessionTask = null;
+      }
+    }
+  }
+
+  private async performRecoverSession(allowSecureStorageUnlock: boolean): Promise<EngineSessionRecovery> {
     return await this.executeFeature('recover_session',
       (handle: EngineRuntimeHandle): Promise<EngineSessionRecovery> =>
         handle.recoverSession(allowSecureStorageUnlock));
@@ -939,6 +955,13 @@ export class EngineRuntimeService implements EngineClipboardObserver {
     if (pendingStart !== null) {
       await pendingStart;
     }
+    let pendingRecovery: Promise<EngineSessionRecovery> | null = this.recoverSessionTask;
+    if (pendingRecovery !== null) {
+      try {
+        await pendingRecovery;
+      } catch (error) {
+      }
+    }
     if (this.state !== EngineRuntimeState.RUNNING || this.handle === null) {
       return;
     }
@@ -1067,6 +1090,13 @@ export class EngineRuntimeService implements EngineClipboardObserver {
     if (pendingResume !== null) {
       try {
         await pendingResume;
+      } catch (error) {
+      }
+    }
+    let pendingRecovery: Promise<EngineSessionRecovery> | null = this.recoverSessionTask;
+    if (pendingRecovery !== null) {
+      try {
+        await pendingRecovery;
       } catch (error) {
       }
     }
