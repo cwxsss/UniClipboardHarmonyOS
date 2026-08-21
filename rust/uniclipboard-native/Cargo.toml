@@ -11,7 +11,6 @@ crate-type = ["cdylib"]
 [dependencies]
 napi-ohos = { version = "1.0", default-features = false, features = ["napi8", "async"] }
 napi-derive-ohos = "1.0"
-uc-mobile = { path = "../uc-mobile" }
 uc-mobile-proto = { path = "../space-core/crates/uc-mobile-proto" }
 uc-application = { path = "../space-core/crates/uc-application" }
 uc-bootstrap = { path = "../space-core/crates/uc-bootstrap", features = ["blobs"] }

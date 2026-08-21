@@ -222,6 +222,10 @@ export struct OpticalTransferPanel {
       this.receiverState = 7;
       return;
     }
+    if (!canIUse('SystemCapability.Multimedia.Scan.ScanBarcode')) {
+      this.receiverState = 7;
+      return;
+    }
     try {
       let options: scanBarcode.ScanOptions = {
         scanTypes: [scanCore.ScanType.QR_CODE],
@@ -238,7 +242,8 @@ export struct OpticalTransferPanel {
   }
 
   private startScanSurface(): void {
-    if (!this.cameraReady || !this.scanInitialized || this.scanStarted) {
+    if (!this.cameraReady || !this.scanInitialized || this.scanStarted ||
+      !canIUse('SystemCapability.Multimedia.Scan.ScanBarcode')) {
       return;
     }
     try {
@@ -257,7 +262,8 @@ export struct OpticalTransferPanel {
           for (let index: number = 0; index < results.length; index += 1) {
             this.handleScanValue(results[index].originalValue);
           }
-          if (this.receiverState !== 5 && this.scanStarted) {
+          if (this.receiverState !== 5 && this.scanStarted &&
+            canIUse('SystemCapability.Multimedia.Scan.ScanBarcode')) {
             try {
               customScan.rescan();
             } catch (scanError) {
@@ -332,14 +338,14 @@ export struct OpticalTransferPanel {
 
   private async stopReceiverCamera(): Promise<void> {
     this.cameraReady = false;
-    if (this.scanStarted) {
+    if (this.scanStarted && canIUse('SystemCapability.Multimedia.Scan.ScanBarcode')) {
       try {
         await customScan.stop();
       } catch (error) {
       }
       this.scanStarted = false;
     }
-    if (this.scanInitialized) {
+    if (this.scanInitialized && canIUse('SystemCapability.Multimedia.Scan.ScanBarcode')) {
       try {
         await customScan.release();
       } catch (error) {

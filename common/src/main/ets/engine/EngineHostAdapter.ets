@@ -133,7 +133,7 @@ class EngineHostCallbacksImpl implements EngineHostCallbacks {
 export class EngineHostAdapter {
   private storage: EngineSecureAssetStore = new EngineSecureAssetStore();
   private files: EngineFileHandleRegistry = new EngineFileHandleRegistry();
-  private clipboard: EngineClipboardHost = new EngineClipboardHost();
+  private clipboard: EngineClipboardHost = new EngineClipboardHost(this.files);
 
   prepare(context: common.UIAbilityContext): EngineHostCallbacks {
     let directories: EngineHostDirectories = new EngineHostDirectories(context);

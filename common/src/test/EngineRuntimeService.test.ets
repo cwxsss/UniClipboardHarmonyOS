@@ -26,7 +26,10 @@ import {
   EngineRuntimeState,
   EngineWorkspaceConvergence
 } from '../main/ets/service/EngineRuntimeService';
-import { EngineClipboardObserver, EngineClipboardSnapshot } from '../main/ets/engine/EngineClipboardHost';
+import {
+  EngineClipboardObserver,
+  EngineClipboardSnapshot
+} from '../main/ets/engine/EngineClipboardHost';
 import { EngineFileMetadata } from '../main/ets/engine/EngineFileHandleRegistry';
 
 class TestHostCallbacks implements EngineHostCallbacks {
@@ -76,6 +79,7 @@ class TestHostCallbacks implements EngineHostCallbacks {
 class TestRuntimeHost implements EngineRuntimeHost {
   shutdownCount: number = 0;
   clipboardPollingEnabled: boolean = false;
+  releasedHandles: string[] = [];
 
   prepare(context: common.UIAbilityContext): EngineHostCallbacks {
     return new TestHostCallbacks();
@@ -97,6 +101,7 @@ class TestRuntimeHost implements EngineRuntimeHost {
   }
 
   releaseFile(handle: string): void {
+    this.releasedHandles.push(handle);
   }
 
   shutdown(): void {
@@ -120,7 +125,11 @@ class TestRuntimeHandle implements EngineRuntimeHandle {
   nextEventCount: number = 0;
   failJoin: boolean = false;
   sendTextCount: number = 0;
+  sendImageCount: number = 0;
+  sendFilesCount: number = 0;
   lastSentText: string = '';
+  lastImageMimeType: string = '';
+  lastFileHandles: string[] = [];
   lastSendTargets: string[] = [];
   private eventResolver: ((event: EngineRuntimeEvent | null) => void) | null = null;
   private eventRejecter: ((reason: Object) => void) | null = null;
@@ -214,10 +223,14 @@ class TestRuntimeHandle implements EngineRuntimeHandle {
   }
 
   async sendImage(bytes: Uint8Array, mimeType: string, targetDevices: string[]): Promise<EngineSendReport> {
+    this.sendImageCount += 1;
+    this.lastImageMimeType = mimeType;
     return new EngineSendReport('entry', 1, 1, 0, 0, 0, 0);
   }
 
   async sendFiles(fileHandles: string[], targetDevices: string[]): Promise<EngineSendReport> {
+    this.sendFilesCount += 1;
+    this.lastFileHandles = fileHandles.slice();
     return new EngineSendReport('entry', 1, 1, 0, 0, 0, 0);
   }
 
@@ -415,6 +428,49 @@ export default function engineRuntimeServiceTest(): void {
       expect(backend.handle.lastSentText).assertEqual('hello');
       expect(backend.handle.lastSendTargets.length).assertEqual(1);
       expect(backend.handle.lastSendTargets[0]).assertEqual('desktop-device');
+      await service.shutdown();
+    });
+
+    it('sends observed images and files and releases file handles', 0, async (): Promise<void> => {
+      let backend: TestRuntimeBackend = new TestRuntimeBackend();
+      let host: TestRuntimeHost = new TestRuntimeHost();
+      let service: EngineRuntimeService = EngineRuntimeService.createForTesting(
+        backend, host, new TestClipboardTextDecoder());
+      await service.prepareForTesting(new TestHostCallbacks(), new EngineRuntimeStartConfig('1.0.0', 'test'));
+      await service.start();
+      service.setClipboardAutoSendTargets(['desktop-device']);
+
+      service.onClipboardChanged({
+        observedAtMs: 2,
+        representations: [{
+          kind: 'inline',
+          format: 'image/png',
+          mimeType: 'image/png',
+          bytes: new Uint8Array([1, 2, 3])
+        }]
+      });
+      await new Promise<void>((resolve: () => void): void => {
+        setTimeout(resolve, 50);
+      });
+      service.onClipboardChanged({
+        observedAtMs: 3,
+        representations: [{
+          kind: 'file',
+          format: 'application/octet-stream',
+          handle: 'clipboard-file',
+          displayName: 'document.bin',
+          sizeBytes: '3'
+        }]
+      });
+      await new Promise<void>((resolve: () => void): void => {
+        setTimeout(resolve, 50);
+      });
+
+      expect(backend.handle.sendImageCount).assertEqual(1);
+      expect(backend.handle.lastImageMimeType).assertEqual('image/png');
+      expect(backend.handle.sendFilesCount).assertEqual(1);
+      expect(backend.handle.lastFileHandles[0]).assertEqual('clipboard-file');
+      expect(host.releasedHandles[0]).assertEqual('clipboard-file');
       await service.shutdown();
     });
 

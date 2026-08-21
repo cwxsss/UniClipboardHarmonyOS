@@ -9,7 +9,7 @@ This repository contains and modifies code from:
 - Upstream license: GNU Affero General Public License v3.0 only
 - Imported snapshot: source archive from the `0.19.0-alpha.3` development stage; the archive did not preserve an exact Git commit identifier
 
-The vendored upstream-derived Rust sources are primarily under `rust/space-core/` and `rust/uc-mobile/`. Original copyright notices remain applicable.
+The vendored upstream-derived Rust sources are primarily under `rust/space-core/`. Original copyright notices remain applicable.
 
 ## HarmonyOS modifications
 

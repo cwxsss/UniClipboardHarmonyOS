@@ -76,7 +76,7 @@ export class ClipboardService {
         try {
           return await this.decodeImageUri(uri);
         } catch (error) {
-          logger.error('UniClipboard failed to decode clipboard image URI: ' + uri);
+          logger.info('Clipboard URI is not a readable image.');
         }
       }
     }

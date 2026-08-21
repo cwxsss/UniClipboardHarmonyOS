@@ -19,7 +19,11 @@ import {
   EngineHostAdapter,
   EngineHostCallbacks
 } from '../engine/EngineHostAdapter';
-import { EngineClipboardObserver, EngineClipboardSnapshot } from '../engine/EngineClipboardHost';
+import {
+  EngineClipboardObserver,
+  EngineClipboardRepresentation,
+  EngineClipboardSnapshot
+} from '../engine/EngineClipboardHost';
 import { EngineHostError } from '../engine/EngineHostError';
 import { Logger } from '../util/Logger';
 
@@ -1142,9 +1146,14 @@ export class EngineRuntimeService implements EngineClipboardObserver {
   onClipboardChanged(snapshot: EngineClipboardSnapshot): void {
     logger.info('Clipboard observer invoked state=' + this.state);
     if (this.clipboardWriteSuppression || this.state !== EngineRuntimeState.RUNNING) {
+      this.releaseSnapshotFileHandles(snapshot);
       return;
     }
     if (this.clipboardCaptureTask !== null) {
+      let previousPending: EngineClipboardSnapshot | null = this.pendingClipboardSnapshot;
+      if (previousPending !== null) {
+        this.releaseSnapshotFileHandles(previousPending);
+      }
       this.pendingClipboardSnapshot = snapshot;
       return;
     }
@@ -1430,24 +1439,38 @@ export class EngineRuntimeService implements EngineClipboardObserver {
     this.startConfig = null;
     this.eventPollTask = null;
     this.clipboardCaptureTask = null;
+    let pendingSnapshot: EngineClipboardSnapshot | null = this.pendingClipboardSnapshot;
     this.pendingClipboardSnapshot = null;
+    if (pendingSnapshot !== null) {
+      this.releaseSnapshotFileHandles(pendingSnapshot);
+    }
     this.clipboardWriteSuppression = false;
     this.eventPolling = false;
   }
 
   private async sendClipboardSnapshotFromHost(snapshot: EngineClipboardSnapshot): Promise<void> {
-    let text: string = this.extractClipboardText(snapshot);
-    if (text.length === 0) {
-      logger.info('Automatic clipboard send skipped reason=no_text');
-      return;
-    }
-    if (this.clipboardAutoSendTargets.length === 0) {
-      logger.warn('Automatic clipboard send skipped reason=no_target');
-      return;
-    }
     try {
+      if (this.clipboardAutoSendTargets.length === 0) {
+        logger.warn('Automatic clipboard send skipped reason=no_target');
+        return;
+      }
       let handle: EngineRuntimeHandle = this.requireRunningHandle('capture_clipboard');
-      let report: EngineSendReport = await handle.sendText(text, this.clipboardAutoSendTargets);
+      let report: EngineSendReport;
+      let image: EngineClipboardRepresentation | null = this.findClipboardImage(snapshot);
+      let files: string[] = this.findClipboardFileHandles(snapshot);
+      if (image !== null && image.bytes !== undefined) {
+        let mimeType: string = image.mimeType === undefined ? image.format : image.mimeType;
+        report = await handle.sendImage(image.bytes, mimeType, this.clipboardAutoSendTargets);
+      } else if (files.length > 0) {
+        report = await handle.sendFiles(files, this.clipboardAutoSendTargets);
+      } else {
+        let text: string = this.extractClipboardText(snapshot);
+        if (text.length === 0) {
+          logger.info('Automatic clipboard send skipped reason=unsupported_content');
+          return;
+        }
+        report = await handle.sendText(text, this.clipboardAutoSendTargets);
+      }
       logger.info('Automatic clipboard send completed accepted=' + report.totalAccepted.toString() +
         ' pending=' + report.totalPending.toString() +
         ' offline=' + report.totalOffline.toString() +
@@ -1455,6 +1478,8 @@ export class EngineRuntimeService implements EngineClipboardObserver {
     } catch (error) {
       let runtimeError: EngineRuntimeError = this.toRuntimeError('send_clipboard', error as Object);
       logger.warn('Automatic clipboard send failed category=' + runtimeError.category);
+    } finally {
+      this.releaseSnapshotFileHandles(snapshot);
     }
   }
 
@@ -1476,6 +1501,40 @@ export class EngineRuntimeService implements EngineClipboardObserver {
       }
     }
     return '';
+  }
+
+  private findClipboardImage(snapshot: EngineClipboardSnapshot): EngineClipboardRepresentation | null {
+    for (let index: number = 0; index < snapshot.representations.length; index += 1) {
+      let representation: EngineClipboardRepresentation = snapshot.representations[index];
+      let mimeType: string = representation.mimeType === undefined ? representation.format :
+        representation.mimeType;
+      if (representation.kind === 'inline' && mimeType.startsWith('image/') &&
+        representation.bytes !== undefined) {
+        return representation;
+      }
+    }
+    return null;
+  }
+
+  private findClipboardFileHandles(snapshot: EngineClipboardSnapshot): string[] {
+    let handles: string[] = [];
+    for (let index: number = 0; index < snapshot.representations.length; index += 1) {
+      let representation: EngineClipboardRepresentation = snapshot.representations[index];
+      if (representation.kind === 'file' && representation.handle !== undefined) {
+        handles.push(representation.handle);
+      }
+    }
+    return handles;
+  }
+
+  private releaseSnapshotFileHandles(snapshot: EngineClipboardSnapshot): void {
+    let handles: string[] = this.findClipboardFileHandles(snapshot);
+    for (let index: number = 0; index < handles.length; index += 1) {
+      try {
+        this.host.releaseFile(handles[index]);
+      } catch (error) {
+      }
+    }
   }
 
   private requireRunningHandle(operation: string): EngineRuntimeHandle {

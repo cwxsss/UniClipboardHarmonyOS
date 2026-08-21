@@ -123,17 +123,16 @@ devecocli run --module entry --product default
 - `common/`：公共能力 HAR，包含模型、存储、通知与同步服务；
 - `AppScope/`：应用级资源与元数据；
 - `rust/uniclipboard-native/`：HarmonyOS Node-API 桥；
-- `rust/uc-mobile/`：移动同步客户端封装；
 - `rust/space-core/`：为本移植版保留的上游 Rust 核心快照；
 - `rust/build-native.ps1`：arm64-v8a 原生库构建与本地包装配脚本。
 
-根目录的 `entry/` 保留为重构前的兼容源码快照；当前构建入口由根 `build-profile.json5` 指向 `products/default/`。
+当前构建入口由根 `build-profile.json5` 指向 `products/default/`。
 
 ## 当前边界
 
-- P2P 空间目前仅稳定支持内联文本；空间图片、大文本和文件传输仍在完善；
-- HTTP 兼容模式仍支持文本和 PNG 图片，但不会替代 P2P 空间传输；
-- 空间节点随应用进程运行，尚未注册 HarmonyOS 长时后台任务；
+- 桌面配对、加密历史、成员偏好和剪贴板传输统一由 Engine HAR 提供；
+- 系统剪贴板监听会自动发送文本、图片和文件，后台轮询由长时任务保持；
+- HTTP 兼容服务仅用于其他移动设备接入当前设备，不再用于连接桌面端；
 - 当前仓库只提供 arm64-v8a 原生库；
 - 应用市场发布不代表 UniClipboard 上游官方背书；协议兼容性仍可能随上游预览版本变化。
 
