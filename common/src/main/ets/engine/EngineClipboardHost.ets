@@ -43,7 +43,7 @@ export class EngineClipboardHost {
   private pollingEnabled: boolean = false;
   private pollingTimerId: number = -1;
   private hasClipboardBaseline: boolean = false;
-  private lastClipboardTimestamp: number = 0;
+  private lastClipboardIdentity: string = '';
   private suppressNextChange: boolean = false;
   private refreshPending: boolean = false;
   private refreshTask: Promise<void> | null = null;
@@ -105,6 +105,7 @@ export class EngineClipboardHost {
     try {
       this.systemPasteboard.on('update', this.updateCallback);
       this.listening = true;
+      this.scheduleClipboardRefresh();
       this.startPollingIfNeeded();
     } catch (error) {
       this.observer = null;
@@ -148,13 +149,8 @@ export class EngineClipboardHost {
   }
 
   private primeClipboardBaseline(): void {
-    try {
-      let data: pasteboard.PasteData = this.systemPasteboard.getDataSync();
-      this.lastClipboardTimestamp = this.clipboardTimestamp(data);
-      this.hasClipboardBaseline = true;
-    } catch (error) {
-      this.hasClipboardBaseline = false;
-    }
+    this.hasClipboardBaseline = false;
+    this.lastClipboardIdentity = '';
   }
 
   private scheduleClipboardRefresh(): void {
@@ -196,17 +192,18 @@ export class EngineClipboardHost {
     let snapshot: EngineClipboardSnapshot | null = null;
     try {
       snapshot = await this.readRichSnapshot();
+      let identity: string = this.snapshotIdentity(snapshot);
       if (!this.hasClipboardBaseline) {
-        this.lastClipboardTimestamp = snapshot.observedAtMs;
+        this.lastClipboardIdentity = identity;
         this.hasClipboardBaseline = true;
         this.releaseSnapshotFiles(snapshot);
         return;
       }
-      if (snapshot.observedAtMs === this.lastClipboardTimestamp) {
+      if (identity === this.lastClipboardIdentity) {
         this.releaseSnapshotFiles(snapshot);
         return;
       }
-      this.lastClipboardTimestamp = snapshot.observedAtMs;
+      this.lastClipboardIdentity = identity;
       if (this.suppressNextChange) {
         this.suppressNextChange = false;
         this.releaseSnapshotFiles(snapshot);
@@ -259,8 +256,21 @@ export class EngineClipboardHost {
   }
 
   private async readRichSnapshot(): Promise<EngineClipboardSnapshot> {
-    let data: pasteboard.PasteData = await this.systemPasteboard.getData();
+    let data: pasteboard.PasteData;
+    try {
+      // Capture the pasteboard synchronously while background access is still
+      // authorized, then perform only representation decoding asynchronously.
+      data = this.systemPasteboard.getDataSync();
+    } catch (error) {
+      throw this.accessError(error as Object, 'clipboard_snapshot_read');
+    }
     let observedAtMs: number = this.clipboardTimestamp(data);
+    let mimeTypes: string[] = data.getMimeTypes();
+    if (mimeTypes.includes(pasteboard.MIMETYPE_TEXT_PLAIN) &&
+      !mimeTypes.includes(pasteboard.MIMETYPE_PIXELMAP) &&
+      !mimeTypes.includes(pasteboard.MIMETYPE_TEXT_URI)) {
+      return this.snapshotFromText(this.extractText(data), observedAtMs);
+    }
     let pixelMap: image.PixelMap | null = await this.clipboardService.readImageFromPasteData(data);
     if (pixelMap !== null) {
       try {
@@ -319,8 +329,32 @@ export class EngineClipboardHost {
   }
 
   private clipboardTimestamp(data: pasteboard.PasteData): number {
-    let timestamp: number = data.getProperty().timestamp;
-    return Number.isSafeInteger(timestamp) && timestamp > 0 ? timestamp : Date.now();
+    try {
+      let timestamp: number = data.getProperty().timestamp;
+      return Number.isSafeInteger(timestamp) && timestamp > 0 ? timestamp : Date.now();
+    } catch (error) {
+      return Date.now();
+    }
+  }
+
+  private snapshotIdentity(snapshot: EngineClipboardSnapshot): string {
+    let parts: string[] = [];
+    for (let index: number = 0; index < snapshot.representations.length; index += 1) {
+      let representation: EngineClipboardRepresentation = snapshot.representations[index];
+      if (representation.bytes !== undefined) {
+        let hash: number = 2166136261;
+        for (let byteIndex: number = 0; byteIndex < representation.bytes.length; byteIndex += 1) {
+          hash = Math.imul(hash ^ representation.bytes[byteIndex], 16777619) >>> 0;
+        }
+        parts.push(representation.kind + ':' + representation.format + ':' +
+          representation.bytes.length.toString() + ':' + hash.toString(16));
+      } else {
+        parts.push(representation.kind + ':' + representation.format + ':' +
+          (representation.displayName === undefined ? '' : representation.displayName) + ':' +
+          (representation.sizeBytes === undefined ? '' : representation.sizeBytes));
+      }
+    }
+    return parts.length === 0 ? 'empty' : parts.join('|');
   }
 
   private releaseSnapshotFiles(snapshot: EngineClipboardSnapshot): void {
