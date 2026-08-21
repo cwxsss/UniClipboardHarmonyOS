@@ -1889,7 +1889,8 @@ export struct CompactClipboardView {
       Toggle({ type: ToggleType.Switch, isOn: this.controller.backgroundSyncEnabled })
         .selectedColor(this.controller.accentColor())
         .onChange((enabled: boolean): void => {
-          this.controller.setBackgroundSyncEnabled(enabled);
+          this.controller.setBackgroundSyncEnabled(enabled).catch((): void => {
+          });
         })
     }
     .width('100%')
@@ -4351,7 +4352,9 @@ export struct CompactClipboardView {
         })
           .enabled(!this.controller.desktopDeviceMutationBusy)
           .onClick((): void => {
-            this.controller.revokeSpaceDevice(device);
+            setTimeout((): void => {
+              this.controller.revokeSpaceDevice(device);
+            }, 120);
           })
       }
     }.menuItemDivider({
@@ -4370,10 +4373,12 @@ export struct CompactClipboardView {
         symbolStartIcon: this.controller.historyDeleteMenuSymbol(),
         content: $r('app.string.mobile_sync_revoke_confirm')
       })
-        .enabled(!this.controller.desktopDeviceMutationBusy)
-        .onClick((): void => {
+      .enabled(!this.controller.desktopDeviceMutationBusy)
+      .onClick((): void => {
+        setTimeout((): void => {
           this.controller.revokeMobileSyncDevice(device);
-        })
+        }, 120);
+      })
     }.menuItemDivider({
       strokeWidth: LengthMetrics.vp(1),
       color: $r('app.color.divider'),

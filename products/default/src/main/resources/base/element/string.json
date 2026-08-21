@@ -194,7 +194,7 @@
     },
     {
       "name": "entry_pasteboard_permission_reason",
-      "value": "用于读取你主动选择发送的剪贴板文本或图片"
+      "value": "用于在你开启后台自动同步后读取剪贴板并同步到受信设备"
     },
     {
       "name": "camera_permission_reason",

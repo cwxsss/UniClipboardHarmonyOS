@@ -63,6 +63,7 @@ import {
   EngineRuntimeEvent,
   EngineRuntimeEventObserver,
   EngineRuntimeState,
+  EngineWorkspaceConvergence,
   EngineSessionRecovery,
   MobileSyncClient,
   MobileSyncServerService,
@@ -79,6 +80,7 @@ import {
 import { HistoryDataSource } from './HistoryDataSource';
 
 const logger: Logger = new Logger('ClipboardFeature');
+const READ_PASTEBOARD_PERMISSION: Permissions = 'ohos.permission.READ_PASTEBOARD';
 
 const POLL_INTERVAL_BASE_MS: number = 1000;
 const POLL_INTERVAL_RELAXED_MS: number = 2000;
@@ -268,6 +270,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   public connectionDiagnosticLastFailureAtMs: number = 0;
   public connectionDiagnosticInternetGranted: boolean = false;
   public connectionDiagnosticBackgroundGranted: boolean = false;
+  public connectionDiagnosticClipboardGranted: boolean = false;
   public largeSection: number = 0;
   public largeSettingsSection: number = 0;
   public desktopSelectedId: string = '';
@@ -342,6 +345,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   public mobileSyncCustomPassword: string = '';
   public mobileSyncCredential: NativeMobileSyncCredential | null = null;
   public mobileSyncPasswordVisible: boolean = false;
+  private pasteboardPermissionRequestTask: Promise<boolean> | null = null;
 
   public clipboardService: ClipboardService = new ClipboardService();
   public appearanceStorageService: AppearanceStorageService = new AppearanceStorageService();
@@ -430,6 +434,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   public setSpaceJoined(joined: boolean): void {
     this.spaceJoined = joined;
     AppStorage.setOrCreate('spaceJoined', joined);
+    engineRuntimeService.setClipboardPollingEnabled(joined && this.backgroundSyncEnabled);
   }
 
   public prepareSharedHistory(uiContext: UIContext): void {
@@ -610,17 +615,95 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     if (context === undefined) {
       return;
     }
-    this.backgroundSyncEnabled = this.backgroundSyncPreferenceService.load(context);
+    let storedBackgroundSyncEnabled: boolean = this.backgroundSyncPreferenceService.load(context);
+    this.backgroundSyncEnabled = storedBackgroundSyncEnabled;
     AppStorage.setOrCreate('backgroundSyncEnabled', this.backgroundSyncEnabled);
+    if (!storedBackgroundSyncEnabled || this.hasPasteboardReadPermission()) {
+      return;
+    }
+    this.requestPasteboardReadPermissionOnce().then((granted: boolean): void => {
+      if (granted) {
+        this.persistBackgroundSyncPreference(true);
+        return;
+      }
+      this.persistBackgroundSyncPreference(false);
+      this.recordConnectionDiagnosticFailure('pasteboard_permission_denied');
+      logger.warn('UniClipboard background sync remains disabled because clipboard permission was denied.');
+    }).catch((): void => {
+      this.persistBackgroundSyncPreference(false);
+      this.recordConnectionDiagnosticFailure('pasteboard_permission_denied');
+      logger.warn('UniClipboard background sync permission request did not complete.');
+    });
   }
 
-  public setBackgroundSyncEnabled(enabled: boolean): void {
+  private hasPasteboardReadPermission(): boolean {
+    try {
+      let bundleInfo: bundleManager.BundleInfo = bundleManager.getBundleInfoForSelfSync(
+        bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_APPLICATION);
+      let tokenId: number = bundleInfo.appInfo.accessTokenId;
+      let accessManager: abilityAccessCtrl.AtManager = abilityAccessCtrl.createAtManager();
+      return accessManager.checkAccessTokenSync(
+        tokenId, READ_PASTEBOARD_PERMISSION) === abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  private async requestPasteboardReadPermission(): Promise<boolean> {
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context === undefined) {
+      return false;
+    }
+    if (this.hasPasteboardReadPermission()) {
+      return true;
+    }
+    try {
+      let accessManager: abilityAccessCtrl.AtManager = abilityAccessCtrl.createAtManager();
+      let result: PermissionRequestResult = await accessManager.requestPermissionsFromUser(
+        context, [READ_PASTEBOARD_PERMISSION]);
+      return result.authResults.length > 0 &&
+        result.authResults[0] === abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  private requestPasteboardReadPermissionOnce(): Promise<boolean> {
+    if (this.pasteboardPermissionRequestTask !== null) {
+      return this.pasteboardPermissionRequestTask;
+    }
+    let task: Promise<boolean> = this.requestPasteboardReadPermission();
+    this.pasteboardPermissionRequestTask = task;
+    let clearTask = (): void => {
+      if (this.pasteboardPermissionRequestTask === task) {
+        this.pasteboardPermissionRequestTask = null;
+      }
+    };
+    task.then(clearTask, clearTask);
+    return task;
+  }
+
+  private persistBackgroundSyncPreference(enabled: boolean): void {
     this.backgroundSyncEnabled = enabled;
     AppStorage.setOrCreate('backgroundSyncEnabled', enabled);
+    engineRuntimeService.setClipboardPollingEnabled(enabled && this.spaceJoined);
     let context: common.Context | undefined = this.getUIContext().getHostContext();
     if (context !== undefined) {
       this.backgroundSyncPreferenceService.save(context, enabled);
     }
+  }
+
+  public async setBackgroundSyncEnabled(enabled: boolean): Promise<void> {
+    if (enabled) {
+      let granted: boolean = await this.requestPasteboardReadPermissionOnce();
+      if (!granted) {
+        this.persistBackgroundSyncPreference(false);
+        this.recordConnectionDiagnosticFailure('pasteboard_permission_denied');
+        logger.warn('UniClipboard background sync remains disabled because clipboard permission was denied.');
+        return;
+      }
+    }
+    this.persistBackgroundSyncPreference(enabled);
   }
 
   public restoreAppearanceMode(): void {
@@ -995,9 +1078,16 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       }
       await engineRuntimeService.prepare(context as common.UIAbilityContext);
       await engineRuntimeService.start();
-      let recovery = await engineRuntimeService.recoverSession(true);
       this.spaceNodeState = 2;
-      this.setSpaceJoined(recovery.resumed);
+      try {
+        let recovery = await engineRuntimeService.recoverSession(true);
+        this.setSpaceJoined(recovery.resumed);
+      } catch (error) {
+        this.setSpaceJoined(false);
+        this.spaceSwitchOpen = false;
+        this.reportError('space', 'recover space session failed; re-pairing is required: ' +
+          this.errorDetail(error));
+      }
       await this.refreshSpaceNetworkSettings();
       if (this.spaceJoined) {
         await this.refreshSpaceDevices();
@@ -1006,6 +1096,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     } catch (error) {
       this.spaceNodeState = 3;
       this.recordConnectionDiagnosticFailure('node_unavailable');
+      this.reportError('space', 'initialize space node failed: ' + this.errorDetail(error));
     }
   }
 
@@ -1185,11 +1276,22 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
         return;
       }
       this.desktopDeviceMutationBusy = true;
-      await engineRuntimeService.removeMember(device.deviceId);
+      logger.info('Space device removal started.');
+      let convergence: EngineWorkspaceConvergence = await engineRuntimeService.removeMember(device.deviceId);
+      this.spaceDevices = this.spaceDevices.filter((item: EngineRuntimeDevice): boolean =>
+        item.deviceId !== device.deviceId);
+      if (this.desktopSelectedSpaceDeviceId === device.deviceId) {
+        this.desktopSelectedSpaceDeviceId = '';
+        engineRuntimeService.setClipboardAutoSendTargets([]);
+      }
       await this.refreshSpaceDevices();
       this.statusCode = 2;
+      this.showFeedbackToast($r('app.string.space_revoke_device_success'));
+      logger.info('Space device removal finished phase=' + convergence.phase);
     } catch (error) {
       this.statusCode = 3;
+      this.reportError('space', 'remove space device failed: ' + this.errorDetail(error),
+        $r('app.string.space_revoke_device_failed'));
     } finally {
       this.desktopDeviceMutationBusy = false;
     }
@@ -1311,8 +1413,8 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     }
     this.spaceJoinBusy = true;
     this.spaceJoinState = 0;
+    let switching: boolean = this.spaceJoined;
     try {
-      let switching: boolean = this.spaceJoined;
       let deviceName: string = this.spaceJoinDeviceName.trim();
       let requestedDeviceName: string | null = switching ? null : deviceName;
       let result: EngineSpaceJoined = await engineRuntimeService.joinSpace(
@@ -1347,7 +1449,8 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
         let joinError: Error = error as Error;
         errorMessage = joinError.message;
       }
-      this.reportError('space', 'join space failed: ' + errorMessage);
+      this.reportError('space', 'join space failed: ' + errorMessage,
+        switching ? $r('app.string.space_switch_failed') : $r('app.string.space_join_failed'));
       this.spaceJoinState = 2;
     } finally {
       this.spaceJoinBusy = false;
@@ -1745,6 +1848,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   private refreshConnectionDiagnosticPermissions(): void {
     this.connectionDiagnosticInternetGranted = false;
     this.connectionDiagnosticBackgroundGranted = false;
+    this.connectionDiagnosticClipboardGranted = false;
     try {
       let bundleInfo: bundleManager.BundleInfo = bundleManager.getBundleInfoForSelfSync(
         bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_APPLICATION);
@@ -1756,9 +1860,12 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
         tokenId, internetPermission) === abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED;
       this.connectionDiagnosticBackgroundGranted = accessManager.checkAccessTokenSync(
         tokenId, backgroundPermission) === abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED;
+      this.connectionDiagnosticClipboardGranted = accessManager.checkAccessTokenSync(
+        tokenId, READ_PASTEBOARD_PERMISSION) === abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED;
     } catch (error) {
       this.connectionDiagnosticInternetGranted = false;
       this.connectionDiagnosticBackgroundGranted = false;
+      this.connectionDiagnosticClipboardGranted = false;
     }
   }
 
@@ -1910,6 +2017,8 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
         this.connectionDiagnosticInternetGranted) + '\n' +
       'background_permission=' + this.connectionDiagnosticPermissionCode(
         this.connectionDiagnosticBackgroundGranted) + '\n' +
+      'clipboard_permission=' + this.connectionDiagnosticPermissionCode(
+        this.connectionDiagnosticClipboardGranted) + '\n' +
       'background_sync=' + (this.backgroundSyncEnabled ? 'enabled' : 'disabled') + '\n' +
       'last_failure=' + this.connectionDiagnosticLastFailure + '\n' +
       'last_failure_at_ms=' + this.connectionDiagnosticLastFailureAtMs.toString() + '\n' +
@@ -1989,6 +2098,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     this.desktopSelectedSpaceDeviceOnline = device.online;
     this.desktopSelectedSpaceDeviceState = device.state;
     this.desktopSelectedSpaceDeviceIsLocal = device.isLocal;
+    engineRuntimeService.setClipboardAutoSendTargets(device.isLocal ? [] : [device.deviceId]);
   }
 
   public selectDesktopSpaceDevice(device: EngineRuntimeDevice): void {
@@ -2003,10 +2113,13 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   private synchronizeDesktopSpaceDeviceSelection(devices: EngineRuntimeDevice[]): void {
     let selected: EngineRuntimeDevice | null = null;
     let local: EngineRuntimeDevice | null = null;
+    let remote: EngineRuntimeDevice | null = null;
     for (let index: number = 0; index < devices.length; index++) {
       let device: EngineRuntimeDevice = devices[index];
       if (device.isLocal) {
         local = device;
+      } else if (remote === null || (!remote.online && device.online)) {
+        remote = device;
       }
       if (device.deviceId === this.desktopSelectedSpaceDeviceId) {
         selected = device;
@@ -2016,7 +2129,10 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       this.assignDesktopSelectedSpaceDevice(selected);
       return;
     }
-    if (local !== null) {
+    if (remote !== null) {
+      this.assignDesktopSelectedSpaceDevice(remote);
+      this.loadDesktopDeviceSyncPreferences(remote.deviceId);
+    } else if (local !== null) {
       this.assignDesktopSelectedSpaceDevice(local);
     } else if (devices.length > 0) {
       this.assignDesktopSelectedSpaceDevice(devices[0]);
@@ -2028,6 +2144,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       this.desktopSelectedSpaceDeviceState = 'unknown';
       this.desktopSelectedSpaceDeviceIsLocal = true;
       this.desktopDeviceSyncState = 0;
+      engineRuntimeService.setClipboardAutoSendTargets([]);
     }
   }
 

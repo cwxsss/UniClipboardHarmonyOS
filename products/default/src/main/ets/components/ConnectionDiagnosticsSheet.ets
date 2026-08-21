@@ -292,6 +292,8 @@ export struct ConnectionDiagnosticsSheet {
             this.controller.connectionDiagnosticInternetGranted)
           this.permissionRow($r('app.string.connection_diagnostics_permission_background'),
             this.controller.connectionDiagnosticBackgroundGranted)
+          this.permissionRow($r('app.string.connection_diagnostics_permission_clipboard'),
+            this.controller.connectionDiagnosticClipboardGranted)
         }
         .width('100%')
         .padding({ left: 16, right: 16, top: 14, bottom: 8 })

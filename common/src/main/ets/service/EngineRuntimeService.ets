@@ -1,16 +1,19 @@
 import { bundleManager, common } from '@kit.AbilityKit';
+import { util } from '@kit.ArkTS';
 import engine from '@uniclipboard/engine';
 import { createNapiBuffer } from 'uniclipboard_native';
 import {
   EngineHostAdapter,
   EngineHostCallbacks
 } from '../engine/EngineHostAdapter';
-import { EngineClipboardObserver } from '../engine/EngineClipboardHost';
+import { EngineClipboardObserver, EngineClipboardSnapshot } from '../engine/EngineClipboardHost';
 import { EngineHostError } from '../engine/EngineHostError';
+import { Logger } from '../util/Logger';
 
 const ENGINE_EVENT_TIMEOUT_MS: number = 1000;
 const ENGINE_SHUTDOWN_DEADLINE_MS: number = 3000;
-const ENGINE_PROFILE_SUFFIX: string = '.default';
+const ENGINE_PROFILE_SUFFIX: string = '.engine-v1-1';
+const logger: Logger = new Logger('EngineRuntime');
 
 export enum EngineRuntimeState {
   IDLE = 'idle',
@@ -238,6 +241,13 @@ interface EngineCompatibilityNativeSpaceJoined {
   preservedUnreadableRecords: string | undefined;
 }
 
+interface EngineCompatibilityNativeJoinSpaceStatus {
+  status: string;
+  joinId: string;
+  joinedSpace: EngineCompatibilityNativeSpaceJoined | undefined;
+  rejectionReason: string | undefined;
+}
+
 interface EngineCompatibilityNativeSendReport {
   entryId: string;
   atMs: number;
@@ -251,7 +261,7 @@ interface EngineCompatibilityNativeSendReport {
 interface EngineCompatibilityNativeHandle {
   issueInvitation(): Promise<EngineCompatibilityNativeInvitation>;
   joinSpace(invitationCode: string, deviceName: string | null, passphrase: string,
-    preserveUnreadableHistory: boolean): Promise<EngineCompatibilityNativeSpaceJoined>;
+    preserveUnreadableHistory: boolean): Promise<EngineCompatibilityNativeJoinSpaceStatus>;
   // The helper returns an actual N-API Buffer even though its ArkTS type is
   // declared as ArrayBuffer because the generated bridge declaration cannot
   // express the native Buffer class.
@@ -298,6 +308,7 @@ export interface EngineRuntimeBackend {
 export interface EngineRuntimeHost {
   prepare(context: common.UIAbilityContext): EngineHostCallbacks;
   listenClipboard(observer: EngineClipboardObserver): void;
+  setClipboardPollingEnabled(enabled: boolean): void;
   registerInputFile(uri: string, mimeType: string): string;
   registerOutputFile(uri: string, mimeType: string): string;
   releaseFile(handle: string): void;
@@ -351,8 +362,13 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
       },
       async (invitationCode: string, deviceName: string | null, passphrase: string,
         preserveUnreadableHistory: boolean): Promise<EngineSpaceJoined> => {
-        let result: EngineCompatibilityNativeSpaceJoined = await compatibilityHandle.joinSpace(invitationCode, deviceName, passphrase,
+        let status: EngineCompatibilityNativeJoinSpaceStatus = await compatibilityHandle.joinSpace(invitationCode, deviceName, passphrase,
           preserveUnreadableHistory);
+        if (status.status !== 'active' || status.joinedSpace === undefined) {
+          let reason: string = status.rejectionReason === undefined ? status.status : status.rejectionReason;
+          throw new Error('join_space_' + reason);
+        }
+        let result: EngineCompatibilityNativeSpaceJoined = status.joinedSpace;
         return new EngineSpaceJoined(result.sponsorDeviceId, result.sponsorIdentityFingerprint,
           result.spaceId, result.selfDeviceId, result.selfIdentityFingerprint,
           result.migratedRecords, result.preservedUnreadableRecords);
@@ -558,6 +574,10 @@ class OfficialEngineRuntimeHost implements EngineRuntimeHost {
     this.adapter.listenClipboard(observer);
   }
 
+  setClipboardPollingEnabled(enabled: boolean): void {
+    this.adapter.setClipboardPollingEnabled(enabled);
+  }
+
   registerInputFile(uri: string, mimeType: string): string {
     return this.adapter.registerInput(uri, mimeType);
   }
@@ -593,7 +613,9 @@ export class EngineRuntimeService implements EngineClipboardObserver {
   private shutdownTask: Promise<void> | null = null;
   private eventPollTask: Promise<void> | null = null;
   private clipboardCaptureTask: Promise<void> | null = null;
+  private pendingClipboardSnapshot: EngineClipboardSnapshot | null = null;
   private clipboardWriteSuppression: boolean = false;
+  private clipboardAutoSendTargets: string[] = [];
   private eventPolling: boolean = false;
   private observers: EngineRuntimeObserver[] = [];
   private eventObservers: EngineRuntimeEventObserver[] = [];
@@ -770,6 +792,22 @@ export class EngineRuntimeService implements EngineClipboardObserver {
       (handle: EngineRuntimeHandle): Promise<string | null> => handle.captureCurrentClipboard());
   }
 
+  setClipboardPollingEnabled(enabled: boolean): void {
+    this.host.setClipboardPollingEnabled(enabled);
+  }
+
+  setClipboardAutoSendTargets(targetDevices: string[]): void {
+    let sanitizedTargets: string[] = [];
+    for (let index: number = 0; index < targetDevices.length; index += 1) {
+      let deviceId: string = targetDevices[index].trim();
+      if (deviceId.length > 0 && sanitizedTargets.indexOf(deviceId) < 0) {
+        sanitizedTargets.push(deviceId);
+      }
+    }
+    this.clipboardAutoSendTargets = sanitizedTargets;
+    logger.info('Clipboard automatic send target count=' + sanitizedTargets.length.toString());
+  }
+
   async queryActiveClipboard(): Promise<EngineActiveClipboard | null> {
     return await this.executeReadOnly('query_active_clipboard',
       (handle: EngineRuntimeHandle): Promise<EngineActiveClipboard | null> => handle.queryActiveClipboard());
@@ -855,12 +893,16 @@ export class EngineRuntimeService implements EngineClipboardObserver {
         choice, confirmLocalRemoval));
   }
 
-  onClipboardChanged(): void {
-    if (this.clipboardWriteSuppression || this.clipboardCaptureTask !== null ||
-      this.state !== EngineRuntimeState.RUNNING) {
+  onClipboardChanged(snapshot: EngineClipboardSnapshot): void {
+    logger.info('Clipboard observer invoked state=' + this.state);
+    if (this.clipboardWriteSuppression || this.state !== EngineRuntimeState.RUNNING) {
       return;
     }
-    let task: Promise<void> = this.captureCurrentClipboardFromHost();
+    if (this.clipboardCaptureTask !== null) {
+      this.pendingClipboardSnapshot = snapshot;
+      return;
+    }
+    let task: Promise<void> = this.drainClipboardSnapshots(snapshot);
     this.clipboardCaptureTask = task;
     task.then((): void => {
       if (this.clipboardCaptureTask === task) {
@@ -1082,12 +1124,14 @@ export class EngineRuntimeService implements EngineClipboardObserver {
           break;
         }
         if (event !== null) {
+          logger.info('Engine event kind=' + event.kind);
           this.notifyEventObservers(event);
         }
       }
     } catch (error) {
       if (this.eventPolling && this.handle === startedHandle) {
-        this.fail('event_poll', error);
+        let runtimeError: EngineRuntimeError = this.toRuntimeError('event_poll', error as Object);
+        logger.warn('Engine event polling stopped category=' + runtimeError.category);
       }
     } finally {
       this.eventPolling = false;
@@ -1125,19 +1169,53 @@ export class EngineRuntimeService implements EngineClipboardObserver {
     this.startConfig = null;
     this.eventPollTask = null;
     this.clipboardCaptureTask = null;
+    this.pendingClipboardSnapshot = null;
     this.clipboardWriteSuppression = false;
     this.eventPolling = false;
   }
 
-  private async captureCurrentClipboardFromHost(): Promise<void> {
+  private async sendClipboardSnapshotFromHost(snapshot: EngineClipboardSnapshot): Promise<void> {
+    let text: string = this.extractClipboardText(snapshot);
+    if (text.length === 0) {
+      logger.info('Automatic clipboard send skipped reason=no_text');
+      return;
+    }
+    if (this.clipboardAutoSendTargets.length === 0) {
+      logger.warn('Automatic clipboard send skipped reason=no_target');
+      return;
+    }
     try {
       let handle: EngineRuntimeHandle = this.requireRunningHandle('capture_clipboard');
-      await handle.captureCurrentClipboard();
+      let report: EngineSendReport = await handle.sendText(text, this.clipboardAutoSendTargets);
+      logger.info('Automatic clipboard send completed accepted=' + report.totalAccepted.toString() +
+        ' pending=' + report.totalPending.toString() +
+        ' offline=' + report.totalOffline.toString() +
+        ' errored=' + report.totalErrored.toString());
     } catch (error) {
-      // Clipboard reads can be denied when the app is not running behind a
-      // user-authorized PasteButton. A denied capture must not stop the
-      // official Engine event loop or invalidate an already joined session.
+      let runtimeError: EngineRuntimeError = this.toRuntimeError('send_clipboard', error as Object);
+      logger.warn('Automatic clipboard send failed category=' + runtimeError.category);
     }
+  }
+
+  private async drainClipboardSnapshots(initialSnapshot: EngineClipboardSnapshot): Promise<void> {
+    let snapshot: EngineClipboardSnapshot | null = initialSnapshot;
+    while (snapshot !== null) {
+      await this.sendClipboardSnapshotFromHost(snapshot);
+      snapshot = this.pendingClipboardSnapshot;
+      this.pendingClipboardSnapshot = null;
+    }
+  }
+
+  private extractClipboardText(snapshot: EngineClipboardSnapshot): string {
+    let decoder: util.TextDecoder = util.TextDecoder.create('utf-8', { fatal: false, ignoreBOM: true });
+    for (let index: number = 0; index < snapshot.representations.length; index += 1) {
+      let representation = snapshot.representations[index];
+      if (representation.kind === 'inline' && representation.format === 'text/plain' &&
+        representation.bytes !== undefined) {
+        return decoder.decodeToString(representation.bytes);
+      }
+    }
+    return '';
   }
 
   private requireRunningHandle(operation: string): EngineRuntimeHandle {
@@ -1151,9 +1229,14 @@ export class EngineRuntimeService implements EngineClipboardObserver {
     action: (handle: EngineRuntimeHandle) => Promise<T>): Promise<T> {
     let handle: EngineRuntimeHandle = this.requireRunningHandle(operation);
     try {
-      return await action(handle);
+      let result: T = await action(handle);
+      if (this.state === EngineRuntimeState.RUNNING && this.handle === handle && this.eventPollTask === null) {
+        this.startEventPolling(handle);
+      }
+      return result;
     } catch (error) {
-      throw this.fail(operation, error);
+      // An operation failure such as a stale invitation must not tear down a healthy runtime.
+      throw this.toRuntimeError(operation, error);
     }
   }
 

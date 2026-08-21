@@ -622,7 +622,7 @@
     },
     {
       "name": "background_sync_note",
-      "value": "开启后，加入同步空间的应用退至后台时会保持设备连接；系统将显示持续通知。"
+      "value": "开启后，加入同步空间的应用退至后台时会自动读取新复制的内容并同步到电脑；系统将显示持续通知，并需要授予剪贴板读取权限。"
     },
     {
       "name": "nav_sync",
@@ -1111,6 +1111,14 @@
     {
       "name": "space_revoke_device_confirm",
       "value": "移除此设备"
+    },
+    {
+      "name": "space_revoke_device_success",
+      "value": "设备已移除"
+    },
+    {
+      "name": "space_revoke_device_failed",
+      "value": "移除失败，请检查设备连接后重试"
     },
     {
       "name": "device_management_hint",
@@ -1743,6 +1751,7 @@
     { "name": "connection_diagnostics_permissions_title", "value": "权限状态" },
     { "name": "connection_diagnostics_permission_internet", "value": "网络访问" },
     { "name": "connection_diagnostics_permission_background", "value": "后台连接" },
+    { "name": "connection_diagnostics_permission_clipboard", "value": "剪贴板读取" },
     { "name": "connection_diagnostics_permission_granted", "value": "已授权" },
     { "name": "connection_diagnostics_permission_denied", "value": "不可用" },
     { "name": "connection_diagnostics_redaction_note", "value": "导出日志会移除设备标识、设备名、网络地址、连接链接、凭据和剪贴板内容。" },

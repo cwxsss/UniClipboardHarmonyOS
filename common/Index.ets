@@ -55,6 +55,7 @@ export {
   EngineRuntimeSnapshot,
   EngineRuntimeStartConfig,
   EngineRuntimeState,
+  EngineWorkspaceConvergence,
   EngineSessionRecovery,
   engineRuntimeService
 } from './src/main/ets/service/EngineRuntimeService';

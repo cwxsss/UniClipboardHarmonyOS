@@ -5,7 +5,7 @@ import { EngineHostError, EngineHostErrorCategory } from './EngineHostError';
 
 const ASSET_NOT_FOUND: number = 24000002;
 const ASSET_ALREADY_EXISTS: number = 24000003;
-const ALIAS_PREFIX: string = 'app.uniclipboard.engine.';
+const ALIAS_PREFIX: string = 'app.uniclipboard.engine.v1-1.';
 
 export class EngineSecureAssetStore {
   private encoder: util.TextEncoder = util.TextEncoder.create('utf-8');

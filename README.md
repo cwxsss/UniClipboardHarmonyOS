@@ -80,7 +80,7 @@ products/default (Entry HAP)
 
 ### 环境要求
 
-- DevEco Studio 与 HarmonyOS SDK；本工程当前目标和最低兼容 API 均为 24（官方 Engine `v1.1.0-rc.3` 要求 API 24）；
+- DevEco Studio 与 HarmonyOS SDK；本工程当前目标和最低兼容 API 均为 24（官方 Engine `v1.1.0-rc.5` 要求 API 24）；
 - PowerShell 与 `devecocli`；
 - 仅在修改 Rust 原生层时需要 Rust 工具链、`cargo` 和 `ohrs`。
 

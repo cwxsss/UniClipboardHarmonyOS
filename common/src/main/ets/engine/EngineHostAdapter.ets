@@ -5,7 +5,7 @@ import { EngineFileHandleRegistry, EngineFileMetadata } from './EngineFileHandle
 import { EngineHostError, EngineHostErrorCategory } from './EngineHostError';
 import { EngineSecureAssetStore } from './EngineSecureAssetStore';
 
-const ENGINE_DIRECTORY_NAME: string = 'uniclipboard-engine';
+const ENGINE_DIRECTORY_NAME: string = 'uniclipboard-engine-v1-1';
 
 // Mirrors the public OhHostResult declaration shipped beside the official HAR.
 export interface EngineHostResult<T> {
@@ -156,6 +156,10 @@ export class EngineHostAdapter {
 
   listenClipboard(observer: EngineClipboardObserver): void {
     this.clipboard.listen(observer);
+  }
+
+  setClipboardPollingEnabled(enabled: boolean): void {
+    this.clipboard.setPollingEnabled(enabled);
   }
 
   shutdown(): void {
