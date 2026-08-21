@@ -1,6 +1,6 @@
 {
   "app": {
-    "bundleName": "com.uniclipboard.hmos",
+    "bundleName": "com.sss.uniclipboard",
     "vendor": "UniClipboard HarmonyOS contributors",
     "versionCode": 1000005,
     "versionName": "1.0.4",
