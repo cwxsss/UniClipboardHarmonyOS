@@ -8,24 +8,24 @@
   "minimumHarmonyOsApi": 24,
   "embeddedLibrary": {
     "path": "package/libs/arm64-v8a/libuc_ohos_napi.so",
-    "sha256": "dada0a93ccb5d077f2224168d7c2ae329cc4c5d7a04a03d538243b0aefad0d21",
-    "size": 90864992
+    "sha256": "fc237a9d1ea326cddfd4d6415ea67ea647cfc95b11e4ef787d073cfdc1fa8d79",
+    "size": 91982504
   },
   "embeddedDeclaration": {
     "path": "package/src/main/cpp/types/libuc_ohos_napi/index.d.ts",
-    "sha256": "ca61a7b22435c180a17001b4210d7741c24413fb2edced4d10efeb1519e06fe0",
-    "size": 5264
+    "sha256": "a7533feaf98a818c22ea6bdc2889aa93702178247a086cf1e331b9d69c4074cd",
+    "size": 7453
   },
   "files": [
     {
       "name": "UniClipboardEngine.har",
-      "sha256": "7f11512c11ce119dc727427ce0927749eeeb6ce965dd7bdd35c1f4b52171ae10",
-      "size": 26952233
+      "sha256": "65952ccc5c2e297413d179619856fc4b7438e7d0c03b983ebb29fb9f8bf78028",
+      "size": 27155046
     },
     {
       "name": "UniClipboardEngine.har.checksum.txt",
-      "sha256": "07ab261be5dcc104b10db2cb753abf571e5d2d05fa724d85fb52de6db39ced54",
-      "size": 65
+      "sha256": "0675a91f601ced415f3c11db0ad0d4265b3bd12bea7b6d86f77a31f703d73536",
+      "size": 66
     },
     {
       "name": "index.d.ts",

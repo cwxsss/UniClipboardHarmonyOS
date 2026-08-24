@@ -11,7 +11,7 @@ export default class UniClipboardShareAbility extends ShareExtensionAbility {
 
   private async forwardToMainAbility(want: Want, session: UIExtensionContentSession): Promise<void> {
     try {
-      want.bundleName = 'com.uniclipboard.hmos';
+      want.bundleName = 'com.sss.uniclipboard';
       want.moduleName = 'entry';
       want.abilityName = 'EntryAbility';
       await this.context.startAbility(want);
