@@ -319,11 +319,20 @@ export declare function revokeSpaceMember(deviceId: string): Promise<void>
 /** Dispatch one user-selected file through the joined encrypted space in bounded chunks. */
 export declare function sendSpaceFile(data: Uint8Array, fileName: string): Promise<number>
 
+/** Dispatch one file through exactly one running supervisor-owned profile runtime. */
+export declare function sendSpaceFileForProfile(profileId: string, data: Uint8Array, fileName: string): Promise<number>
+
 export declare function sendSpaceFileFromFd(fd: number, fileSize: number, fileName: string): Promise<NativeSpaceFileSendResult>
+
+/** Stream one file through exactly one running supervisor-owned profile runtime. */
+export declare function sendSpaceFileFromFdForProfile(profileId: string, fd: number, fileSize: number, fileName: string): Promise<NativeSpaceFileSendResult>
 
 export declare function sendSpaceFileFromFdToDevice(fd: number, fileSize: number, fileName: string, deviceId: string): Promise<NativeSpaceFileSendResult>
 
 export declare function sendSpaceImage(data: Uint8Array, mimeType: string): Promise<number>
+
+/** Dispatch one image through exactly one running supervisor-owned profile runtime. */
+export declare function sendSpaceImageForProfile(profileId: string, data: Uint8Array, mimeType: string): Promise<number>
 
 export declare function sendSpaceImageToDevice(data: Uint8Array, mimeType: string, deviceId: string): Promise<number>
 

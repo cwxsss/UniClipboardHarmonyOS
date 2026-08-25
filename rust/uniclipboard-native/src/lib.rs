@@ -1176,21 +1176,26 @@ pub async fn stop_space_node_for_profile(profile_id: String) -> Result<NativePro
     current_profile_space_status(&profile_id).await
 }
 
+fn profile_runtime_for<T>(
+    profile_id: &str,
+    resolve: impl FnOnce(&ProfileId) -> Option<T>,
+) -> Result<(ProfileId, T)> {
+    let profile_id = validated_profile_id(profile_id)?;
+    let runtime = resolve(&profile_id).ok_or_else(|| {
+        Error::new(
+            Status::GenericFailure,
+            format!("space profile {profile_id} is not running"),
+        )
+    })?;
+    Ok((profile_id, runtime))
+}
+
 fn profile_app_facade(
     profile_id: &str,
 ) -> Result<(ProfileId, Arc<uc_application::facade::AppFacade>)> {
-    CliAppRuntimeProfileConfig::namespace_for_profile(profile_id)
-        .map_err(|error| Error::new(Status::InvalidArg, error.to_string()))?;
-    let profile_id = ProfileId::from(profile_id);
-    let app_facade = profile_space_supervisor()
-        .app_facade(&profile_id)
-        .ok_or_else(|| {
-            Error::new(
-                Status::GenericFailure,
-                format!("space profile {profile_id} is not running"),
-            )
-        })?;
-    Ok((profile_id, app_facade))
+    profile_runtime_for(profile_id, |profile_id| {
+        profile_space_supervisor().app_facade(profile_id)
+    })
 }
 
 #[napi]
@@ -2348,7 +2353,8 @@ pub async fn send_space_text_to_device(text: String, device_id: String) -> Resul
 
 /// Dispatch a compressed image through the joined UniClipboard space. The
 /// HarmonyOS layer keeps this payload below the encrypted wire inline limit.
-async fn send_space_image_with_filter(
+async fn dispatch_space_image_with_filter(
+    app_facade: Arc<uc_application::facade::AppFacade>,
     data: Uint8Array,
     mime_type: String,
     target_filter: Option<Vec<DeviceId>>,
@@ -2372,13 +2378,6 @@ async fn send_space_image_with_filter(
             "unsupported clipboard image type",
         ));
     }
-    let app_facade = {
-        let guard = space_runtime().lock().await;
-        guard
-            .as_ref()
-            .map(|runtime| runtime.app_facade.clone())
-            .ok_or_else(|| Error::new(Status::GenericFailure, "space node has not been started"))?
-    };
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(space_error)?
@@ -2403,9 +2402,34 @@ async fn send_space_image_with_filter(
     Ok(outcome.total_accepted.min(u32::MAX as usize) as u32)
 }
 
+async fn send_space_image_with_filter(
+    data: Uint8Array,
+    mime_type: String,
+    target_filter: Option<Vec<DeviceId>>,
+) -> Result<u32> {
+    let app_facade = {
+        let guard = space_runtime().lock().await;
+        guard
+            .as_ref()
+            .map(|runtime| runtime.app_facade.clone())
+            .ok_or_else(|| Error::new(Status::GenericFailure, "space node has not been started"))?
+    };
+    dispatch_space_image_with_filter(app_facade, data, mime_type, target_filter).await
+}
+
 #[napi]
 pub async fn send_space_image(data: Uint8Array, mime_type: String) -> Result<u32> {
     send_space_image_with_filter(data, mime_type, None).await
+}
+
+#[napi]
+pub async fn send_space_image_for_profile(
+    profile_id: String,
+    data: Uint8Array,
+    mime_type: String,
+) -> Result<u32> {
+    let (_, app_facade) = profile_app_facade(&profile_id)?;
+    dispatch_space_image_with_filter(app_facade, data, mime_type, None).await
 }
 
 #[napi]
@@ -2424,9 +2448,11 @@ pub async fn send_space_image_to_device(
     send_space_image_with_filter(data, mime_type, Some(vec![DeviceId::new(target)])).await
 }
 
-/// Dispatch one user-selected file through the joined encrypted space in bounded chunks.
-#[napi]
-pub async fn send_space_file(data: Uint8Array, file_name: String) -> Result<u32> {
+async fn dispatch_space_file(
+    app_facade: Arc<uc_application::facade::AppFacade>,
+    data: Uint8Array,
+    file_name: String,
+) -> Result<u32> {
     if data.is_empty() {
         return Err(Error::new(Status::InvalidArg, "file data is required"));
     }
@@ -2448,13 +2474,6 @@ pub async fn send_space_file(data: Uint8Array, file_name: String) -> Result<u32>
             "file requires too many chunks",
         ));
     }
-    let app_facade = {
-        let guard = space_runtime().lock().await;
-        guard
-            .as_ref()
-            .map(|runtime| runtime.app_facade.clone())
-            .ok_or_else(|| Error::new(Status::GenericFailure, "space node has not been started"))?
-    };
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(space_error)?
@@ -2501,11 +2520,35 @@ pub async fn send_space_file(data: Uint8Array, file_name: String) -> Result<u32>
     Ok(minimum_accepted.min(u32::MAX as usize) as u32)
 }
 
+/// Dispatch one user-selected file through the joined encrypted space in bounded chunks.
+#[napi]
+pub async fn send_space_file(data: Uint8Array, file_name: String) -> Result<u32> {
+    let app_facade = {
+        let guard = space_runtime().lock().await;
+        guard
+            .as_ref()
+            .map(|runtime| runtime.app_facade.clone())
+            .ok_or_else(|| Error::new(Status::GenericFailure, "space node has not been started"))?
+    };
+    dispatch_space_file(app_facade, data, file_name).await
+}
+
+#[napi]
+pub async fn send_space_file_for_profile(
+    profile_id: String,
+    data: Uint8Array,
+    file_name: String,
+) -> Result<u32> {
+    let (_, app_facade) = profile_app_facade(&profile_id)?;
+    dispatch_space_file(app_facade, data, file_name).await
+}
+
 /// Publish a user-selected file through iroh-blobs using its open HarmonyOS
 /// file descriptor.  The descriptor remains owned by ArkTS and is never
 /// closed here; `/proc/self/fd/<n>` lets iroh stream/copy it without loading
 /// the full file into memory.
-async fn send_space_file_from_fd_with_filter(
+async fn dispatch_space_file_from_fd_with_filter(
+    app_facade: Arc<uc_application::facade::AppFacade>,
     fd: i32,
     file_size: f64,
     file_name: String,
@@ -2524,13 +2567,6 @@ async fn send_space_file_from_fd_with_filter(
             "valid file name is required",
         ));
     }
-    let app_facade = {
-        let guard = space_runtime().lock().await;
-        guard
-            .as_ref()
-            .map(|runtime| runtime.app_facade.clone())
-            .ok_or_else(|| Error::new(Status::GenericFailure, "space node has not been started"))?
-    };
     let fd_path = std::path::PathBuf::from(format!("/proc/self/fd/{fd}"));
     let metadata = tokio::fs::metadata(&fd_path).await.map_err(space_error)?;
     if metadata.len() == 0 {
@@ -2586,6 +2622,23 @@ async fn send_space_file_from_fd_with_filter(
     })
 }
 
+async fn send_space_file_from_fd_with_filter(
+    fd: i32,
+    file_size: f64,
+    file_name: String,
+    target_filter: Option<Vec<DeviceId>>,
+) -> Result<NativeSpaceFileSendResult> {
+    let app_facade = {
+        let guard = space_runtime().lock().await;
+        guard
+            .as_ref()
+            .map(|runtime| runtime.app_facade.clone())
+            .ok_or_else(|| Error::new(Status::GenericFailure, "space node has not been started"))?
+    };
+    dispatch_space_file_from_fd_with_filter(app_facade, fd, file_size, file_name, target_filter)
+        .await
+}
+
 #[napi]
 pub async fn send_space_file_from_fd(
     fd: i32,
@@ -2593,6 +2646,17 @@ pub async fn send_space_file_from_fd(
     file_name: String,
 ) -> Result<NativeSpaceFileSendResult> {
     send_space_file_from_fd_with_filter(fd, file_size, file_name, None).await
+}
+
+#[napi]
+pub async fn send_space_file_from_fd_for_profile(
+    profile_id: String,
+    fd: i32,
+    file_size: f64,
+    file_name: String,
+) -> Result<NativeSpaceFileSendResult> {
+    let (_, app_facade) = profile_app_facade(&profile_id)?;
+    dispatch_space_file_from_fd_with_filter(app_facade, fd, file_size, file_name, None).await
 }
 
 #[napi]
@@ -2711,7 +2775,12 @@ pub fn drain_space_file_status_events() -> Vec<NativeSpaceFileStatusEvent> {
 }
 
 fn validated_profile_id(profile_id: &str) -> Result<ProfileId> {
-    let profile_id = profile_id.trim();
+    if profile_id != profile_id.trim() {
+        return Err(Error::new(
+            Status::InvalidArg,
+            "profile id must be supplied in canonical form",
+        ));
+    }
     CliAppRuntimeProfileConfig::namespace_for_profile(profile_id)
         .map_err(|error| Error::new(Status::InvalidArg, error.to_string()))?;
     Ok(ProfileId::from(profile_id))
@@ -3786,11 +3855,58 @@ mod profile_api_contract_tests {
         let _ = issue_space_invitation_for_profile;
         let _ = join_space_for_profile;
         let _ = send_space_text_for_profile;
+        let _ = send_space_image_for_profile;
+        let _ = send_space_file_for_profile;
+        let _ = send_space_file_from_fd_for_profile;
         let _ = get_space_devices_for_profile;
         let _ = drain_space_text_events_for_profile;
         let _ = drain_space_image_events_for_profile;
         let _ = drain_space_file_events_for_profile;
         let _ = drain_space_file_status_events_for_profile;
+    }
+
+    #[test]
+    fn profile_ids_must_be_supplied_in_canonical_form() {
+        for profile_id in [" profile-a", "profile-a ", "\tprofile-a", "profile-a\n"] {
+            let error = validated_profile_id(profile_id).unwrap_err();
+            assert_eq!(error.status, Status::InvalidArg, "{profile_id:?}");
+        }
+        assert_eq!(
+            validated_profile_id("profile-a").unwrap(),
+            ProfileId::from("profile-a")
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn concurrent_profile_sends_resolve_only_the_requested_runtime() {
+        let sends_a = Arc::new(Mutex::new(Vec::<String>::new()));
+        let sends_b = Arc::new(Mutex::new(Vec::<String>::new()));
+        let runtimes = Arc::new(std::collections::HashMap::from([
+            (ProfileId::from("profile-a"), Arc::clone(&sends_a)),
+            (ProfileId::from("profile-b"), Arc::clone(&sends_b)),
+        ]));
+        let barrier = Arc::new(tokio::sync::Barrier::new(3));
+
+        let spawn_send = |profile_id: &'static str, payload: &'static str| {
+            let runtimes = Arc::clone(&runtimes);
+            let barrier = Arc::clone(&barrier);
+            tokio::spawn(async move {
+                let (_, runtime) =
+                    profile_runtime_for(profile_id, |profile_id| runtimes.get(profile_id).cloned())
+                        .unwrap();
+                barrier.wait().await;
+                runtime.lock().unwrap().push(payload.to_string());
+            })
+        };
+
+        let send_a = spawn_send("profile-a", "image-a");
+        let send_b = spawn_send("profile-b", "file-b");
+        barrier.wait().await;
+        send_a.await.unwrap();
+        send_b.await.unwrap();
+
+        assert_eq!(*sends_a.lock().unwrap(), vec!["image-a"]);
+        assert_eq!(*sends_b.lock().unwrap(), vec!["file-b"]);
     }
 
     #[test]
