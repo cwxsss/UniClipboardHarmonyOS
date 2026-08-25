@@ -31,6 +31,8 @@ pub(crate) use dispatch_entry::{
 };
 pub(crate) use ingest_inbound::{
     InboundAction, InboundClipboardNotice, IngestInboundClipboardUseCase, IngestSpawnHandle,
+    IngestWorkerExit as InternalIngestWorkerExit,
+    IngestWorkerExitSubscription as InternalIngestWorkerExitSubscription,
 };
 pub(crate) use payload_codec::encode_snapshot_to_v3_bytes;
 

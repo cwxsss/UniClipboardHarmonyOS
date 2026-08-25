@@ -8,6 +8,7 @@ import {
   EngineRuntimeBackend,
   EngineActiveClipboard,
   EngineInvitationIssued,
+  EngineMemberSyncPreferences,
   EngineRuntimeEvent,
   EngineRuntimeHandle,
   EngineRuntimeHost,
@@ -69,12 +70,20 @@ class TestHostCallbacks implements EngineHostCallbacks {
 
 class TestRuntimeHost implements EngineRuntimeHost {
   shutdownCount: number = 0;
+  clipboardPollingEnabled: boolean = false;
 
   prepare(context: common.UIAbilityContext): EngineHostCallbacks {
     return new TestHostCallbacks();
   }
 
   listenClipboard(observer: EngineClipboardObserver): void {
+  }
+
+  releaseClipboardListener(): void {
+  }
+
+  setClipboardPollingEnabled(enabled: boolean): void {
+    this.clipboardPollingEnabled = enabled;
   }
 
   registerInputFile(uri: string, mimeType: string): string {
@@ -96,9 +105,18 @@ class TestRuntimeHost implements EngineRuntimeHost {
 class TestRuntimeHandle implements EngineRuntimeHandle {
   suspendCount: number = 0;
   resumeCount: number = 0;
+  recoverNetworkCount: number = 0;
+  recoverSessionCount: number = 0;
+  deferSessionRecovery: boolean = false;
   shutdownCount: number = 0;
   nextEventCount: number = 0;
+  failJoin: boolean = false;
+  sendTextCount: number = 0;
+  lastSentText: string = '';
+  lastSendTargets: string[] = [];
   private eventResolver: ((event: EngineRuntimeEvent | null) => void) | null = null;
+  private eventRejecter: ((reason: Object) => void) | null = null;
+  private recoveryResolver: ((recovery: EngineSessionRecovery) => void) | null = null;
 
   async lifecycleState(): Promise<string> {
     return 'running';
@@ -112,17 +130,33 @@ class TestRuntimeHandle implements EngineRuntimeHandle {
     this.resumeCount += 1;
   }
 
+  async recoverNetwork(): Promise<void> {
+    this.recoverNetworkCount += 1;
+  }
+
   nextEvent(timeoutMs: number): Promise<EngineRuntimeEvent | null> {
     this.nextEventCount += 1;
-    return new Promise<EngineRuntimeEvent | null>((resolve: (event: EngineRuntimeEvent | null) => void): void => {
+    return new Promise<EngineRuntimeEvent | null>((resolve: (event: EngineRuntimeEvent | null) => void,
+      reject: (reason: Object) => void): void => {
       this.eventResolver = resolve;
+      this.eventRejecter = reject;
     });
+  }
+
+  rejectPendingEvent(reason: Object): void {
+    let rejecter: ((reason: Object) => void) | null = this.eventRejecter;
+    this.eventResolver = null;
+    this.eventRejecter = null;
+    if (rejecter !== null) {
+      rejecter(reason);
+    }
   }
 
   async shutdown(deadlineMs: number): Promise<void> {
     this.shutdownCount += 1;
     let resolver: ((event: EngineRuntimeEvent | null) => void) | null = this.eventResolver;
     this.eventResolver = null;
+    this.eventRejecter = null;
     if (resolver !== null) {
       resolver(null);
     }
@@ -133,7 +167,22 @@ class TestRuntimeHandle implements EngineRuntimeHandle {
   }
 
   async recoverSession(allowSecureStorageUnlock: boolean): Promise<EngineSessionRecovery> {
+    this.recoverSessionCount += 1;
+    if (this.deferSessionRecovery) {
+      return await new Promise<EngineSessionRecovery>(
+        (resolve: (recovery: EngineSessionRecovery) => void): void => {
+          this.recoveryResolver = resolve;
+        });
+    }
     return new EngineSessionRecovery(true, true);
+  }
+
+  completeSessionRecovery(): void {
+    let resolver: ((recovery: EngineSessionRecovery) => void) | null = this.recoveryResolver;
+    this.recoveryResolver = null;
+    if (resolver !== null) {
+      resolver(new EngineSessionRecovery(true, true));
+    }
   }
 
   async issueInvitation(): Promise<EngineInvitationIssued> {
@@ -142,11 +191,17 @@ class TestRuntimeHandle implements EngineRuntimeHandle {
 
   async joinSpace(invitationCode: string, deviceName: string | null, passphrase: string,
     preserveUnreadableHistory: boolean): Promise<EngineSpaceJoined> {
+    if (this.failJoin) {
+      throw new Error('invitation not found');
+    }
     return new EngineSpaceJoined('sponsor', 'fingerprint', 'space', 'device', 'self-fingerprint',
       undefined, undefined);
   }
 
   async sendText(text: string, targetDevices: string[]): Promise<EngineSendReport> {
+    this.sendTextCount += 1;
+    this.lastSentText = text;
+    this.lastSendTargets = targetDevices.slice();
     return new EngineSendReport('entry', 1, 1, 0, 0, 0, 0);
   }
 
@@ -164,6 +219,19 @@ class TestRuntimeHandle implements EngineRuntimeHandle {
 
   async queryActiveClipboard(): Promise<EngineActiveClipboard | null> {
     return new EngineActiveClipboard('entry', 'device');
+  }
+
+  async queryMemberSyncPreferences(deviceId: string): Promise<EngineMemberSyncPreferences> {
+    return new EngineMemberSyncPreferences(true, true, true, true, true, true, true);
+  }
+
+  async updateMemberSendPreferences(deviceId: string, sendEnabled: boolean, text: boolean, imageEnabled: boolean,
+    file: boolean, link: boolean, richText: boolean): Promise<EngineMemberSyncPreferences> {
+    return new EngineMemberSyncPreferences(sendEnabled, text, imageEnabled, file, link, true, richText);
+  }
+
+  async resetMemberSyncPreferences(deviceId: string): Promise<EngineMemberSyncPreferences> {
+    return new EngineMemberSyncPreferences(true, true, true, true, true, true, true);
   }
 
   async restoreClipboard(entryId: string, mode: string): Promise<string> {
@@ -238,6 +306,28 @@ export default function engineRuntimeServiceTest(): void {
       expect(service.getSnapshot().state).assertEqual(EngineRuntimeState.IDLE);
     });
 
+    it('shares session recovery and waits before suspending', 0, async (): Promise<void> => {
+      let backend: TestRuntimeBackend = new TestRuntimeBackend();
+      let service: EngineRuntimeService = EngineRuntimeService.createForTesting(backend, new TestRuntimeHost());
+      await service.prepareForTesting(new TestHostCallbacks(), new EngineRuntimeStartConfig('1.0.0', 'test'));
+      await service.start();
+      backend.handle.deferSessionRecovery = true;
+
+      let firstRecovery: Promise<EngineSessionRecovery> = service.recoverSession(true);
+      let secondRecovery: Promise<EngineSessionRecovery> = service.recoverSession(true);
+      let suspension: Promise<void> = service.suspend();
+      await Promise.resolve();
+
+      expect(backend.handle.recoverSessionCount).assertEqual(1);
+      expect(backend.handle.suspendCount).assertEqual(0);
+      backend.handle.completeSessionRecovery();
+      await Promise.all([firstRecovery, secondRecovery, suspension]);
+
+      expect(backend.handle.suspendCount).assertEqual(1);
+      expect(service.getSnapshot().state).assertEqual(EngineRuntimeState.SUSPENDED);
+      await service.shutdown();
+    });
+
     it('recovers after startup failure', 0, async (): Promise<void> => {
       let backend: TestRuntimeBackend = new TestRuntimeBackend();
       let service: EngineRuntimeService = EngineRuntimeService.createForTesting(backend, new TestRuntimeHost());
@@ -266,9 +356,77 @@ export default function engineRuntimeServiceTest(): void {
 
       let invitation: EngineInvitationIssued = await service.issueInvitation();
       let report: EngineSendReport = await service.sendText('hello', []);
+      let preferences: EngineMemberSyncPreferences = await service.queryMemberSyncPreferences('desktop');
+      let updated: EngineMemberSyncPreferences = await service.updateMemberSendPreferences(
+        'desktop', true, true, false, true, true, true);
+      await service.recoverNetwork();
 
       expect(invitation.invitationCode).assertEqual('invitation');
       expect(report.totalAccepted).assertEqual(1);
+      expect(preferences.image).assertTrue();
+      expect(updated.image).assertFalse();
+      expect(backend.handle.recoverNetworkCount).assertEqual(1);
+      await service.shutdown();
+    });
+
+    it('sends observed clipboard text to the selected desktop', 0, async (): Promise<void> => {
+      let backend: TestRuntimeBackend = new TestRuntimeBackend();
+      let service: EngineRuntimeService = EngineRuntimeService.createForTesting(backend, new TestRuntimeHost());
+      await service.prepareForTesting(new TestHostCallbacks(), new EngineRuntimeStartConfig('1.0.0', 'test'));
+      await service.start();
+      service.setClipboardAutoSendTargets(['desktop-device']);
+      let bytes: Uint8Array = new Uint8Array([104, 101, 108, 108, 111]);
+      let snapshot: EngineClipboardSnapshot = {
+        observedAtMs: 1,
+        representations: [{
+          kind: 'inline',
+          format: 'text/plain',
+          mimeType: 'text/plain',
+          bytes: bytes
+        }]
+      };
+
+      service.onClipboardChanged(snapshot);
+
+      expect(backend.handle.sendTextCount).assertEqual(1);
+      expect(backend.handle.lastSentText).assertEqual('hello');
+      expect(backend.handle.lastSendTargets.length).assertEqual(1);
+      expect(backend.handle.lastSendTargets[0]).assertEqual('desktop-device');
+      await service.shutdown();
+    });
+
+    it('keeps the runtime running after a feature operation fails', 0, async (): Promise<void> => {
+      let backend: TestRuntimeBackend = new TestRuntimeBackend();
+      let service: EngineRuntimeService = EngineRuntimeService.createForTesting(backend, new TestRuntimeHost());
+      await service.prepareForTesting(new TestHostCallbacks(), new EngineRuntimeStartConfig('1.0.0', 'test'));
+      await service.start();
+
+      backend.handle.failJoin = true;
+      try {
+        await service.joinSpace('expired-invitation', null, 'passphrase', true);
+      } catch (error) {
+      }
+      expect(service.getSnapshot().state).assertEqual(EngineRuntimeState.RUNNING);
+
+      backend.handle.failJoin = false;
+      let joined: EngineSpaceJoined = await service.joinSpace('fresh-invitation', null, 'passphrase', true);
+      expect(joined.spaceId).assertEqual('space');
+      await service.shutdown();
+    });
+
+    it('keeps the runtime available when event polling stops before pairing', 0, async (): Promise<void> => {
+      let backend: TestRuntimeBackend = new TestRuntimeBackend();
+      let service: EngineRuntimeService = EngineRuntimeService.createForTesting(backend, new TestRuntimeHost());
+      await service.prepareForTesting(new TestHostCallbacks(), new EngineRuntimeStartConfig('1.0.0', 'test'));
+      await service.start();
+
+      backend.handle.rejectPendingEvent(new Error('workspace is not active'));
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(service.getSnapshot().state).assertEqual(EngineRuntimeState.RUNNING);
+
+      await service.issueInvitation();
+      expect(backend.handle.nextEventCount).assertEqual(2);
       await service.shutdown();
     });
   });

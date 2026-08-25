@@ -8,7 +8,7 @@ const logger: Logger = new Logger('LinkPreview');
 
 export class LinkPreviewService {
   async load(url: string): Promise<LinkPreview> {
-    if (deviceInfo.apiAvailable('6.1.1(24)')) {
+    if (deviceInfo.sdkApiVersion >= 24) {
       try {
         return await this.loadWithPreconnect(url);
       } catch (error) {
@@ -35,7 +35,7 @@ export class LinkPreviewService {
     };
     let preconnectRequest: rcp.Request = new rcp.Request(url, 'GET', headers);
     preconnectRequest.configuration = configuration;
-    if (deviceInfo.apiAvailable('6.1.1(24)')) {
+    if (deviceInfo.sdkApiVersion >= 24) {
       preconnectRequest.connectOnly = true;
     } else {
       throw new Error('RCP preconnect is unavailable on this system version');

@@ -22,13 +22,13 @@
 //!   receiver adapter; retrying has no effect.
 //! * Receiver lagged → log; next frame catches up.
 //! * Receiver closed (all senders dropped, i.e. adapter shutdown) → loop
-//!   exits cleanly; the [`IngestSpawnHandle`] resolves its join handle.
+//!   exits cleanly and the [`IngestSpawnHandle`] publishes the worker exit.
 
 use std::sync::Arc;
 
 use bytes::Bytes;
 use tokio::sync::broadcast;
-use tokio::task::JoinHandle;
+use tokio::task::{AbortHandle, JoinHandle};
 use tracing::{debug, info, instrument, warn};
 use uc_observability::FlowId;
 
@@ -72,22 +72,108 @@ pub(crate) struct IngestInboundClipboardUseCase {
     clock: Arc<dyn ClockPort>,
 }
 
-/// Handle returned by [`IngestInboundClipboardUseCase::spawn_run`]. Drop
-/// or `abort()` to stop the loop; the cleanup is also automatic when the
-/// receiver adapter shuts down (its broadcast senders drop).
+/// Handle returned by [`IngestInboundClipboardUseCase::spawn_run`]. It owns
+/// the real ingest task and publishes that task's completion, cancellation,
+/// or panic. Drop or `abort()` to stop the loop; the cleanup is also automatic
+/// when the receiver adapter shuts down (its broadcast senders drop).
 pub(crate) struct IngestSpawnHandle {
-    join: JoinHandle<()>,
+    worker_abort: AbortHandle,
+    observer: Option<JoinHandle<()>>,
+    exit_rx: tokio::sync::watch::Receiver<Option<IngestWorkerExit>>,
+    lifecycle_handoff: IngestWorkerLifecycleHandoff,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IngestWorkerExit {
+    Completed,
+    Cancelled,
+    Panicked,
+}
+
+#[derive(Clone, Default)]
+struct IngestWorkerLifecycleHandoff {
+    state: Arc<std::sync::Mutex<IngestWorkerLifecycleState>>,
+}
+
+#[derive(Default)]
+struct IngestWorkerLifecycleState {
+    terminal: Option<IngestWorkerExit>,
+    running_committed: bool,
+}
+
+impl IngestWorkerLifecycleHandoff {
+    fn record_terminal(&self, terminal: IngestWorkerExit) {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        state.terminal.get_or_insert(terminal);
+    }
+
+    fn commit_running(&self, commit_running: &mut dyn FnMut()) -> Result<(), IngestWorkerExit> {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        if let Some(terminal) = state.terminal {
+            return Err(terminal);
+        }
+        commit_running();
+        state.running_committed = true;
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct IngestWorkerExitSubscription {
+    rx: tokio::sync::watch::Receiver<Option<IngestWorkerExit>>,
+    lifecycle_handoff: IngestWorkerLifecycleHandoff,
+}
+
+impl IngestWorkerExitSubscription {
+    pub(crate) fn current_exit(&self) -> Option<IngestWorkerExit> {
+        *self.rx.borrow()
+    }
+
+    pub(crate) async fn recv(&mut self) -> Option<IngestWorkerExit> {
+        loop {
+            if let Some(exit) = *self.rx.borrow_and_update() {
+                return Some(exit);
+            }
+            if self.rx.changed().await.is_err() {
+                return None;
+            }
+        }
+    }
+
+    pub(crate) fn commit_running(
+        &self,
+        commit_running: &mut dyn FnMut(),
+    ) -> Result<(), IngestWorkerExit> {
+        self.lifecycle_handoff.commit_running(commit_running)
+    }
 }
 
 impl IngestSpawnHandle {
     pub fn abort(&self) {
-        self.join.abort();
+        self.worker_abort.abort();
+    }
+
+    pub(crate) fn subscribe_exit(&self) -> IngestWorkerExitSubscription {
+        IngestWorkerExitSubscription {
+            rx: self.exit_rx.clone(),
+            lifecycle_handoff: self.lifecycle_handoff.clone(),
+        }
+    }
+
+    pub(crate) async fn shutdown(mut self) {
+        self.worker_abort.abort();
+        if let Some(observer) = self.observer.take() {
+            let _ = observer.await;
+        }
     }
 }
 
 impl Drop for IngestSpawnHandle {
     fn drop(&mut self) {
-        self.join.abort();
+        self.worker_abort.abort();
+        if let Some(observer) = self.observer.take() {
+            observer.abort();
+        }
     }
 }
 
@@ -128,8 +214,26 @@ impl IngestInboundClipboardUseCase {
     /// owning facade.
     pub(crate) fn spawn_run(self: Arc<Self>) -> IngestSpawnHandle {
         let uc = Arc::clone(&self);
-        let join = tokio::spawn(async move { uc.run().await });
-        IngestSpawnHandle { join }
+        let worker = tokio::spawn(async move { uc.run().await });
+        let worker_abort = worker.abort_handle();
+        let (exit_tx, exit_rx) = tokio::sync::watch::channel(None);
+        let lifecycle_handoff = IngestWorkerLifecycleHandoff::default();
+        let observer_handoff = lifecycle_handoff.clone();
+        let observer = tokio::spawn(async move {
+            let exit = match worker.await {
+                Ok(()) => IngestWorkerExit::Completed,
+                Err(error) if error.is_cancelled() => IngestWorkerExit::Cancelled,
+                Err(_) => IngestWorkerExit::Panicked,
+            };
+            observer_handoff.record_terminal(exit);
+            let _ = exit_tx.send(Some(exit));
+        });
+        IngestSpawnHandle {
+            worker_abort,
+            observer: Some(observer),
+            exit_rx,
+            lifecycle_handoff,
+        }
     }
 
     #[instrument(skip_all)]
@@ -299,6 +403,15 @@ mod tests {
         tx: broadcast::Sender<InboundClipboard>,
     }
 
+    struct PanickingReceiver;
+
+    #[async_trait]
+    impl ClipboardReceiverPort for PanickingReceiver {
+        fn subscribe(&self) -> broadcast::Receiver<InboundClipboard> {
+            panic!("simulated ingest receiver worker failure");
+        }
+    }
+
     impl FakeReceiver {
         fn new() -> Self {
             let (tx, _) = broadcast::channel(32);
@@ -389,6 +502,36 @@ mod tests {
             },
             ciphertext,
         }
+    }
+
+    #[tokio::test]
+    async fn ingest_handle_reports_real_worker_panic() {
+        let uc = Arc::new(IngestInboundClipboardUseCase::new(
+            Arc::new(PanickingReceiver),
+            Arc::new(make_member_repo_all_enabled()),
+            Arc::new(MockCipher::new()),
+            Arc::new(FixedClock(0)),
+        ));
+        let handle = Arc::clone(&uc).spawn_run();
+        let mut exits = handle.subscribe_exit();
+        let health_check = handle.subscribe_exit();
+
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(2), exits.recv())
+                .await
+                .expect("worker exit must be observable"),
+            Some(IngestWorkerExit::Panicked)
+        );
+        assert_eq!(
+            health_check.current_exit(),
+            Some(IngestWorkerExit::Panicked)
+        );
+        let mut committed = false;
+        assert_eq!(
+            health_check.commit_running(&mut || committed = true),
+            Err(IngestWorkerExit::Panicked)
+        );
+        assert!(!committed, "a terminal producer must reject Running commit");
     }
 
     /// 1. Happy path — one inbound, decrypt succeeds, notice arrives on

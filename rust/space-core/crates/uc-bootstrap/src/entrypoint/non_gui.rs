@@ -530,6 +530,14 @@ impl CliAppRuntime {
         &self.app_facade
     }
 
+    pub fn subscribe_ingest_worker_exit(
+        &self,
+    ) -> Option<uc_application::facade::IngestWorkerExitSubscription> {
+        self.sync_engine_assembly
+            .as_ref()
+            .map(|assembly| assembly.subscribe_ingest_worker_exit())
+    }
+
     pub async fn shutdown(mut self) {
         if let Some(assembly) = self.sync_engine_assembly.take() {
             assembly.shutdown().await;
@@ -544,7 +552,27 @@ pub async fn build_cli_app_runtime(
 ) -> anyhow::Result<CliAppRuntime> {
     let (config, wired) = crate::entrypoint::cli::build_cli_wiring_context(log_profile).await?;
     let storage_paths = get_storage_paths(&config)?;
+    build_cli_app_runtime_from_wiring(wired, storage_paths).await
+}
 
+/// Construct one CLI runtime from explicit profile-owned roots and namespace.
+/// This path never reads or mutates `UC_PROFILE` or the HarmonyOS directory env
+/// variables; multi-profile hosts must use it instead of the legacy builder.
+/// It also wires `NoopSystemClipboard`: ArkTS owns the process's only pasteboard
+/// watcher and routes each local capture to the selected profile explicitly.
+pub async fn build_cli_app_runtime_for_profile(
+    profile: &crate::layer::paths::CliAppRuntimeProfileConfig,
+    log_profile: Option<uc_observability::LogProfile>,
+) -> anyhow::Result<CliAppRuntime> {
+    let (_config, wired, storage_paths) =
+        crate::entrypoint::cli::build_cli_wiring_context_for_profile(profile, log_profile).await?;
+    build_cli_app_runtime_from_wiring(wired, storage_paths).await
+}
+
+async fn build_cli_app_runtime_from_wiring(
+    wired: crate::wiring::deps::WiredDependencies,
+    storage_paths: uc_application::facade::AppPaths,
+) -> anyhow::Result<CliAppRuntime> {
     // Phase 94 NETSET-03：与 builders.rs 同模式（D-B1 选项 B 现状决策 — 见
     // 094-CONTEXT.md `<deferred>` 后续 phase 实施 `SettingsLoadError` 偿还）。
     let settings = wired

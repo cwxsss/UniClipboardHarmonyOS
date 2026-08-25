@@ -21,6 +21,9 @@ export interface NativeClipboardContent {
   data: Uint8Array
 }
 
+/** Create a native N-API Buffer from ArkTS bytes for the engine bridge. */
+export declare function createNapiBuffer(data: Uint8Array): ArrayBuffer
+
 export interface NativeCreateSpaceResult {
   spaceId: string
   selfDeviceId: string
@@ -149,6 +152,17 @@ export interface NativeSpaceStatus {
   spaceId: string
 }
 
+export interface NativeProfileSpaceStatus {
+  profileId: string
+  generation: number
+  lifecycle: string
+  lastFailure: string
+  running: boolean
+  joined: boolean
+  deviceName: string
+  spaceId: string
+}
+
 export interface NativeSpaceTextEvent {
   text: string
   fromDeviceId: string
@@ -182,17 +196,29 @@ export declare function deleteTextHistory(config: NativeServerConfig, hash: stri
 
 export declare function drainMobileSyncInboundEvents(): Array<NativeMobileSyncInboundEvent>
 
-/** Drain file clipboard frames received from peers since the previous call. */
+/** @deprecated Compatibility wrapper for the legacy single-space runtime. */
 export declare function drainSpaceFileEvents(): Array<NativeSpaceFileEvent>
 
-/** Drain sender-side status changes reported by the receiving peer. */
+/** Drain file events owned by one supervisor profile runtime. */
+export declare function drainSpaceFileEventsForProfile(profileId: string): Array<NativeSpaceFileEvent>
+
+/** @deprecated Compatibility wrapper for the legacy single-space runtime. */
 export declare function drainSpaceFileStatusEvents(): Array<NativeSpaceFileStatusEvent>
 
-/** Drain image clipboard frames received from peers since the previous call. */
+/** Drain file status events owned by one supervisor profile runtime. */
+export declare function drainSpaceFileStatusEventsForProfile(profileId: string): Array<NativeSpaceFileStatusEvent>
+
+/** @deprecated Compatibility wrapper for the legacy single-space runtime. */
 export declare function drainSpaceImageEvents(): Array<NativeSpaceImageEvent>
 
-/** Drain text clipboard frames received from peers since the previous call. */
+/** Drain image events owned by one supervisor profile runtime. */
+export declare function drainSpaceImageEventsForProfile(profileId: string): Array<NativeSpaceImageEvent>
+
+/** @deprecated Compatibility wrapper for the legacy single-space runtime. */
 export declare function drainSpaceTextEvents(): Array<NativeSpaceTextEvent>
+
+/** Drain text events owned by one supervisor profile runtime. */
+export declare function drainSpaceTextEventsForProfile(profileId: string): Array<NativeSpaceTextEvent>
 
 export declare function drainSseEvents(): Array<NativeSseEvent>
 
@@ -205,11 +231,11 @@ export declare function getLatestText(config: NativeServerConfig): Promise<Lates
 /** Return persisted mobile-sync settings plus the actual in-process listener state. */
 export declare function getMobileSyncServerStatus(): Promise<NativeMobileSyncStatus>
 
-/**
-  * Return the persisted member roster enriched with live reachability and the
-  * HarmonyOS device type announced by each peer through the encrypted space.
-  */
+/** @deprecated Compatibility wrapper for the legacy single-space runtime. */
 export declare function getSpaceDevices(): Promise<Array<NativeSpaceDevice>>
+
+/** Return the roster for one supervisor-owned profile runtime. */
+export declare function getSpaceDevicesForProfile(profileId: string): Promise<Array<NativeSpaceDevice>>
 
 /** Return the local device's outbound sync preferences for one paired member. */
 export declare function getSpaceMemberSyncPreferences(deviceId: string): Promise<NativeSpaceMemberSyncPreferences>
@@ -217,12 +243,23 @@ export declare function getSpaceMemberSyncPreferences(deviceId: string): Promise
 /** Return the persisted relay policy used by the embedded P2P node. */
 export declare function getSpaceNetworkSettings(): Promise<NativeSpaceNetworkSettings>
 
+/** Return status for one explicit supervisor-owned profile runtime. */
+export declare function getSpaceStatusForProfile(profileId: string): Promise<NativeProfileSpaceStatus>
+
+/** @deprecated Compatibility wrapper for the legacy single-space runtime. */
 export declare function getSpaceStatus(): Promise<NativeSpaceStatus>
 
-/** Issue a fresh, short-lived invitation for the space owned by this device. */
+/** @deprecated Compatibility wrapper for the legacy single-space runtime. */
 export declare function issueSpaceInvitation(): Promise<NativeSpaceInvitation>
 
+/** Issue an invitation from one supervisor-owned profile runtime. */
+export declare function issueSpaceInvitationForProfile(profileId: string): Promise<NativeSpaceInvitation>
+
+/** @deprecated Compatibility wrapper for the legacy single-space runtime. */
 export declare function joinSpace(invitationCode: string, passphrase: string, deviceName: string): Promise<NativeJoinSpaceResult>
+
+/** Join a space through one supervisor-owned profile runtime. */
+export declare function joinSpaceForProfile(profileId: string, invitationCode: string, passphrase: string, deviceName: string): Promise<NativeJoinSpaceResult>
 
 export declare function listMobileSyncDevices(): Promise<Array<NativeMobileSyncDevice>>
 
@@ -282,15 +319,31 @@ export declare function revokeSpaceMember(deviceId: string): Promise<void>
 /** Dispatch one user-selected file through the joined encrypted space in bounded chunks. */
 export declare function sendSpaceFile(data: Uint8Array, fileName: string): Promise<number>
 
+/** Dispatch one file through exactly one running supervisor-owned profile runtime. */
+export declare function sendSpaceFileForProfile(profileId: string, data: Uint8Array, fileName: string): Promise<number>
+
 export declare function sendSpaceFileFromFd(fd: number, fileSize: number, fileName: string): Promise<NativeSpaceFileSendResult>
+
+/** Stream one file through exactly one running supervisor-owned profile runtime. */
+export declare function sendSpaceFileFromFdForProfile(profileId: string, fd: number, fileSize: number, fileName: string): Promise<NativeSpaceFileSendResult>
 
 export declare function sendSpaceFileFromFdToDevice(fd: number, fileSize: number, fileName: string, deviceId: string): Promise<NativeSpaceFileSendResult>
 
 export declare function sendSpaceImage(data: Uint8Array, mimeType: string): Promise<number>
 
+/** Dispatch one image through exactly one running supervisor-owned profile runtime. */
+export declare function sendSpaceImageForProfile(profileId: string, data: Uint8Array, mimeType: string): Promise<number>
+
 export declare function sendSpaceImageToDevice(data: Uint8Array, mimeType: string, deviceId: string): Promise<number>
 
+/** @deprecated Compatibility wrapper for the legacy single-space runtime. */
 export declare function sendSpaceText(text: string): Promise<number>
+
+/**
+ * Active-send router seam: the single ArkTS pasteboard watcher sends each local
+ * capture through exactly one selected supervisor-owned profile runtime.
+ */
+export declare function sendSpaceTextForProfile(profileId: string, text: string): Promise<number>
 
 export declare function sendSpaceTextToDevice(text: string, deviceId: string): Promise<number>
 
@@ -316,13 +369,25 @@ export declare function setTextHistoryStarred(config: NativeServerConfig, hash: 
 export declare function sha256HexUpper(text: string): string
 
 /**
+  * @deprecated Compatibility wrapper for the legacy single-space runtime.
+  *
   * Start the embedded UniClipboard P2P node inside the HarmonyOS application
   * sandbox. This must be called once before redeeming a space invitation.
   */
 export declare function startSpaceNode(dataDir: string, cacheDir: string, deviceType: string): Promise<NativeSpaceStatus>
 
+/**
+  * Start one supervisor-owned profile runtime. dataDir/cacheDir are the final
+  * absolute roots for this profile and are never resolved through process env.
+  */
+export declare function startSpaceNodeForProfile(profileId: string, dataDir: string, cacheDir: string, deviceType: string): Promise<NativeProfileSpaceStatus>
+
 export declare function startSse(config: NativeServerConfig): void
 
+/** Stop one supervisor-owned profile runtime without affecting other profiles. */
+export declare function stopSpaceNodeForProfile(profileId: string): Promise<NativeProfileSpaceStatus>
+
+/** @deprecated Compatibility wrapper for the legacy single-space runtime. */
 export declare function stopSpaceNode(): Promise<void>
 
 export declare function stopSse(): void

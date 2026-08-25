@@ -491,6 +491,12 @@
     {
       "name": "onboarding_feature_file",
       "value": "Files"
-    }
+    },
+    { "name": "image_intelligence_title", "value": "Image text recognition" },
+    { "name": "image_intelligence_action", "value": "Recognize image" },
+    { "name": "image_intelligence_running", "value": "Recognizing…" },
+    { "name": "image_intelligence_text_title", "value": "Recognized text" },
+    { "name": "image_intelligence_empty", "value": "No text found" },
+    { "name": "image_intelligence_failed", "value": "Image recognition failed. Try again later." }
   ]
 }

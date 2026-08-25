@@ -41,6 +41,7 @@ export {
   EngineRuntimeBackend,
   EngineInvitationIssued,
   EngineActiveClipboard,
+  EngineMemberSyncPreferences,
   EngineRuntimeError,
   EngineRuntimeEvent,
   EngineRuntimeEventObserver,
@@ -55,9 +56,17 @@ export {
   EngineRuntimeSnapshot,
   EngineRuntimeStartConfig,
   EngineRuntimeState,
+  EngineWorkspaceConvergence,
   EngineSessionRecovery,
   engineRuntimeService
 } from './src/main/ets/service/EngineRuntimeService';
+export {
+  LEGACY_SPACE_PROFILE_ID,
+  SpaceProfileDirectory,
+  SpaceProfileRecord,
+  SpaceProfileStore
+} from './src/main/ets/service/SpaceProfileStore';
+export { SpaceRuntimeSupervisor, spaceRuntimeSupervisor } from './src/main/ets/service/SpaceRuntimeSupervisor';
 export { Logger } from './src/main/ets/util/Logger';
 export { HistoryLibrarySettings, HistoryStorageService } from './src/main/ets/service/HistoryStorageService';
 export { LinkPreviewService } from './src/main/ets/service/LinkPreviewService';

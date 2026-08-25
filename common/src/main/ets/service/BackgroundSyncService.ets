@@ -7,7 +7,7 @@ import { Logger } from '../util/Logger';
 const logger: Logger = new Logger('BackgroundSync');
 const STORE_NAME: string = 'background_sync_preferences';
 const ENABLED_KEY: string = 'background_sync_enabled';
-const BUNDLE_NAME: string = 'com.uniclipboard.hmos';
+const BUNDLE_NAME: string = 'com.sss.uniclipboard';
 const ABILITY_NAME: string = 'EntryAbility';
 
 export class BackgroundSyncPreferenceService {
@@ -60,7 +60,9 @@ export class BackgroundSyncTaskService {
       };
       let notificationWantAgent: WantAgent = await wantAgent.getWantAgent(wantAgentInfo);
       if (this.shouldRun) {
-        let taskModes: string[] = ['multiDeviceConnection'];
+        // iroh/QUIC carries clipboard payloads as data transfer. Using multiDeviceConnection lets
+        // startup succeed but HarmonyOS suspends the process after about 65 seconds.
+        let taskModes: string[] = ['dataTransfer'];
         await backgroundTaskManager.startBackgroundRunning(context, taskModes, notificationWantAgent);
         this.active = true;
         logger.info('UniClipboard background device sync started.');

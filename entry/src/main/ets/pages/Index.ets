@@ -5,6 +5,7 @@ import {
 } from '@kit.AbilityKit';
 import { BusinessError, deviceInfo } from '@kit.BasicServicesKit';
 import { scanBarcode, scanCore } from '@kit.ScanKit';
+import { textRecognition } from '@kit.CoreVisionKit';
 import { image } from '@kit.ImageKit';
 import { fileIo, fileUri, picker } from '@kit.CoreFileKit';
 import { media } from '@kit.MediaKit';
@@ -120,6 +121,9 @@ struct Index {
   @State latestKind: string = 'Text';
   @State latestImage: image.PixelMap | null = null;
   @State latestImageRevision: number = 0;
+  @State imageRecognitionState: number = 0;
+  @State imageRecognitionSourceKey: string = '';
+  @State imageRecognizedText: string = '';
   @State composerImage: image.PixelMap | null = null;
   @State composerImageRevision: number = 0;
   @State imageReadState: number = 0;
@@ -1693,10 +1697,13 @@ struct Index {
   private synchronizeDesktopSpaceDeviceSelection(devices: NativeSpaceDevice[]): void {
     let selected: NativeSpaceDevice | null = null;
     let local: NativeSpaceDevice | null = null;
+    let remote: NativeSpaceDevice | null = null;
     for (let index: number = 0; index < devices.length; index++) {
       let device: NativeSpaceDevice = devices[index];
       if (device.isLocal) {
         local = device;
+      } else if (remote === null || (!remote.online && device.online)) {
+        remote = device;
       }
       if (device.deviceId === this.desktopSelectedSpaceDeviceId) {
         selected = device;
@@ -1706,7 +1713,10 @@ struct Index {
       this.assignDesktopSelectedSpaceDevice(selected);
       return;
     }
-    if (local !== null) {
+    if (remote !== null) {
+      this.assignDesktopSelectedSpaceDevice(remote);
+      this.loadDesktopDeviceSyncPreferences(remote.deviceId);
+    } else if (local !== null) {
       this.assignDesktopSelectedSpaceDevice(local);
     } else if (devices.length > 0) {
       this.assignDesktopSelectedSpaceDevice(devices[0]);
@@ -1735,6 +1745,7 @@ struct Index {
       this.applyDesktopDeviceSyncPreferences(preferences);
       this.desktopDeviceSyncState = 2;
     } catch (error) {
+      console.error('UniClipboard failed to load device sync preferences: ' + JSON.stringify(error));
       if (this.desktopSelectedSpaceDeviceId === deviceId) {
         this.desktopDeviceSyncState = 3;
       }
@@ -1785,6 +1796,7 @@ struct Index {
       }
       this.statusCode = 2;
     } catch (error) {
+      console.error('UniClipboard failed to update device sync preferences: ' + JSON.stringify(error));
       if (this.desktopSelectedSpaceDeviceId === deviceId) {
         this.desktopDeviceSendEnabled = previousSendEnabled;
         this.desktopDeviceSyncText = previousText;
@@ -1816,6 +1828,7 @@ struct Index {
       }
       this.statusCode = 2;
     } catch (error) {
+      console.error('UniClipboard failed to reset device sync preferences: ' + JSON.stringify(error));
       if (this.desktopSelectedSpaceDeviceId === deviceId) {
         this.desktopDeviceSyncState = 3;
       }
@@ -2347,6 +2360,129 @@ struct Index {
       return this.desktopSelectedImage;
     }
     return this.latestKind === 'Image' ? this.latestImage : null;
+  }
+
+  private currentImageRecognitionKey(): string {
+    if (this.desktopSelectedId.length > 0 && this.desktopSelectedImage !== null) {
+      return 'selected:' + this.desktopSelectedId + ':' + this.desktopSelectedImageRevision.toString();
+    }
+    if (this.latestKind === 'Image' && this.latestImage !== null) {
+      return 'latest:' + this.latestImageRevision.toString();
+    }
+    return '';
+  }
+
+  private currentImageRecognitionState(): number {
+    return this.imageRecognitionSourceKey === this.currentImageRecognitionKey() ? this.imageRecognitionState : 0;
+  }
+
+  private currentImageRecognizedText(): string {
+    return this.imageRecognitionSourceKey === this.currentImageRecognitionKey() ? this.imageRecognizedText : '';
+  }
+
+  private async packImageForRecognition(pixelMap: image.PixelMap): Promise<ArrayBuffer> {
+    let packer: image.ImagePacker = image.createImagePacker();
+    let options: image.PackingOption = {
+      format: 'image/png',
+      quality: 100
+    };
+    try {
+      return await packer.packToData(pixelMap, options);
+    } finally {
+      await packer.release();
+    }
+  }
+
+  private async createOcrPixelMap(packedImage: ArrayBuffer): Promise<image.PixelMap> {
+    let source: image.ImageSource = image.createImageSource(packedImage);
+    let options: image.DecodingOptions = {
+      desiredPixelFormat: image.PixelMapFormat.RGBA_8888
+    };
+    try {
+      return await source.createPixelMap(options);
+    } finally {
+      await source.release();
+    }
+  }
+
+  private async recognizeCurrentImage(): Promise<void> {
+    let pixelMap: image.PixelMap | null = this.desktopDisplayImage();
+    let sourceKey: string = this.currentImageRecognitionKey();
+    if (pixelMap === null || sourceKey.length === 0 || this.currentImageRecognitionState() === 1) {
+      return;
+    }
+    this.imageRecognitionSourceKey = sourceKey;
+    this.imageRecognitionState = 1;
+    this.imageRecognizedText = '';
+
+    let packedImage: ArrayBuffer;
+    try {
+      packedImage = await this.packImageForRecognition(pixelMap);
+    } catch (error) {
+      console.error('UniClipboard failed to package the image for recognition.');
+      if (this.currentImageRecognitionKey() === sourceKey) {
+        this.imageRecognitionState = 4;
+      }
+      return;
+    }
+
+    let ocrInitialized: boolean = false;
+    let ocrPixelMap: image.PixelMap | null = null;
+    let recognizedText: string = '';
+    try {
+      ocrInitialized = await textRecognition.init();
+      if (ocrInitialized) {
+        ocrPixelMap = await this.createOcrPixelMap(packedImage);
+        let visionInfo: textRecognition.VisionInfo = { pixelMap: ocrPixelMap };
+        let result: textRecognition.TextRecognitionResult = await textRecognition.recognizeText(visionInfo);
+        recognizedText = result.value.trim();
+      }
+    } catch (error) {
+      console.error('UniClipboard failed to recognize text in the current image.');
+    } finally {
+      if (ocrPixelMap !== null) {
+        try {
+          await ocrPixelMap.release();
+        } catch (error) {
+        }
+      }
+      if (ocrInitialized) {
+        try {
+          await textRecognition.release();
+        } catch (error) {
+        }
+      }
+    }
+
+    if (this.currentImageRecognitionKey() !== sourceKey) {
+      return;
+    }
+    this.imageRecognizedText = recognizedText;
+    this.imageRecognitionState = recognizedText.length > 0 ? 2 : (ocrInitialized ? 3 : 4);
+  }
+
+  private async copyImageRecognizedText(): Promise<void> {
+    let text: string = this.currentImageRecognizedText();
+    if (text.length === 0) {
+      return;
+    }
+    try {
+      await this.clipboardService.writeText(text);
+      this.statusCode = 2;
+    } catch (error) {
+      this.statusCode = 3;
+    }
+  }
+
+  private fileUriForPath(path: string): string {
+    if (path.length === 0 || !path.startsWith('/')) {
+      return path;
+    }
+    try {
+      return fileUri.getUriFromPath(path);
+    } catch (error) {
+      return '';
+    }
   }
 
   private desktopShowsFile(): boolean {
@@ -4244,18 +4380,47 @@ struct Index {
     for (let index: number = 0; index < fileEvents.length; index++) {
       let event: NativeSpaceFileEvent = fileEvents[index];
       let filePreview: image.PixelMap | null = null;
-      if (this.isImageFileName(event.fileName) && event.data.length > 0) {
+      let receivedFileUri: string = this.fileUriForPath(event.localPath);
+      if (this.isImageFileName(event.fileName)) {
         try {
-          filePreview = await this.clipboardService.decodeImage(event.data);
+          filePreview = event.data.length > 0 ? await this.clipboardService.decodeImage(event.data) :
+            await this.clipboardService.decodeImageUri(receivedFileUri);
         } catch (error) {
           filePreview = null;
         }
+      }
+      if (filePreview !== null) {
+        this.latestKind = 'Image';
+        this.latestText = event.fileName;
+        this.latestImage = filePreview;
+        this.latestImageRevision += 1;
+        this.latestFileName = '';
+        this.latestFileData = null;
+        this.latestFilePath = '';
+        if (this.desktopSelectedId.length === 0) {
+          this.releaseDesktopAudio();
+        }
+        this.latestContentId = event.snapshotHash;
+        this.addHistory(event.fileName, 'received', 'Image', filePreview);
+        try {
+          await this.clipboardService.writeImage(filePreview);
+          this.notifyReceivedContent('Image', event.fileName, filePreview, event.fileSize,
+            this.sourceLabelForDevice(event.fromDeviceId));
+        } catch (error) {
+          console.error('UniClipboard failed to write received image to the system clipboard.');
+          this.statusCode = 3;
+        }
+        continue;
+      }
+      let receivedFilePath: string = event.localPath;
+      if (receivedFilePath.length === 0 && event.data.length > 0) {
+        receivedFilePath = this.cacheLatestFile(event.data);
       }
       this.latestKind = 'File';
       this.latestText = event.fileName;
       this.latestFileName = event.fileName;
       this.latestFileData = event.data;
-      this.latestFilePath = event.localPath;
+      this.latestFilePath = receivedFilePath;
       this.latestFileRevision += 1;
       this.desktopFilePreviewState = 0;
       this.resetDesktopVideoAspectRatio();
@@ -4265,7 +4430,17 @@ struct Index {
       this.latestImage = null;
       this.latestContentId = event.snapshotHash;
       this.addHistory(event.fileName, 'received', 'File', null,
-        event.data.length > 0 ? event.data : null, event.localPath);
+        event.data.length > 0 ? event.data : null, receivedFilePath);
+      try {
+        let fileUriValue: string = this.fileUriForPath(receivedFilePath);
+        if (fileUriValue.length === 0) {
+          throw new Error('received file has no readable path');
+        }
+        await this.clipboardService.writeUri(fileUriValue);
+      } catch (error) {
+        console.error('UniClipboard failed to write received file URI to the system clipboard.');
+        this.statusCode = 3;
+      }
       this.notifyReceivedContent('File', event.fileName, filePreview, event.data.length,
         this.sourceLabelForDevice(event.fromDeviceId));
     }
@@ -4683,6 +4858,75 @@ struct Index {
   }
 
   @Builder
+  private imageIntelligencePanel() {
+    Column({ space: 10 }) {
+      Row({ space: 10 }) {
+        Text($r('app.string.image_intelligence_title'))
+          .fontSize($r('app.float.font_subtitle_large'))
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.text_primary'))
+          .layoutWeight(1)
+        Button(this.currentImageRecognitionState() === 1 ?
+          $r('app.string.image_intelligence_running') : $r('app.string.image_intelligence_action'),
+        { type: ButtonType.Normal })
+          .height(36)
+          .fontSize(13)
+          .fontColor($r('app.color.on_accent'))
+          .backgroundColor(this.accentColor())
+          .borderRadius($r('app.float.corner_radius_level10'))
+          .enabled(this.currentImageRecognitionState() !== 1)
+          .onClick((): void => {
+            this.recognizeCurrentImage();
+          })
+      }
+      .width('100%')
+      if (this.currentImageRecognitionState() === 2 && this.currentImageRecognizedText().length > 0) {
+        Row({ space: 8 }) {
+          Text($r('app.string.image_intelligence_text_title'))
+            .fontSize(13)
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('app.color.text_secondary'))
+            .layoutWeight(1)
+          Button($r('app.string.copy_action'), { type: ButtonType.Normal })
+            .height(32)
+            .fontSize(12)
+            .fontColor(this.accentColor())
+            .backgroundColor($r('app.color.surface'))
+            .borderRadius($r('app.float.corner_radius_level10'))
+            .onClick((): void => {
+              this.copyImageRecognizedText();
+            })
+        }
+        .width('100%')
+        Text(this.currentImageRecognizedText())
+          .fontSize($r('app.float.font_body_medium'))
+          .lineHeight(21)
+          .fontColor($r('app.color.text_primary'))
+          .width('100%')
+          .maxLines(8)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .padding(12)
+          .borderRadius($r('app.float.corner_radius_level4'))
+          .backgroundColor($r('app.color.surface_muted'))
+      } else if (this.currentImageRecognitionState() === 3) {
+        Text($r('app.string.image_intelligence_empty'))
+          .fontSize(13)
+          .fontColor($r('app.color.text_secondary'))
+          .width('100%')
+      } else if (this.currentImageRecognitionState() === 4) {
+        Text($r('app.string.image_intelligence_failed'))
+          .fontSize(13)
+          .fontColor($r('app.color.danger'))
+          .width('100%')
+      }
+    }
+    .width('100%')
+    .padding(12)
+    .borderRadius($r('app.float.corner_radius_level8'))
+    .backgroundColor($r('app.color.surface_muted'))
+  }
+
+  @Builder
   private mobileLatestContent() {
     if (this.desktopHasGestureShareContent() && !this.desktopGestureShareHintDismissed) {
       this.desktopGestureShareHint()
@@ -4711,6 +4955,7 @@ struct Index {
         .fontSize($r('app.float.font_body_medium'))
         .fontColor($r('app.color.text_secondary'))
         .width('100%')
+      this.imageIntelligencePanel()
     } else if (this.latestKind === 'File' && this.desktopShowsFile()) {
       if (this.desktopFileIsVideo() && this.desktopFilePreviewUri().length > 0) {
         Video({ src: this.desktopFilePreviewUri() })

@@ -5,10 +5,16 @@ import { EngineHostError, EngineHostErrorCategory } from './EngineHostError';
 
 const ASSET_NOT_FOUND: number = 24000002;
 const ASSET_ALREADY_EXISTS: number = 24000003;
-const ALIAS_PREFIX: string = 'app.uniclipboard.engine.';
+const ALIAS_PREFIX: string = 'app.uniclipboard.engine.v1-1.';
+const LEGACY_PROFILE_ID: string = '.engine-v1-1';
 
 export class EngineSecureAssetStore {
   private encoder: util.TextEncoder = util.TextEncoder.create('utf-8');
+  private profileId: string;
+
+  constructor(profileId: string = LEGACY_PROFILE_ID) {
+    this.profileId = profileId;
+  }
 
   get(key: string): Uint8Array | null {
     try {
@@ -113,7 +119,8 @@ export class EngineSecureAssetStore {
   }
 
   private alias(key: string): Uint8Array {
-    return this.encoder.encodeInto(ALIAS_PREFIX + key);
+    let scope: string = this.profileId === LEGACY_PROFILE_ID ? '' : 'profile.' + this.profileId + '.';
+    return this.encoder.encodeInto(ALIAS_PREFIX + scope + key);
   }
 
   private errorCode(error: Object): number {

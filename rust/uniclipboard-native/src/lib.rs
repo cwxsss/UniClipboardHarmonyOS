@@ -5,39 +5,44 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use napi_derive_ohos::napi;
-use napi_ohos::bindgen_prelude::Uint8Array;
+use napi_ohos::bindgen_prelude::{Buffer, Uint8Array};
 use napi_ohos::{Error, Result, Status};
-use uc_mobile::{
-    ClipboardKind, ClipboardMeta, HistoryPatch, MobileSyncClient, PlatformBridge, ProbeResult,
-    ServerConfig as MobileServerConfig, SseHandle, SseListener,
+use uc_application::facade::mobile_sync::{
+    RegisterMobileShortcutDeviceInput, RevokeMobileDeviceInput, UpdateMobileSyncSettingsInput,
 };
-use uc_mobile::client::{HistoryQuery, HistoryRecord};
+use uc_application::facade::settings::{NetworkSettingsPatch, SettingsFacade};
 use uc_application::facade::space_setup::{
     InitializeSpaceInput, RedeemPairingInvitationInput, SwitchSpaceInput,
 };
-use uc_application::facade::mobile_sync::{
-    RegisterMobileShortcutDeviceInput, RevokeMobileDeviceInput,
-    UpdateMobileSyncSettingsInput,
-};
-use uc_application::facade::settings::{NetworkSettingsPatch, SettingsFacade};
 use uc_application::facade::{
     connection_channel_to_wire, decode_v3_bytes_to_snapshot,
     decode_v3_bytes_to_snapshot_and_blob_refs, BatchPosition, ClipboardHostEvent,
-    ClipboardOriginKind, ContentTypesPatch, EmitError,
-    FetchBlobToPathCommand, FetchTransferContext, HostEvent, HostEventEmitterPort, InboundAction,
+    ClipboardOriginKind, ContentTypesPatch, EmitError, FetchBlobToPathCommand,
+    FetchTransferContext, HostEvent, HostEventEmitterPort, InboundAction,
     MemberSyncPreferencesPatch, MemberSyncPreferencesView, PublishBlobPathCommand, SettingsPatch,
     TransferHostEvent, V3BlobRef,
 };
-use uc_bootstrap::CliAppRuntime;
-use uc_core::ids::{DeviceId, EntryId, FormatId, RepresentationId};
+use uc_bootstrap::{CliAppRuntime, CliAppRuntimeProfileConfig};
+use uc_core::ids::{DeviceId, EntryId, FormatId, ProfileId, RepresentationId};
 use uc_core::mobile_sync::MobileDeviceId;
 use uc_core::ports::ReachabilityState;
 use uc_core::{
     ClipboardChangeOrigin, MimeType, ObservedClipboardRepresentation, SystemClipboardSnapshot,
 };
 use uc_infra::settings::repository::FileSettingsRepository;
+use uc_mobile::client::{HistoryQuery, HistoryRecord};
+use uc_mobile::{
+    ClipboardKind, ClipboardMeta, HistoryPatch, MobileSyncClient, PlatformBridge, ProbeResult,
+    ServerConfig as MobileServerConfig, SseHandle, SseListener,
+};
 
 mod mobile_sync_server;
+mod space_runtime_supervisor;
+use space_runtime_supervisor::{
+    SpaceRuntimeFactory, SpaceRuntimeFailureCallback, SpaceRuntimeFailureCategory,
+    SpaceRuntimeFuture, SpaceRuntimeLifecycle, SpaceRuntimeProfileConfig, SpaceRuntimeStatus,
+    SpaceRuntimeSupervisor, SupervisedSpaceRuntime,
+};
 
 static MOBILE_CLIENT: OnceLock<Arc<MobileSyncClient>> = OnceLock::new();
 static SSE_HANDLE: OnceLock<Mutex<Option<Arc<SseHandle>>>> = OnceLock::new();
@@ -61,6 +66,7 @@ static SPACE_FILE_TRANSFER_SEQ: AtomicU64 = AtomicU64::new(1);
 static SPACE_DEVICE_TYPES: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
 static SPACE_LOCAL_DEVICE_TYPE: OnceLock<Mutex<String>> = OnceLock::new();
 static SPACE_PROFILE_ANNOUNCED: AtomicBool = AtomicBool::new(false);
+static PROFILE_SPACE_SUPERVISOR: OnceLock<Arc<SpaceRuntimeSupervisor>> = OnceLock::new();
 
 const MAX_PENDING_SSE_EVENTS: usize = 64;
 const MAX_PENDING_SPACE_EVENTS: usize = 64;
@@ -72,6 +78,13 @@ const SPACE_FILE_HEADER_BYTES: usize = 27;
 const SPACE_DEVICE_PROFILE_MIME: &str = "application/x-uniclipboard-device-profile";
 const SPACE_FILE_MIME: &str = "application/x-uniclipboard-file";
 const SPACE_BACKGROUND_VERIFY_INTERVAL: Duration = Duration::from_secs(15);
+
+/// Copy ArkTS bytes into a real N-API Buffer for consumers that use
+/// napi_get_buffer_info rather than accepting a generic Uint8Array.
+#[napi]
+pub fn create_napi_buffer(data: Uint8Array) -> Buffer {
+    Buffer::from(data.to_vec())
+}
 
 struct HarmonyPlatformBridge;
 
@@ -161,9 +174,9 @@ impl HostEventEmitterPort for HarmonyHostEventEmitter {
             _ => None,
         };
         if let Some(signal) = signal {
-            self.sender
-                .send(signal)
-                .map_err(|_| EmitError::Failed("HarmonyOS file event channel closed".to_string()))?;
+            self.sender.send(signal).map_err(|_| {
+                EmitError::Failed("HarmonyOS file event channel closed".to_string())
+            })?;
         }
         Ok(())
     }
@@ -270,6 +283,18 @@ pub struct NativeSseEvent {
 
 #[napi(object)]
 pub struct NativeSpaceStatus {
+    pub running: bool,
+    pub joined: bool,
+    pub device_name: String,
+    pub space_id: String,
+}
+
+#[napi(object)]
+pub struct NativeProfileSpaceStatus {
+    pub profile_id: String,
+    pub generation: f64,
+    pub lifecycle: String,
+    pub last_failure: String,
     pub running: bool,
     pub joined: bool,
     pub device_name: String,
@@ -434,8 +459,8 @@ fn mobile_client() -> Result<Arc<MobileSyncClient>> {
     }
 
     uc_mobile::uc_mobile_init();
-    let created = MobileSyncClient::new(Arc::new(HarmonyPlatformBridge), false)
-        .map_err(sync_error)?;
+    let created =
+        MobileSyncClient::new(Arc::new(HarmonyPlatformBridge), false).map_err(sync_error)?;
     if MOBILE_CLIENT.set(created.clone()).is_ok() {
         return Ok(created);
     }
@@ -731,9 +756,10 @@ async fn current_space_status() -> Result<NativeSpaceStatus> {
             space_id: String::new(),
         });
     };
-    let setup = app_facade.space_setup.get().cloned().ok_or_else(|| {
-        Error::new(Status::GenericFailure, "space setup service is unavailable")
-    })?;
+    let setup =
+        app_facade.space_setup.get().cloned().ok_or_else(|| {
+            Error::new(Status::GenericFailure, "space setup service is unavailable")
+        })?;
     let state = setup.query_setup_state().await.map_err(space_error)?;
     Ok(NativeSpaceStatus {
         running: true,
@@ -744,6 +770,289 @@ async fn current_space_status() -> Result<NativeSpaceStatus> {
             .map(|space_id| space_id.to_string())
             .unwrap_or_default(),
     })
+}
+
+struct HarmonyProfileRuntimeFactory;
+
+struct HarmonyRuntimeMonitor {
+    cancel: Option<tokio::sync::oneshot::Sender<()>>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl HarmonyRuntimeMonitor {
+    fn activate_worker(
+        worker: &mut Option<
+            tokio::task::JoinHandle<std::result::Result<(), SpaceRuntimeFailureCategory>>,
+        >,
+        report_failure: &mut Option<SpaceRuntimeFailureCallback>,
+    ) -> std::result::Result<Self, SpaceRuntimeFailureCategory> {
+        if worker
+            .as_ref()
+            .expect("Harmony runtime monitor worker activates exactly once")
+            .is_finished()
+        {
+            return Err(SpaceRuntimeFailureCategory::Runtime);
+        }
+        Ok(Self::spawn_worker(
+            worker
+                .take()
+                .expect("Harmony runtime monitor worker activates exactly once"),
+            report_failure
+                .take()
+                .expect("Harmony runtime failure callback activates exactly once"),
+        ))
+    }
+
+    fn spawn_worker(
+        worker: tokio::task::JoinHandle<std::result::Result<(), SpaceRuntimeFailureCategory>>,
+        report_failure: SpaceRuntimeFailureCallback,
+    ) -> Self {
+        Self::spawn_worker_with_terminal_observer(worker, report_failure, None)
+    }
+
+    fn spawn_worker_with_terminal_observer(
+        mut worker: tokio::task::JoinHandle<std::result::Result<(), SpaceRuntimeFailureCategory>>,
+        report_failure: SpaceRuntimeFailureCallback,
+        terminal_observed: Option<Arc<tokio::sync::Notify>>,
+    ) -> Self {
+        let (cancel, cancelled) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            tokio::select! {
+                biased;
+                _ = cancelled => {
+                    worker.abort();
+                    let _ = worker.await;
+                }
+                outcome = &mut worker => {
+                    let category = match outcome {
+                        Ok(Err(category)) => category,
+                        Ok(Ok(())) | Err(_) => SpaceRuntimeFailureCategory::Runtime,
+                    };
+                    if let Some(terminal_observed) = terminal_observed {
+                        terminal_observed.notify_one();
+                    }
+                    // Run the callback outside this monitor task. The supervisor
+                    // shuts down the runtime (and joins this task) while handling
+                    // the report, so awaiting inline would self-join.
+                    tokio::spawn(async move {
+                        let _ = report_failure(category).await;
+                    });
+                }
+            }
+        });
+        Self {
+            cancel: Some(cancel),
+            task,
+        }
+    }
+
+    async fn shutdown(mut self) {
+        if let Some(cancel) = self.cancel.take() {
+            let _ = cancel.send(());
+        }
+        let _ = self.task.await;
+    }
+}
+
+struct HarmonyProfileRuntime {
+    runtime: CliAppRuntime,
+    _generation: u64,
+    monitor: Option<HarmonyRuntimeMonitor>,
+    ingest_worker_health: Option<uc_application::facade::IngestWorkerExitSubscription>,
+    ingest_worker_exit: Option<uc_application::facade::IngestWorkerExitSubscription>,
+    monitor_worker:
+        Option<tokio::task::JoinHandle<std::result::Result<(), SpaceRuntimeFailureCategory>>>,
+    report_failure: Option<SpaceRuntimeFailureCallback>,
+    device_type: String,
+}
+
+impl SupervisedSpaceRuntime for HarmonyProfileRuntime {
+    fn activate_and_commit(
+        &mut self,
+        commit_running: &mut dyn FnMut(),
+    ) -> std::result::Result<(), SpaceRuntimeFailureCategory> {
+        let mut ingest_worker_exit = self
+            .ingest_worker_exit
+            .take()
+            .expect("Harmony ingest worker monitor activates exactly once");
+        self.monitor_worker = Some(tokio::spawn(async move {
+            let _ = ingest_worker_exit.recv().await;
+            Err(SpaceRuntimeFailureCategory::Runtime)
+        }));
+        self.monitor = Some(HarmonyRuntimeMonitor::activate_worker(
+            &mut self.monitor_worker,
+            &mut self.report_failure,
+        )?);
+        let health = self
+            .ingest_worker_health
+            .take()
+            .expect("Harmony ingest worker health activates exactly once");
+        if health.current_exit().is_some() {
+            return Err(SpaceRuntimeFailureCategory::Runtime);
+        }
+        health
+            .commit_running(commit_running)
+            .map_err(|_| SpaceRuntimeFailureCategory::Runtime)
+    }
+
+    fn app_facade(&self) -> Option<Arc<uc_application::facade::AppFacade>> {
+        Some(Arc::clone(&self.runtime.app_facade))
+    }
+
+    fn device_type(&self) -> Option<String> {
+        Some(self.device_type.clone())
+    }
+
+    fn shutdown(self: Box<Self>) -> SpaceRuntimeFuture<()> {
+        Box::pin(async move {
+            let Self {
+                runtime,
+                monitor,
+                monitor_worker,
+                ..
+            } = *self;
+            if let Some(monitor) = monitor {
+                monitor.shutdown().await;
+            } else if let Some(worker) = monitor_worker {
+                worker.abort();
+                let _ = worker.await;
+            }
+            runtime.shutdown().await;
+        })
+    }
+}
+
+impl SpaceRuntimeFactory for HarmonyProfileRuntimeFactory {
+    fn create(
+        &self,
+        config: SpaceRuntimeProfileConfig,
+        generation: u64,
+        report_failure: SpaceRuntimeFailureCallback,
+    ) -> SpaceRuntimeFuture<
+        std::result::Result<Box<dyn SupervisedSpaceRuntime>, SpaceRuntimeFailureCategory>,
+    > {
+        Box::pin(async move {
+            let profile = CliAppRuntimeProfileConfig::builder(config.profile_id.to_string())
+                .data_root(config.data_root)
+                .cache_root(config.cache_root)
+                .secure_storage_namespace(config.namespace)
+                .build()
+                .map_err(|_| SpaceRuntimeFailureCategory::Bootstrap)?;
+            let runtime = uc_bootstrap::build_cli_app_runtime_for_profile(&profile, None)
+                .await
+                .map_err(|_| SpaceRuntimeFailureCategory::Bootstrap)?;
+            runtime
+                .app_facade
+                .try_resume_session()
+                .await
+                .map_err(|_| SpaceRuntimeFailureCategory::Runtime)?;
+            let ingest_worker_health = runtime
+                .subscribe_ingest_worker_exit()
+                .ok_or(SpaceRuntimeFailureCategory::Runtime)?;
+            let ingest_worker_exit = runtime
+                .subscribe_ingest_worker_exit()
+                .ok_or(SpaceRuntimeFailureCategory::Runtime)?;
+            Ok(Box::new(HarmonyProfileRuntime {
+                runtime,
+                _generation: generation,
+                monitor: None,
+                ingest_worker_health: Some(ingest_worker_health),
+                ingest_worker_exit: Some(ingest_worker_exit),
+                monitor_worker: None,
+                report_failure: Some(report_failure),
+                device_type: config.device_type,
+            }) as Box<dyn SupervisedSpaceRuntime>)
+        })
+    }
+}
+
+fn profile_space_supervisor() -> &'static Arc<SpaceRuntimeSupervisor> {
+    PROFILE_SPACE_SUPERVISOR
+        .get_or_init(|| SpaceRuntimeSupervisor::new(Arc::new(HarmonyProfileRuntimeFactory)))
+}
+
+fn build_profile_runtime_config(
+    profile_id: &str,
+    data_dir: &str,
+    cache_dir: &str,
+    device_type: &str,
+) -> Result<SpaceRuntimeProfileConfig> {
+    let namespace = CliAppRuntimeProfileConfig::namespace_for_profile(profile_id)
+        .map_err(|error| Error::new(Status::InvalidArg, error.to_string()))?;
+    let data_root = std::path::PathBuf::from(data_dir);
+    let cache_root = std::path::PathBuf::from(cache_dir);
+    let profile = CliAppRuntimeProfileConfig::builder(profile_id)
+        .data_root(data_root)
+        .cache_root(cache_root)
+        .secure_storage_namespace(namespace.clone())
+        .create_and_build()
+        .map_err(|error| Error::new(Status::InvalidArg, error.to_string()))?;
+
+    Ok(SpaceRuntimeProfileConfig {
+        profile_id: ProfileId::from(profile_id),
+        data_root: profile.data_root().to_path_buf(),
+        cache_root: profile.cache_root().to_path_buf(),
+        namespace,
+        device_type: normalize_device_type(device_type),
+    })
+}
+
+fn profile_lifecycle_name(lifecycle: SpaceRuntimeLifecycle) -> &'static str {
+    match lifecycle {
+        SpaceRuntimeLifecycle::Starting => "starting",
+        SpaceRuntimeLifecycle::Running => "running",
+        SpaceRuntimeLifecycle::Stopping => "stopping",
+        SpaceRuntimeLifecycle::Failed => "failed",
+        SpaceRuntimeLifecycle::Stopped => "stopped",
+    }
+}
+
+fn profile_failure_name(failure: Option<SpaceRuntimeFailureCategory>) -> &'static str {
+    match failure {
+        Some(SpaceRuntimeFailureCategory::Bootstrap) => "bootstrap",
+        Some(SpaceRuntimeFailureCategory::Runtime) => "runtime",
+        Some(SpaceRuntimeFailureCategory::Storage) => "storage",
+        Some(SpaceRuntimeFailureCategory::Network) => "network",
+        Some(SpaceRuntimeFailureCategory::ProfileConflict) => "profile_conflict",
+        Some(SpaceRuntimeFailureCategory::Superseded) => "superseded",
+        None => "",
+    }
+}
+
+async fn current_profile_space_status(profile_id: &ProfileId) -> Result<NativeProfileSpaceStatus> {
+    let status = profile_space_supervisor()
+        .status(profile_id)
+        .unwrap_or_else(|| SpaceRuntimeStatus {
+            profile_id: profile_id.clone(),
+            generation: 0,
+            lifecycle: SpaceRuntimeLifecycle::Stopped,
+            last_failure: None,
+        });
+    let mut native = NativeProfileSpaceStatus {
+        profile_id: profile_id.to_string(),
+        generation: status.generation as f64,
+        lifecycle: profile_lifecycle_name(status.lifecycle).to_string(),
+        last_failure: profile_failure_name(status.last_failure).to_string(),
+        running: status.lifecycle == SpaceRuntimeLifecycle::Running,
+        joined: false,
+        device_name: String::new(),
+        space_id: String::new(),
+    };
+    let Some(app_facade) = profile_space_supervisor().app_facade(profile_id) else {
+        return Ok(native);
+    };
+    let setup =
+        app_facade.space_setup.get().cloned().ok_or_else(|| {
+            Error::new(Status::GenericFailure, "space setup service is unavailable")
+        })?;
+    let state = setup.query_setup_state().await.map_err(space_error)?;
+    native.joined = state.has_completed;
+    native.device_name = state.device_name.unwrap_or_default();
+    native.space_id = state
+        .space_id
+        .map(|space_id| space_id.to_string())
+        .unwrap_or_default();
+    Ok(native)
 }
 
 fn cancel_sse_subscription() {
@@ -802,9 +1111,8 @@ fn native_history_item(record: HistoryRecord) -> NativeHistoryItem {
 
 #[napi]
 pub fn parse_connect_uri(uri: String) -> Result<ConnectPayload> {
-    let payload = uc_mobile_proto::parse_mobile_sync_connect_uri(&uri).map_err(|error| {
-        Error::new(Status::InvalidArg, error.to_string())
-    })?;
+    let payload = uc_mobile_proto::parse_mobile_sync_connect_uri(&uri)
+        .map_err(|error| Error::new(Status::InvalidArg, error.to_string()))?;
 
     Ok(ConnectPayload {
         url: payload.url,
@@ -817,6 +1125,198 @@ pub fn parse_connect_uri(uri: String) -> Result<ConnectPayload> {
 #[napi]
 pub fn sha256_hex_upper(text: String) -> String {
     uc_mobile_proto::sha256_hex_upper(text.as_bytes())
+}
+
+/// Start one explicitly-scoped HarmonyOS runtime. `data_dir` and `cache_dir`
+/// are the final roots for this profile, not process-wide base directories.
+#[napi]
+pub async fn start_space_node_for_profile(
+    profile_id: String,
+    data_dir: String,
+    cache_dir: String,
+    device_type: String,
+) -> Result<NativeProfileSpaceStatus> {
+    let config = build_profile_runtime_config(
+        profile_id.trim(),
+        data_dir.trim(),
+        cache_dir.trim(),
+        &device_type,
+    )?;
+    let profile_id = config.profile_id.clone();
+    profile_space_supervisor()
+        .start(config)
+        .await
+        .map_err(|error| {
+            Error::new(
+                Status::GenericFailure,
+                format!(
+                    "profile {} generation {} failed to start: {}",
+                    error.profile_id,
+                    error.generation,
+                    profile_failure_name(Some(error.category))
+                ),
+            )
+        })?;
+    current_profile_space_status(&profile_id).await
+}
+
+#[napi]
+pub async fn get_space_status_for_profile(profile_id: String) -> Result<NativeProfileSpaceStatus> {
+    CliAppRuntimeProfileConfig::namespace_for_profile(profile_id.trim())
+        .map_err(|error| Error::new(Status::InvalidArg, error.to_string()))?;
+    current_profile_space_status(&ProfileId::from(profile_id.trim())).await
+}
+
+#[napi]
+pub async fn stop_space_node_for_profile(profile_id: String) -> Result<NativeProfileSpaceStatus> {
+    CliAppRuntimeProfileConfig::namespace_for_profile(profile_id.trim())
+        .map_err(|error| Error::new(Status::InvalidArg, error.to_string()))?;
+    let profile_id = ProfileId::from(profile_id.trim());
+    profile_space_supervisor().stop(&profile_id).await;
+    current_profile_space_status(&profile_id).await
+}
+
+fn profile_runtime_for<T>(
+    profile_id: &str,
+    resolve: impl FnOnce(&ProfileId) -> Option<T>,
+) -> Result<(ProfileId, T)> {
+    let profile_id = validated_profile_id(profile_id)?;
+    let runtime = resolve(&profile_id).ok_or_else(|| {
+        Error::new(
+            Status::GenericFailure,
+            format!("space profile {profile_id} is not running"),
+        )
+    })?;
+    Ok((profile_id, runtime))
+}
+
+fn profile_app_facade(
+    profile_id: &str,
+) -> Result<(ProfileId, Arc<uc_application::facade::AppFacade>)> {
+    profile_runtime_for(profile_id, |profile_id| {
+        profile_space_supervisor().app_facade(profile_id)
+    })
+}
+
+#[napi]
+pub async fn issue_space_invitation_for_profile(
+    profile_id: String,
+) -> Result<NativeSpaceInvitation> {
+    let (_, app_facade) = profile_app_facade(profile_id.trim())?;
+    let result = app_facade
+        .issue_pairing_invitation()
+        .await
+        .map_err(space_error)?;
+    Ok(NativeSpaceInvitation {
+        code: result.code.as_str().to_string(),
+        expires_at_ms: result.expires_at.timestamp_millis() as f64,
+    })
+}
+
+#[napi]
+pub async fn join_space_for_profile(
+    profile_id: String,
+    invitation_code: String,
+    passphrase: String,
+    device_name: String,
+) -> Result<NativeJoinSpaceResult> {
+    let code = invitation_code.trim().to_ascii_uppercase();
+    let name = device_name.trim().to_string();
+    if code.is_empty() || passphrase.is_empty() || name.is_empty() {
+        return Err(Error::new(
+            Status::InvalidArg,
+            "invitation code, space passphrase, and device name are required",
+        ));
+    }
+    let (_, app_facade) = profile_app_facade(profile_id.trim())?;
+    app_facade
+        .set_device_name(name)
+        .await
+        .map_err(space_error)?;
+    let result = app_facade
+        .redeem_pairing_invitation(RedeemPairingInvitationInput { code, passphrase })
+        .await
+        .map_err(space_error)?;
+    Ok(NativeJoinSpaceResult {
+        space_id: result.space_id.to_string(),
+        sponsor_device_id: result.sponsor_device_id.to_string(),
+        self_device_id: result.self_device_id.to_string(),
+    })
+}
+
+#[napi]
+pub async fn send_space_text_for_profile(profile_id: String, text: String) -> Result<u32> {
+    let (_, app_facade) = profile_app_facade(profile_id.trim())?;
+    dispatch_space_text_with_filter(app_facade, text, None).await
+}
+
+#[napi]
+pub async fn get_space_devices_for_profile(profile_id: String) -> Result<Vec<NativeSpaceDevice>> {
+    let (profile_id, app_facade) = profile_app_facade(profile_id.trim())?;
+    let local = app_facade
+        .device
+        .local_device_info()
+        .await
+        .map_err(space_error)?;
+    let local_type = profile_space_supervisor()
+        .device_type(&profile_id)
+        .unwrap_or_else(|| "unknown".to_string());
+    let entries = app_facade
+        .list_roster_entries()
+        .await
+        .map_err(space_error)?;
+    let peer_snapshots = app_facade
+        .list_peer_snapshots()
+        .await
+        .map_err(space_error)?;
+    let mut devices = Vec::with_capacity(entries.len() + 1);
+    let mut has_local = false;
+    for entry in entries {
+        if entry.is_local {
+            has_local = true;
+        }
+        let channel = if entry.is_local {
+            "direct".to_string()
+        } else {
+            peer_snapshots
+                .iter()
+                .find(|snapshot| snapshot.peer_id == entry.device_id.as_str())
+                .map(|snapshot| connection_channel_to_wire(snapshot.channel).to_string())
+                .unwrap_or_else(|| "unknown".to_string())
+        };
+        devices.push(NativeSpaceDevice {
+            device_id: entry.device_id.to_string(),
+            device_name: entry.device_name,
+            device_type: if entry.is_local {
+                local_type.clone()
+            } else {
+                "unknown".to_string()
+            },
+            is_local: entry.is_local,
+            online: entry.is_local || entry.state == ReachabilityState::Online,
+            state: if entry.is_local {
+                "online".to_string()
+            } else {
+                reachability_name(entry.state)
+            },
+            channel,
+        });
+    }
+    if !has_local {
+        devices.insert(
+            0,
+            NativeSpaceDevice {
+                device_id: local.peer_id,
+                device_name: local.device_name,
+                device_type: local_type,
+                is_local: true,
+                online: true,
+                state: "online".to_string(),
+                channel: "direct".to_string(),
+            },
+        );
+    }
+    Ok(devices)
 }
 
 /// Start the embedded UniClipboard P2P node inside the HarmonyOS application
@@ -875,9 +1375,7 @@ pub async fn start_space_node(
             let background_active = SPACE_BACKGROUND_SYNC_ACTIVE.load(Ordering::Acquire);
             let periodic_force_verify = if background_active {
                 match last_background_verify {
-                    Some(last_verify) => {
-                        last_verify.elapsed() >= SPACE_BACKGROUND_VERIFY_INTERVAL
-                    }
+                    Some(last_verify) => last_verify.elapsed() >= SPACE_BACKGROUND_VERIFY_INTERVAL,
                     None => true,
                 }
             } else {
@@ -933,12 +1431,11 @@ pub async fn start_space_node(
             if notice.action != InboundAction::NewEntry {
                 continue;
             }
-            let (snapshot, blob_refs) = match
-                decode_v3_bytes_to_snapshot_and_blob_refs(notice.plaintext.as_ref())
-            {
-                Ok(decoded) => decoded,
-                Err(_) => continue,
-            };
+            let (snapshot, blob_refs) =
+                match decode_v3_bytes_to_snapshot_and_blob_refs(notice.plaintext.as_ref()) {
+                    Ok(decoded) => decoded,
+                    Err(_) => continue,
+                };
             if !blob_refs.is_empty() {
                 for blob_ref in blob_refs {
                     if blob_ref.representation_index.is_some() {
@@ -1020,7 +1517,8 @@ pub async fn start_space_node(
                     }
                     let transfer_id = u64::from_le_bytes(bytes[1..9].try_into().unwrap());
                     let chunk_index = u32::from_le_bytes(bytes[9..13].try_into().unwrap()) as usize;
-                    let chunk_count = u32::from_le_bytes(bytes[13..17].try_into().unwrap()) as usize;
+                    let chunk_count =
+                        u32::from_le_bytes(bytes[13..17].try_into().unwrap()) as usize;
                     let total_size = u64::from_le_bytes(bytes[17..25].try_into().unwrap()) as usize;
                     let name_len = u16::from_le_bytes(bytes[25..27].try_into().unwrap()) as usize;
                     let expected_chunk_count = total_size.div_ceil(SPACE_FILE_CHUNK_BYTES);
@@ -1060,15 +1558,16 @@ pub async fn start_space_node(
                         assemblies.retain(|_, assembly| {
                             now_ms.saturating_sub(assembly.updated_at_ms) < 5 * 60 * 1000
                         });
-                        let assembly = assemblies.entry(assembly_key.clone()).or_insert_with(|| {
-                            SpaceFileAssembly {
-                                file_name: file_name.clone(),
-                                total_size,
-                                chunks: vec![None; chunk_count],
-                                received_chunks: 0,
-                                updated_at_ms: now_ms,
-                            }
-                        });
+                        let assembly =
+                            assemblies.entry(assembly_key.clone()).or_insert_with(|| {
+                                SpaceFileAssembly {
+                                    file_name: file_name.clone(),
+                                    total_size,
+                                    chunks: vec![None; chunk_count],
+                                    received_chunks: 0,
+                                    updated_at_ms: now_ms,
+                                }
+                            });
                         if assembly.total_size != total_size
                             || assembly.chunks.len() != chunk_count
                             || assembly.file_name != file_name
@@ -1343,11 +1842,21 @@ pub async fn get_space_devices() -> Result<Vec<NativeSpaceDevice>> {
             .map(|runtime| runtime.app_facade.clone())
             .ok_or_else(|| Error::new(Status::GenericFailure, "space node has not been started"))?
     };
-    let local = app_facade.device.local_device_info().await.map_err(space_error)?;
+    let local = app_facade
+        .device
+        .local_device_info()
+        .await
+        .map_err(space_error)?;
     let local_type = current_local_device_type();
     let _ = set_known_device_type(local.peer_id.clone(), local_type.clone());
-    let entries = app_facade.list_roster_entries().await.map_err(space_error)?;
-    let peer_snapshots = app_facade.list_peer_snapshots().await.map_err(space_error)?;
+    let entries = app_facade
+        .list_roster_entries()
+        .await
+        .map_err(space_error)?;
+    let peer_snapshots = app_facade
+        .list_peer_snapshots()
+        .await
+        .map_err(space_error)?;
     let mut devices = Vec::with_capacity(entries.len() + 1);
     let mut has_local = false;
     let mut has_online_peer = false;
@@ -1429,7 +1938,10 @@ pub async fn get_space_member_sync_preferences(
 ) -> Result<NativeSpaceMemberSyncPreferences> {
     let trimmed = device_id.trim();
     if trimmed.is_empty() {
-        return Err(Error::new(Status::InvalidArg, "space device id is required"));
+        return Err(Error::new(
+            Status::InvalidArg,
+            "space device id is required",
+        ));
     }
     let member_roster = {
         let guard = space_runtime().lock().await;
@@ -1464,7 +1976,10 @@ pub async fn update_space_member_send_preferences(
 ) -> Result<NativeSpaceMemberSyncPreferences> {
     let trimmed = device_id.trim();
     if trimmed.is_empty() {
-        return Err(Error::new(Status::InvalidArg, "space device id is required"));
+        return Err(Error::new(
+            Status::InvalidArg,
+            "space device id is required",
+        ));
     }
     let member_roster = {
         let guard = space_runtime().lock().await;
@@ -1507,7 +2022,10 @@ pub async fn reset_space_member_sync_preferences(
 ) -> Result<NativeSpaceMemberSyncPreferences> {
     let trimmed = device_id.trim();
     if trimmed.is_empty() {
-        return Err(Error::new(Status::InvalidArg, "space device id is required"));
+        return Err(Error::new(
+            Status::InvalidArg,
+            "space device id is required",
+        ));
     }
     let member_roster = {
         let guard = space_runtime().lock().await;
@@ -1583,9 +2101,7 @@ pub async fn create_space(
         guard
             .as_ref()
             .map(|runtime| runtime.app_facade.clone())
-            .ok_or_else(|| {
-                Error::new(Status::GenericFailure, "space node has not been started")
-            })?
+            .ok_or_else(|| Error::new(Status::GenericFailure, "space node has not been started"))?
     };
     let result = app_facade
         .initialize_space(InitializeSpaceInput {
@@ -1609,9 +2125,7 @@ pub async fn issue_space_invitation() -> Result<NativeSpaceInvitation> {
         guard
             .as_ref()
             .map(|runtime| runtime.app_facade.clone())
-            .ok_or_else(|| {
-                Error::new(Status::GenericFailure, "space node has not been started")
-            })?
+            .ok_or_else(|| Error::new(Status::GenericFailure, "space node has not been started"))?
     };
     let result = app_facade
         .issue_pairing_invitation()
@@ -1642,9 +2156,7 @@ pub async fn join_space(
         guard
             .as_ref()
             .map(|runtime| runtime.app_facade.clone())
-            .ok_or_else(|| {
-                Error::new(Status::GenericFailure, "space node has not been started")
-            })?
+            .ok_or_else(|| Error::new(Status::GenericFailure, "space node has not been started"))?
     };
     app_facade
         .set_device_name(name)
@@ -1682,9 +2194,7 @@ pub async fn switch_space(
         guard
             .as_ref()
             .map(|runtime| runtime.app_facade.clone())
-            .ok_or_else(|| {
-                Error::new(Status::GenericFailure, "space node has not been started")
-            })?
+            .ok_or_else(|| Error::new(Status::GenericFailure, "space node has not been started"))?
     };
     let result = app_facade
         .switch_space(SwitchSpaceInput {
@@ -1727,9 +2237,7 @@ pub async fn replace_space(
         guard
             .as_ref()
             .map(|runtime| runtime.app_facade.clone())
-            .ok_or_else(|| {
-                Error::new(Status::GenericFailure, "space node has not been started")
-            })?
+            .ok_or_else(|| Error::new(Status::GenericFailure, "space node has not been started"))?
     };
 
     // Snapshot peer ids before reset. The local owner row is retained and
@@ -1771,7 +2279,8 @@ pub async fn replace_space(
 
 /// Dispatch UTF-8 text through the joined UniClipboard space. The return
 /// value is the number of online peers that accepted the encrypted frame.
-async fn send_space_text_with_filter(
+async fn dispatch_space_text_with_filter(
+    app_facade: Arc<uc_application::facade::AppFacade>,
     text: String,
     target_filter: Option<Vec<DeviceId>>,
 ) -> Result<u32> {
@@ -1784,13 +2293,6 @@ async fn send_space_text_with_filter(
             "clipboard text exceeds the 1 MiB inline limit",
         ));
     }
-    let app_facade = {
-        let guard = space_runtime().lock().await;
-        guard
-            .as_ref()
-            .map(|runtime| runtime.app_facade.clone())
-            .ok_or_else(|| Error::new(Status::GenericFailure, "space node has not been started"))?
-    };
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(space_error)?
@@ -1799,10 +2301,7 @@ async fn send_space_text_with_filter(
     // Presence is intentionally cached by the core dispatch path. Refresh it
     // for an explicit user send so a peer that came online after app startup
     // is dialed before the online-only fan-out selects its targets.
-    app_facade
-        .refresh_presence()
-        .await
-        .map_err(space_error)?;
+    app_facade.refresh_presence().await.map_err(space_error)?;
     let snapshot = SystemClipboardSnapshot {
         ts_ms: now_ms,
         representations: vec![ObservedClipboardRepresentation::new(
@@ -1815,14 +2314,24 @@ async fn send_space_text_with_filter(
         file_set_v1_component: None,
     };
     let outcome = app_facade
-        .dispatch_clipboard_snapshot(
-            snapshot,
-            ClipboardChangeOrigin::LocalCapture,
-            target_filter,
-        )
+        .dispatch_clipboard_snapshot(snapshot, ClipboardChangeOrigin::LocalCapture, target_filter)
         .await
         .map_err(space_error)?;
     Ok(outcome.total_accepted.min(u32::MAX as usize) as u32)
+}
+
+async fn send_space_text_with_filter(
+    text: String,
+    target_filter: Option<Vec<DeviceId>>,
+) -> Result<u32> {
+    let app_facade = {
+        let guard = space_runtime().lock().await;
+        guard
+            .as_ref()
+            .map(|runtime| runtime.app_facade.clone())
+            .ok_or_else(|| Error::new(Status::GenericFailure, "space node has not been started"))?
+    };
+    dispatch_space_text_with_filter(app_facade, text, target_filter).await
 }
 
 #[napi]
@@ -1834,20 +2343,27 @@ pub async fn send_space_text(text: String) -> Result<u32> {
 pub async fn send_space_text_to_device(text: String, device_id: String) -> Result<u32> {
     let target = device_id.trim();
     if target.is_empty() {
-        return Err(Error::new(Status::InvalidArg, "target device id is required"));
+        return Err(Error::new(
+            Status::InvalidArg,
+            "target device id is required",
+        ));
     }
     send_space_text_with_filter(text, Some(vec![DeviceId::new(target)])).await
 }
 
 /// Dispatch a compressed image through the joined UniClipboard space. The
 /// HarmonyOS layer keeps this payload below the encrypted wire inline limit.
-async fn send_space_image_with_filter(
+async fn dispatch_space_image_with_filter(
+    app_facade: Arc<uc_application::facade::AppFacade>,
     data: Uint8Array,
     mime_type: String,
     target_filter: Option<Vec<DeviceId>>,
 ) -> Result<u32> {
     if data.is_empty() {
-        return Err(Error::new(Status::InvalidArg, "clipboard image is required"));
+        return Err(Error::new(
+            Status::InvalidArg,
+            "clipboard image is required",
+        ));
     }
     if data.len() > MAX_SPACE_IMAGE_BYTES {
         return Err(Error::new(
@@ -1857,24 +2373,17 @@ async fn send_space_image_with_filter(
     }
     let normalized_mime = mime_type.trim().to_ascii_lowercase();
     if normalized_mime != "image/jpeg" && normalized_mime != "image/png" {
-        return Err(Error::new(Status::InvalidArg, "unsupported clipboard image type"));
+        return Err(Error::new(
+            Status::InvalidArg,
+            "unsupported clipboard image type",
+        ));
     }
-    let app_facade = {
-        let guard = space_runtime().lock().await;
-        guard
-            .as_ref()
-            .map(|runtime| runtime.app_facade.clone())
-            .ok_or_else(|| Error::new(Status::GenericFailure, "space node has not been started"))?
-    };
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(space_error)?
         .as_millis()
         .min(i64::MAX as u128) as i64;
-    app_facade
-        .refresh_presence()
-        .await
-        .map_err(space_error)?;
+    app_facade.refresh_presence().await.map_err(space_error)?;
     let snapshot = SystemClipboardSnapshot {
         ts_ms: now_ms,
         representations: vec![ObservedClipboardRepresentation::new(
@@ -1887,19 +2396,40 @@ async fn send_space_image_with_filter(
         file_set_v1_component: None,
     };
     let outcome = app_facade
-        .dispatch_clipboard_snapshot(
-            snapshot,
-            ClipboardChangeOrigin::LocalCapture,
-            target_filter,
-        )
+        .dispatch_clipboard_snapshot(snapshot, ClipboardChangeOrigin::LocalCapture, target_filter)
         .await
         .map_err(space_error)?;
     Ok(outcome.total_accepted.min(u32::MAX as usize) as u32)
 }
 
+async fn send_space_image_with_filter(
+    data: Uint8Array,
+    mime_type: String,
+    target_filter: Option<Vec<DeviceId>>,
+) -> Result<u32> {
+    let app_facade = {
+        let guard = space_runtime().lock().await;
+        guard
+            .as_ref()
+            .map(|runtime| runtime.app_facade.clone())
+            .ok_or_else(|| Error::new(Status::GenericFailure, "space node has not been started"))?
+    };
+    dispatch_space_image_with_filter(app_facade, data, mime_type, target_filter).await
+}
+
 #[napi]
 pub async fn send_space_image(data: Uint8Array, mime_type: String) -> Result<u32> {
     send_space_image_with_filter(data, mime_type, None).await
+}
+
+#[napi]
+pub async fn send_space_image_for_profile(
+    profile_id: String,
+    data: Uint8Array,
+    mime_type: String,
+) -> Result<u32> {
+    let (_, app_facade) = profile_app_facade(&profile_id)?;
+    dispatch_space_image_with_filter(app_facade, data, mime_type, None).await
 }
 
 #[napi]
@@ -1910,14 +2440,19 @@ pub async fn send_space_image_to_device(
 ) -> Result<u32> {
     let target = device_id.trim();
     if target.is_empty() {
-        return Err(Error::new(Status::InvalidArg, "target device id is required"));
+        return Err(Error::new(
+            Status::InvalidArg,
+            "target device id is required",
+        ));
     }
     send_space_image_with_filter(data, mime_type, Some(vec![DeviceId::new(target)])).await
 }
 
-/// Dispatch one user-selected file through the joined encrypted space in bounded chunks.
-#[napi]
-pub async fn send_space_file(data: Uint8Array, file_name: String) -> Result<u32> {
+async fn dispatch_space_file(
+    app_facade: Arc<uc_application::facade::AppFacade>,
+    data: Uint8Array,
+    file_name: String,
+) -> Result<u32> {
     if data.is_empty() {
         return Err(Error::new(Status::InvalidArg, "file data is required"));
     }
@@ -1934,15 +2469,11 @@ pub async fn send_space_file(data: Uint8Array, file_name: String) -> Result<u32>
     }
     let chunk_count = data.len().div_ceil(SPACE_FILE_CHUNK_BYTES);
     if chunk_count > 128 {
-        return Err(Error::new(Status::InvalidArg, "file requires too many chunks"));
+        return Err(Error::new(
+            Status::InvalidArg,
+            "file requires too many chunks",
+        ));
     }
-    let app_facade = {
-        let guard = space_runtime().lock().await;
-        guard
-            .as_ref()
-            .map(|runtime| runtime.app_facade.clone())
-            .ok_or_else(|| Error::new(Status::GenericFailure, "space node has not been started"))?
-    };
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(space_error)?
@@ -1956,7 +2487,8 @@ pub async fn send_space_file(data: Uint8Array, file_name: String) -> Result<u32>
         let chunk_start = chunk_index * SPACE_FILE_CHUNK_BYTES;
         let chunk_end = (chunk_start + SPACE_FILE_CHUNK_BYTES).min(data.len());
         let chunk = &data.as_ref()[chunk_start..chunk_end];
-        let mut payload = Vec::with_capacity(SPACE_FILE_HEADER_BYTES + name_bytes.len() + chunk.len());
+        let mut payload =
+            Vec::with_capacity(SPACE_FILE_HEADER_BYTES + name_bytes.len() + chunk.len());
         payload.push(1);
         payload.extend_from_slice(&transfer_id.to_le_bytes());
         payload.extend_from_slice(&(chunk_index as u32).to_le_bytes());
@@ -1988,23 +2520,9 @@ pub async fn send_space_file(data: Uint8Array, file_name: String) -> Result<u32>
     Ok(minimum_accepted.min(u32::MAX as usize) as u32)
 }
 
-/// Publish a user-selected file through iroh-blobs using its open HarmonyOS
-/// file descriptor.  The descriptor remains owned by ArkTS and is never
-/// closed here; `/proc/self/fd/<n>` lets iroh stream/copy it without loading
-/// the full file into memory.
-async fn send_space_file_from_fd_with_filter(
-    fd: i32,
-    file_size: f64,
-    file_name: String,
-    target_filter: Option<Vec<DeviceId>>,
-) -> Result<NativeSpaceFileSendResult> {
-    if fd < 0 || !file_size.is_finite() || file_size <= 0.0 {
-        return Err(Error::new(Status::InvalidArg, "valid non-empty file is required"));
-    }
-    let normalized_name = file_name.trim();
-    if normalized_name.is_empty() {
-        return Err(Error::new(Status::InvalidArg, "valid file name is required"));
-    }
+/// Dispatch one user-selected file through the joined encrypted space in bounded chunks.
+#[napi]
+pub async fn send_space_file(data: Uint8Array, file_name: String) -> Result<u32> {
     let app_facade = {
         let guard = space_runtime().lock().await;
         guard
@@ -2012,6 +2530,43 @@ async fn send_space_file_from_fd_with_filter(
             .map(|runtime| runtime.app_facade.clone())
             .ok_or_else(|| Error::new(Status::GenericFailure, "space node has not been started"))?
     };
+    dispatch_space_file(app_facade, data, file_name).await
+}
+
+#[napi]
+pub async fn send_space_file_for_profile(
+    profile_id: String,
+    data: Uint8Array,
+    file_name: String,
+) -> Result<u32> {
+    let (_, app_facade) = profile_app_facade(&profile_id)?;
+    dispatch_space_file(app_facade, data, file_name).await
+}
+
+/// Publish a user-selected file through iroh-blobs using its open HarmonyOS
+/// file descriptor.  The descriptor remains owned by ArkTS and is never
+/// closed here; `/proc/self/fd/<n>` lets iroh stream/copy it without loading
+/// the full file into memory.
+async fn dispatch_space_file_from_fd_with_filter(
+    app_facade: Arc<uc_application::facade::AppFacade>,
+    fd: i32,
+    file_size: f64,
+    file_name: String,
+    target_filter: Option<Vec<DeviceId>>,
+) -> Result<NativeSpaceFileSendResult> {
+    if fd < 0 || !file_size.is_finite() || file_size <= 0.0 {
+        return Err(Error::new(
+            Status::InvalidArg,
+            "valid non-empty file is required",
+        ));
+    }
+    let normalized_name = file_name.trim();
+    if normalized_name.is_empty() {
+        return Err(Error::new(
+            Status::InvalidArg,
+            "valid file name is required",
+        ));
+    }
     let fd_path = std::path::PathBuf::from(format!("/proc/self/fd/{fd}"));
     let metadata = tokio::fs::metadata(&fd_path).await.map_err(space_error)?;
     if metadata.len() == 0 {
@@ -2067,6 +2622,23 @@ async fn send_space_file_from_fd_with_filter(
     })
 }
 
+async fn send_space_file_from_fd_with_filter(
+    fd: i32,
+    file_size: f64,
+    file_name: String,
+    target_filter: Option<Vec<DeviceId>>,
+) -> Result<NativeSpaceFileSendResult> {
+    let app_facade = {
+        let guard = space_runtime().lock().await;
+        guard
+            .as_ref()
+            .map(|runtime| runtime.app_facade.clone())
+            .ok_or_else(|| Error::new(Status::GenericFailure, "space node has not been started"))?
+    };
+    dispatch_space_file_from_fd_with_filter(app_facade, fd, file_size, file_name, target_filter)
+        .await
+}
+
 #[napi]
 pub async fn send_space_file_from_fd(
     fd: i32,
@@ -2074,6 +2646,17 @@ pub async fn send_space_file_from_fd(
     file_name: String,
 ) -> Result<NativeSpaceFileSendResult> {
     send_space_file_from_fd_with_filter(fd, file_size, file_name, None).await
+}
+
+#[napi]
+pub async fn send_space_file_from_fd_for_profile(
+    profile_id: String,
+    fd: i32,
+    file_size: f64,
+    file_name: String,
+) -> Result<NativeSpaceFileSendResult> {
+    let (_, app_facade) = profile_app_facade(&profile_id)?;
+    dispatch_space_file_from_fd_with_filter(app_facade, fd, file_size, file_name, None).await
 }
 
 #[napi]
@@ -2085,22 +2668,23 @@ pub async fn send_space_file_from_fd_to_device(
 ) -> Result<NativeSpaceFileSendResult> {
     let target = device_id.trim();
     if target.is_empty() {
-        return Err(Error::new(Status::InvalidArg, "target device id is required"));
+        return Err(Error::new(
+            Status::InvalidArg,
+            "target device id is required",
+        ));
     }
-    send_space_file_from_fd_with_filter(
-        fd,
-        file_size,
-        file_name,
-        Some(vec![DeviceId::new(target)]),
-    )
-    .await
+    send_space_file_from_fd_with_filter(fd, file_size, file_name, Some(vec![DeviceId::new(target)]))
+        .await
 }
 
 /// Stream a materialized received file into an open HarmonyOS save target.
 #[napi]
 pub async fn copy_space_file_to_fd(source_path: String, target_fd: i32) -> Result<()> {
     if source_path.trim().is_empty() || target_fd < 0 {
-        return Err(Error::new(Status::InvalidArg, "source path and target fd are required"));
+        return Err(Error::new(
+            Status::InvalidArg,
+            "source path and target fd are required",
+        ));
     }
     tokio::task::spawn_blocking(move || -> std::io::Result<()> {
         let mut source = std::fs::File::open(source_path)?;
@@ -2190,6 +2774,91 @@ pub fn drain_space_file_status_events() -> Vec<NativeSpaceFileStatusEvent> {
         .collect()
 }
 
+fn validated_profile_id(profile_id: &str) -> Result<ProfileId> {
+    if profile_id != profile_id.trim() {
+        return Err(Error::new(
+            Status::InvalidArg,
+            "profile id must be supplied in canonical form",
+        ));
+    }
+    CliAppRuntimeProfileConfig::namespace_for_profile(profile_id)
+        .map_err(|error| Error::new(Status::InvalidArg, error.to_string()))?;
+    Ok(ProfileId::from(profile_id))
+}
+
+/// Drain text events owned by one supervisor profile slot. This never falls
+/// back to the legacy process-global event queue.
+#[napi]
+pub fn drain_space_text_events_for_profile(
+    profile_id: String,
+) -> Result<Vec<NativeSpaceTextEvent>> {
+    let profile_id = validated_profile_id(&profile_id)?;
+    Ok(profile_space_supervisor()
+        .drain_text_events(&profile_id)
+        .into_iter()
+        .map(|event| NativeSpaceTextEvent {
+            text: event.text,
+            from_device_id: event.from_device_id,
+            snapshot_hash: event.snapshot_hash,
+        })
+        .collect())
+}
+
+/// Drain image events owned by one supervisor profile slot.
+#[napi]
+pub fn drain_space_image_events_for_profile(
+    profile_id: String,
+) -> Result<Vec<NativeSpaceImageEvent>> {
+    let profile_id = validated_profile_id(&profile_id)?;
+    Ok(profile_space_supervisor()
+        .drain_image_events(&profile_id)
+        .into_iter()
+        .map(|event| NativeSpaceImageEvent {
+            data: event.data.into(),
+            mime_type: event.mime_type,
+            from_device_id: event.from_device_id,
+            snapshot_hash: event.snapshot_hash,
+        })
+        .collect())
+}
+
+/// Drain file events owned by one supervisor profile slot.
+#[napi]
+pub fn drain_space_file_events_for_profile(
+    profile_id: String,
+) -> Result<Vec<NativeSpaceFileEvent>> {
+    let profile_id = validated_profile_id(&profile_id)?;
+    Ok(profile_space_supervisor()
+        .drain_file_events(&profile_id)
+        .into_iter()
+        .map(|event| NativeSpaceFileEvent {
+            data: event.data.into(),
+            file_name: event.file_name,
+            from_device_id: event.from_device_id,
+            snapshot_hash: event.snapshot_hash,
+            local_path: event.local_path,
+            file_size: event.file_size as f64,
+        })
+        .collect())
+}
+
+/// Drain sender-side file status events owned by one supervisor profile slot.
+#[napi]
+pub fn drain_space_file_status_events_for_profile(
+    profile_id: String,
+) -> Result<Vec<NativeSpaceFileStatusEvent>> {
+    let profile_id = validated_profile_id(&profile_id)?;
+    Ok(profile_space_supervisor()
+        .drain_file_status_events(&profile_id)
+        .into_iter()
+        .map(|event| NativeSpaceFileStatusEvent {
+            transfer_id: event.transfer_id,
+            status: event.status,
+            reason: event.reason,
+        })
+        .collect())
+}
+
 #[napi]
 pub async fn stop_space_node() {
     mobile_sync_server::stop();
@@ -2277,7 +2946,9 @@ pub async fn get_mobile_sync_server_status() -> Result<NativeMobileSyncStatus> {
         .ok_or_else(|| Error::new(Status::GenericFailure, "mobile sync is unavailable"))?;
     let settings = facade.get_settings().await.map_err(mobile_sync_error)?;
     let port = settings.lan_port.unwrap_or(42720);
-    let urls = mobile_sync_urls(&facade, port).await.unwrap_or_else(|_| Vec::new());
+    let urls = mobile_sync_urls(&facade, port)
+        .await
+        .unwrap_or_else(|_| Vec::new());
     Ok(NativeMobileSyncStatus {
         enabled: settings.enabled,
         lan_listen_enabled: settings.lan_listen_enabled,
@@ -2289,7 +2960,10 @@ pub async fn get_mobile_sync_server_status() -> Result<NativeMobileSyncStatus> {
 
 /// Enable/disable the embedded SyncClipboard-compatible LAN HTTP server.
 #[napi]
-pub async fn set_mobile_sync_server_enabled(enabled: bool, port: u32) -> Result<NativeMobileSyncStatus> {
+pub async fn set_mobile_sync_server_enabled(
+    enabled: bool,
+    port: u32,
+) -> Result<NativeMobileSyncStatus> {
     if port == 0 || port > u32::from(u16::MAX) {
         return Err(Error::new(Status::InvalidArg, "port must be in 1..=65535"));
     }
@@ -2317,7 +2991,9 @@ pub async fn set_mobile_sync_server_enabled(enabled: bool, port: u32) -> Result<
     } else {
         mobile_sync_server::stop();
     }
-    let urls = mobile_sync_urls(&facade, port).await.unwrap_or_else(|_| Vec::new());
+    let urls = mobile_sync_urls(&facade, port)
+        .await
+        .unwrap_or_else(|_| Vec::new());
     Ok(NativeMobileSyncStatus {
         enabled,
         lan_listen_enabled: enabled,
@@ -2435,7 +3111,10 @@ pub async fn revoke_mobile_sync_device(device_id: String) -> Result<()> {
 #[napi]
 pub fn publish_mobile_sync_text(text: String) -> Result<String> {
     if mobile_sync_server::running_port() == 0 {
-        return Err(Error::new(Status::GenericFailure, "mobile sync server is not running"));
+        return Err(Error::new(
+            Status::GenericFailure,
+            "mobile sync server is not running",
+        ));
     }
     Ok(mobile_sync_server::publish_text(text))
 }
@@ -2443,7 +3122,10 @@ pub fn publish_mobile_sync_text(text: String) -> Result<String> {
 #[napi]
 pub fn publish_mobile_sync_image(data: Uint8Array, mime_type: String) -> Result<String> {
     if mobile_sync_server::running_port() == 0 {
-        return Err(Error::new(Status::GenericFailure, "mobile sync server is not running"));
+        return Err(Error::new(
+            Status::GenericFailure,
+            "mobile sync server is not running",
+        ));
     }
     Ok(mobile_sync_server::publish_data(
         "image",
@@ -2462,19 +3144,27 @@ pub fn publish_mobile_sync_file_from_fd(
     mime_type: String,
 ) -> Result<String> {
     if mobile_sync_server::running_port() == 0 {
-        return Err(Error::new(Status::GenericFailure, "mobile sync server is not running"));
+        return Err(Error::new(
+            Status::GenericFailure,
+            "mobile sync server is not running",
+        ));
     }
     if file_size <= 0.0 || file_size > (64 * 1024 * 1024) as f64 {
-        return Err(Error::new(Status::InvalidArg, "file must be between 1 byte and 64 MiB"));
+        return Err(Error::new(
+            Status::InvalidArg,
+            "file must be between 1 byte and 64 MiB",
+        ));
     }
-    let mut file = std::fs::File::open(format!("/proc/self/fd/{fd}"))
-        .map_err(mobile_sync_error)?;
+    let mut file = std::fs::File::open(format!("/proc/self/fd/{fd}")).map_err(mobile_sync_error)?;
     let mut data = Vec::with_capacity(file_size as usize);
     file.take(file_size as u64)
         .read_to_end(&mut data)
         .map_err(mobile_sync_error)?;
     if data.len() != file_size as usize {
-        return Err(Error::new(Status::GenericFailure, "selected file changed while reading"));
+        return Err(Error::new(
+            Status::GenericFailure,
+            "selected file changed while reading",
+        ));
     }
     Ok(mobile_sync_server::publish_data(
         "file",
@@ -2625,7 +3315,10 @@ pub async fn put_file_from_fd(
     file_name: String,
 ) -> Result<Option<String>> {
     if fd < 0 || !file_size.is_finite() || file_size <= 0.0 {
-        return Err(Error::new(Status::InvalidArg, "valid non-empty file is required"));
+        return Err(Error::new(
+            Status::InvalidArg,
+            "valid non-empty file is required",
+        ));
     }
     if file_size > MAX_SPACE_FILE_BYTES as f64 {
         return Err(Error::new(
@@ -2635,7 +3328,10 @@ pub async fn put_file_from_fd(
     }
     let normalized_name = file_name.trim();
     if normalized_name.is_empty() {
-        return Err(Error::new(Status::InvalidArg, "valid file name is required"));
+        return Err(Error::new(
+            Status::InvalidArg,
+            "valid file name is required",
+        ));
     }
 
     let fd_path = std::path::PathBuf::from(format!("/proc/self/fd/{fd}"));
@@ -2919,6 +3615,457 @@ pub async fn delete_history(
         },
     )
     .await
+}
+
+#[cfg(test)]
+mod profile_api_contract_tests {
+    use std::future::Future;
+    use std::sync::{Arc, Mutex};
+    use std::task::Poll;
+
+    use super::*;
+    use crate::space_runtime_supervisor::{SpaceRuntimeStart, SpaceRuntimeStartError};
+
+    #[derive(Default)]
+    struct ProductionMonitorTestFactory {
+        worker_releases: Mutex<Vec<tokio::sync::oneshot::Sender<()>>>,
+        callbacks: Mutex<Vec<SpaceRuntimeFailureCallback>>,
+    }
+
+    impl ProductionMonitorTestFactory {
+        fn crash_worker(&self, index: usize) {
+            self.worker_releases
+                .lock()
+                .unwrap()
+                .remove(index)
+                .send(())
+                .unwrap();
+        }
+    }
+
+    struct ProductionMonitoredTestRuntime {
+        monitor: HarmonyRuntimeMonitor,
+    }
+
+    impl SupervisedSpaceRuntime for ProductionMonitoredTestRuntime {
+        fn activate_and_commit(
+            &mut self,
+            commit_running: &mut dyn FnMut(),
+        ) -> std::result::Result<(), SpaceRuntimeFailureCategory> {
+            commit_running();
+            Ok(())
+        }
+
+        fn shutdown(self: Box<Self>) -> SpaceRuntimeFuture<()> {
+            Box::pin(async move {
+                self.monitor.shutdown().await;
+            })
+        }
+    }
+
+    #[derive(Default)]
+    struct PreRunningMonitorFactory {
+        terminator: Mutex<Option<uc_application::facade::RealIngestWorkerTerminator>>,
+        runtime_created: Arc<tokio::sync::Notify>,
+        allow_activation: Arc<tokio::sync::Notify>,
+        activation_checked: Arc<tokio::sync::Notify>,
+        allow_running_commit: std::sync::atomic::AtomicBool,
+        terminal_observed: Arc<tokio::sync::Notify>,
+        commit_finished: Arc<tokio::sync::Notify>,
+    }
+
+    struct PreRunningMonitorRuntime {
+        monitor: Option<HarmonyRuntimeMonitor>,
+        health: Option<uc_application::facade::IngestWorkerExitSubscription>,
+        harness: Option<uc_application::facade::RealIngestWorkerTestHarness>,
+        factory: Arc<PreRunningMonitorFactory>,
+    }
+
+    impl SupervisedSpaceRuntime for PreRunningMonitorRuntime {
+        fn activate_and_commit(
+            &mut self,
+            commit_running: &mut dyn FnMut(),
+        ) -> std::result::Result<(), SpaceRuntimeFailureCategory> {
+            let health = self
+                .health
+                .as_ref()
+                .expect("real ingest health subscription remains available");
+            let terminal = health.current_exit();
+            assert_eq!(
+                terminal, None,
+                "barrier must begin after the final watch health check returned None"
+            );
+            self.factory.activation_checked.notify_one();
+            while !self
+                .factory
+                .allow_running_commit
+                .load(std::sync::atomic::Ordering::Acquire)
+            {
+                std::thread::yield_now();
+            }
+            let result = terminal.map_or_else(
+                || {
+                    health
+                        .commit_running(commit_running)
+                        .map_err(|_| SpaceRuntimeFailureCategory::Runtime)
+                },
+                |_| Err(SpaceRuntimeFailureCategory::Runtime),
+            );
+            self.factory.commit_finished.notify_one();
+            result
+        }
+
+        fn shutdown(self: Box<Self>) -> SpaceRuntimeFuture<()> {
+            Box::pin(async move {
+                if let Some(monitor) = self.monitor {
+                    monitor.shutdown().await;
+                }
+                if let Some(harness) = self.harness {
+                    harness.shutdown().await;
+                }
+            })
+        }
+    }
+
+    impl SpaceRuntimeFactory for Arc<PreRunningMonitorFactory> {
+        fn create(
+            &self,
+            _config: SpaceRuntimeProfileConfig,
+            _generation: u64,
+            report_failure: SpaceRuntimeFailureCallback,
+        ) -> SpaceRuntimeFuture<
+            std::result::Result<Box<dyn SupervisedSpaceRuntime>, SpaceRuntimeFailureCategory>,
+        > {
+            let factory = Arc::clone(self);
+            Box::pin(async move {
+                let (harness, terminator) =
+                    uc_application::facade::RealIngestWorkerTestHarness::spawn();
+                *factory.terminator.lock().unwrap() = Some(terminator);
+                let health = harness.subscribe_exit();
+                let mut monitor_exit = harness.subscribe_exit();
+                let worker = tokio::spawn(async move {
+                    let _ = monitor_exit.recv().await;
+                    Err(SpaceRuntimeFailureCategory::Runtime)
+                });
+                let monitor = HarmonyRuntimeMonitor::spawn_worker_with_terminal_observer(
+                    worker,
+                    report_failure,
+                    Some(Arc::clone(&factory.terminal_observed)),
+                );
+                tokio::task::yield_now().await;
+                factory.runtime_created.notify_one();
+                factory.allow_activation.notified().await;
+                Ok(Box::new(PreRunningMonitorRuntime {
+                    monitor: Some(monitor),
+                    health: Some(health),
+                    harness: Some(harness),
+                    factory,
+                }) as Box<dyn SupervisedSpaceRuntime>)
+            })
+        }
+    }
+
+    async fn start_after_pending_signal(
+        supervisor: Arc<SpaceRuntimeSupervisor>,
+        config: SpaceRuntimeProfileConfig,
+        pending: Arc<tokio::sync::Notify>,
+    ) -> std::result::Result<SpaceRuntimeStart, SpaceRuntimeStartError> {
+        let mut start = Box::pin(supervisor.start(config));
+        let mut signalled = false;
+        std::future::poll_fn(move |context| match start.as_mut().poll(context) {
+            Poll::Pending => {
+                if !signalled {
+                    signalled = true;
+                    pending.notify_one();
+                }
+                Poll::Pending
+            }
+            Poll::Ready(result) => Poll::Ready(result),
+        })
+        .await
+    }
+
+    impl SpaceRuntimeFactory for ProductionMonitorTestFactory {
+        fn create(
+            &self,
+            _config: SpaceRuntimeProfileConfig,
+            _generation: u64,
+            report_failure: SpaceRuntimeFailureCallback,
+        ) -> SpaceRuntimeFuture<
+            std::result::Result<Box<dyn SupervisedSpaceRuntime>, SpaceRuntimeFailureCategory>,
+        > {
+            let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+            self.worker_releases.lock().unwrap().push(release_tx);
+            self.callbacks
+                .lock()
+                .unwrap()
+                .push(Arc::clone(&report_failure));
+            Box::pin(async move {
+                let worker = tokio::spawn(async move {
+                    release_rx
+                        .await
+                        .expect("worker release sender must stay alive");
+                    panic!("simulated production worker panic");
+                    #[allow(unreachable_code)]
+                    Ok(())
+                });
+                Ok(Box::new(ProductionMonitoredTestRuntime {
+                    monitor: HarmonyRuntimeMonitor::spawn_worker(worker, report_failure),
+                }) as Box<dyn SupervisedSpaceRuntime>)
+            })
+        }
+    }
+
+    fn monitor_config(profile_id: &str) -> SpaceRuntimeProfileConfig {
+        let root = std::env::temp_dir().join(format!(
+            "uc-native-monitor-{}-{profile_id}",
+            std::process::id()
+        ));
+        SpaceRuntimeProfileConfig {
+            profile_id: ProfileId::from(profile_id),
+            data_root: root.join("data"),
+            cache_root: root.join("cache"),
+            namespace: format!("harmony-{profile_id}"),
+            device_type: "phone".to_string(),
+        }
+    }
+
+    async fn wait_for_lifecycle(
+        supervisor: &SpaceRuntimeSupervisor,
+        profile_id: &ProfileId,
+        expected: SpaceRuntimeLifecycle,
+    ) {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if supervisor.status(profile_id).unwrap().lifecycle == expected {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+    }
+
+    #[test]
+    fn profile_scoped_start_stop_status_exports_exist() {
+        let _ = start_space_node_for_profile;
+        let _ = stop_space_node_for_profile;
+        let _ = get_space_status_for_profile;
+        let _ = issue_space_invitation_for_profile;
+        let _ = join_space_for_profile;
+        let _ = send_space_text_for_profile;
+        let _ = send_space_image_for_profile;
+        let _ = send_space_file_for_profile;
+        let _ = send_space_file_from_fd_for_profile;
+        let _ = get_space_devices_for_profile;
+        let _ = drain_space_text_events_for_profile;
+        let _ = drain_space_image_events_for_profile;
+        let _ = drain_space_file_events_for_profile;
+        let _ = drain_space_file_status_events_for_profile;
+    }
+
+    #[test]
+    fn profile_ids_must_be_supplied_in_canonical_form() {
+        for profile_id in [" profile-a", "profile-a ", "\tprofile-a", "profile-a\n"] {
+            let error = validated_profile_id(profile_id).unwrap_err();
+            assert_eq!(error.status, Status::InvalidArg, "{profile_id:?}");
+        }
+        assert_eq!(
+            validated_profile_id("profile-a").unwrap(),
+            ProfileId::from("profile-a")
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn concurrent_profile_sends_resolve_only_the_requested_runtime() {
+        let sends_a = Arc::new(Mutex::new(Vec::<String>::new()));
+        let sends_b = Arc::new(Mutex::new(Vec::<String>::new()));
+        let runtimes = Arc::new(std::collections::HashMap::from([
+            (ProfileId::from("profile-a"), Arc::clone(&sends_a)),
+            (ProfileId::from("profile-b"), Arc::clone(&sends_b)),
+        ]));
+        let barrier = Arc::new(tokio::sync::Barrier::new(3));
+
+        let spawn_send = |profile_id: &'static str, payload: &'static str| {
+            let runtimes = Arc::clone(&runtimes);
+            let barrier = Arc::clone(&barrier);
+            tokio::spawn(async move {
+                let (_, runtime) =
+                    profile_runtime_for(profile_id, |profile_id| runtimes.get(profile_id).cloned())
+                        .unwrap();
+                barrier.wait().await;
+                runtime.lock().unwrap().push(payload.to_string());
+            })
+        };
+
+        let send_a = spawn_send("profile-a", "image-a");
+        let send_b = spawn_send("profile-b", "file-b");
+        barrier.wait().await;
+        send_a.await.unwrap();
+        send_b.await.unwrap();
+
+        assert_eq!(*sends_a.lock().unwrap(), vec!["image-a"]);
+        assert_eq!(*sends_b.lock().unwrap(), vec!["file-b"]);
+    }
+
+    #[test]
+    fn production_factory_config_is_explicit_and_canonical() {
+        let root = std::env::temp_dir().join("uc-native-profile-factory");
+        let data_root = root.join("data");
+        let cache_root = root.join("cache");
+        let config = build_profile_runtime_config(
+            "profile-a",
+            data_root.to_string_lossy().as_ref(),
+            cache_root.to_string_lossy().as_ref(),
+            "phone",
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.profile_id,
+            uc_core::ids::ProfileId::from("profile-a")
+        );
+        assert_eq!(config.data_root, std::fs::canonicalize(data_root).unwrap());
+        assert_eq!(
+            config.cache_root,
+            std::fs::canonicalize(cache_root).unwrap()
+        );
+        assert_eq!(config.namespace, "harmony-profile-a");
+        assert_eq!(config.device_type, "phone");
+    }
+
+    #[test]
+    fn production_monitor_failure_marks_profile_failed() {
+        let factory = Arc::new(ProductionMonitorTestFactory::default());
+        let supervisor = SpaceRuntimeSupervisor::new(factory.clone());
+        let config = monitor_config("profile-monitor-failure");
+        let profile_id = config.profile_id.clone();
+
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                supervisor.start(config).await.unwrap();
+                factory.crash_worker(0);
+                wait_for_lifecycle(&supervisor, &profile_id, SpaceRuntimeLifecycle::Failed).await;
+                assert_eq!(
+                    supervisor.status(&profile_id).unwrap().last_failure,
+                    Some(SpaceRuntimeFailureCategory::Runtime)
+                );
+            });
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+    async fn worker_terminal_after_health_check_fails_all_generation_one_starts() {
+        let factory = Arc::new(PreRunningMonitorFactory::default());
+        let supervisor = SpaceRuntimeSupervisor::new(Arc::new(Arc::clone(&factory)));
+        let config = monitor_config("profile-monitor-pre-running-terminal");
+        let profile_id = config.profile_id.clone();
+
+        let runtime_created = factory.runtime_created.notified();
+        let first = tokio::spawn({
+            let supervisor = Arc::clone(&supervisor);
+            let config = config.clone();
+            async move { supervisor.start(config).await }
+        });
+        runtime_created.await;
+
+        let second_pending = Arc::new(tokio::sync::Notify::new());
+        let second = tokio::spawn(start_after_pending_signal(
+            Arc::clone(&supervisor),
+            config,
+            Arc::clone(&second_pending),
+        ));
+        second_pending.notified().await;
+        assert_eq!(
+            supervisor.status(&profile_id).unwrap().lifecycle,
+            SpaceRuntimeLifecycle::Starting
+        );
+
+        let activation_checked = factory.activation_checked.notified();
+        factory.allow_activation.notify_one();
+        activation_checked.await;
+
+        let terminal_observed = factory.terminal_observed.notified();
+        factory
+            .terminator
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .terminate();
+        terminal_observed.await;
+        factory
+            .allow_running_commit
+            .store(true, std::sync::atomic::Ordering::Release);
+        factory.commit_finished.notified().await;
+
+        let first = first.await.unwrap();
+        let second = second.await.unwrap();
+        let first = first.unwrap_err();
+        let second = second.unwrap_err();
+        assert_eq!(first.generation, 1);
+        assert_eq!(second.generation, 1);
+        assert_eq!(first.category, SpaceRuntimeFailureCategory::Runtime);
+        assert_eq!(second.category, SpaceRuntimeFailureCategory::Runtime);
+        assert_eq!(
+            supervisor.status(&profile_id).unwrap(),
+            SpaceRuntimeStatus {
+                profile_id,
+                generation: 1,
+                lifecycle: SpaceRuntimeLifecycle::Failed,
+                last_failure: Some(SpaceRuntimeFailureCategory::Runtime),
+            }
+        );
+    }
+
+    #[test]
+    fn production_monitor_old_generation_does_not_pollute_restart() {
+        let factory = Arc::new(ProductionMonitorTestFactory::default());
+        let supervisor = SpaceRuntimeSupervisor::new(factory.clone());
+        let config = monitor_config("profile-monitor-generation");
+        let profile_id = config.profile_id.clone();
+
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                supervisor.start(config.clone()).await.unwrap();
+                let old_callback = factory.callbacks.lock().unwrap()[0].clone();
+                supervisor.stop(&profile_id).await.unwrap();
+                supervisor.start(config).await.unwrap();
+
+                assert!(!(old_callback)(SpaceRuntimeFailureCategory::Runtime).await);
+                let status = supervisor.status(&profile_id).unwrap();
+                assert_eq!(status.lifecycle, SpaceRuntimeLifecycle::Running);
+                assert_eq!(status.last_failure, None);
+            });
+    }
+
+    #[test]
+    fn production_monitor_normal_stop_does_not_report_failure() {
+        let factory = Arc::new(ProductionMonitorTestFactory::default());
+        let supervisor = SpaceRuntimeSupervisor::new(factory);
+        let config = monitor_config("profile-monitor-stop");
+        let profile_id = config.profile_id.clone();
+
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                supervisor.start(config).await.unwrap();
+                let stopped = supervisor.stop(&profile_id).await.unwrap();
+                assert_eq!(stopped.lifecycle, SpaceRuntimeLifecycle::Stopped);
+                tokio::task::yield_now().await;
+                let status = supervisor.status(&profile_id).unwrap();
+                assert_eq!(status.lifecycle, SpaceRuntimeLifecycle::Stopped);
+                assert_eq!(status.last_failure, None);
+            });
+    }
 }
 
 async fn patch_history(

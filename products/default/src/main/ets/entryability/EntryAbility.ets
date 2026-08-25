@@ -22,7 +22,9 @@ import {
   AppearanceStorageService,
   BackgroundSyncPreferenceService,
   BackgroundSyncTaskService,
-  engineRuntimeService
+  engineRuntimeService,
+  spaceRuntimeSupervisor,
+  setSpaceBackgroundMode
 } from 'common';
 
 const DOMAIN = 0x0000;
@@ -57,8 +59,9 @@ export default class EntryAbility extends UIAbility {
     AppStorage.setOrCreate('backgroundSyncEnabled', backgroundSyncEnabled);
     AppStorage.setOrCreate('spaceJoined', false);
     AppStorage.setOrCreate('officialEngineSessionResumed', false);
-    this.startEngineRuntime().catch((): void => {
-      hilog.warn(DOMAIN, 'testTag', 'Official Engine startup did not complete cleanly.');
+    this.startEngineRuntime().catch((error: Object): void => {
+      let detail: string = error instanceof Error ? (error as Error).message : JSON.stringify(error);
+      hilog.warn(DOMAIN, 'testTag', 'Official Engine startup did not complete cleanly: %{public}s', detail);
     });
     try {
       let appearanceMode: string = this.appearanceStorageService.load(this.context);
@@ -90,20 +93,28 @@ export default class EntryAbility extends UIAbility {
   private async performEngineRuntimeStart(): Promise<void> {
     await engineRuntimeService.prepare(this.context);
     await engineRuntimeService.start();
-    let recovery = await engineRuntimeService.recoverSession(true);
-    AppStorage.setOrCreate('officialEngineSessionResumed', recovery.resumed);
-    if (recovery.resumed) {
-      AppStorage.setOrCreate('spaceJoined', true);
+    let resumed: boolean = false;
+    try {
+      let recovery = await engineRuntimeService.recoverSession(true);
+      resumed = recovery.resumed;
+    } catch (error) {
+      let detail: string = error instanceof Error ? (error as Error).message : JSON.stringify(error);
+      hilog.warn(DOMAIN, 'testTag', 'Official Engine session requires re-pairing: %{public}s', detail);
     }
+    AppStorage.setOrCreate('officialEngineSessionResumed', resumed);
+    AppStorage.setOrCreate('spaceJoined', resumed);
+    this.updateClipboardMonitoring();
     hilog.info(DOMAIN, 'testTag', 'Official Engine started. resumed=%{public}d',
-      recovery.resumed ? 1 : 0);
+      resumed ? 1 : 0);
   }
 
   onDestroy(): void {
+    setSpaceBackgroundMode(false);
+    engineRuntimeService.setClipboardPollingEnabled(false);
     this.backgroundSyncTaskService.stop(this.context).catch((): void => {
       hilog.warn(DOMAIN, 'testTag', 'Background sync task shutdown did not complete cleanly.');
     });
-    engineRuntimeService.shutdown().catch((): void => {
+    spaceRuntimeSupervisor.shutdown().catch((): void => {
       hilog.warn(DOMAIN, 'testTag', 'Engine runtime shutdown did not complete cleanly.');
     });
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onDestroy');
@@ -189,11 +200,15 @@ export default class EntryAbility extends UIAbility {
   }
 
   onForeground(): void {
+    setSpaceBackgroundMode(false);
     this.backgroundSyncTaskService.stop(this.context).catch((): void => {
       hilog.warn(DOMAIN, 'testTag', 'Background sync task cleanup did not complete cleanly.');
     });
-    this.startEngineRuntime().catch((): void => {
-      hilog.warn(DOMAIN, 'testTag', 'Official Engine resume did not complete cleanly.');
+    this.startEngineRuntime().then((): void => {
+      this.updateClipboardMonitoring();
+    }).catch((error: Object): void => {
+      let detail: string = error instanceof Error ? (error as Error).message : JSON.stringify(error);
+      hilog.warn(DOMAIN, 'testTag', 'Official Engine resume did not complete cleanly: %{public}s', detail);
     });
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onForeground');
   }
@@ -201,18 +216,30 @@ export default class EntryAbility extends UIAbility {
   onBackground(): void {
     let backgroundSyncEnabled: boolean | undefined = AppStorage.get<boolean>('backgroundSyncEnabled');
     let spaceJoined: boolean | undefined = AppStorage.get<boolean>('spaceJoined');
-    if (backgroundSyncEnabled === true && spaceJoined === true) {
+    let keepEngineRunning: boolean = backgroundSyncEnabled === true && spaceJoined === true;
+    if (keepEngineRunning) {
+      setSpaceBackgroundMode(true);
+      engineRuntimeService.setClipboardPollingEnabled(true);
       this.backgroundSyncTaskService.start(this.context).catch((): void => {
         hilog.warn(DOMAIN, 'testTag', 'Background sync task startup did not complete cleanly.');
       });
     } else {
+      engineRuntimeService.setClipboardPollingEnabled(false);
       this.backgroundSyncTaskService.stop(this.context).catch((): void => {
         hilog.warn(DOMAIN, 'testTag', 'Background sync task cleanup did not complete cleanly.');
       });
     }
-    engineRuntimeService.suspend().catch((): void => {
-      hilog.warn(DOMAIN, 'testTag', 'Engine runtime suspend did not complete cleanly.');
-    });
+    if (!keepEngineRunning) {
+      engineRuntimeService.suspend().catch((): void => {
+        hilog.warn(DOMAIN, 'testTag', 'Engine runtime suspend did not complete cleanly.');
+      });
+    }
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onBackground');
+  }
+
+  private updateClipboardMonitoring(): void {
+    let backgroundSyncEnabled: boolean | undefined = AppStorage.get<boolean>('backgroundSyncEnabled');
+    let spaceJoined: boolean | undefined = AppStorage.get<boolean>('spaceJoined');
+    engineRuntimeService.setClipboardPollingEnabled(backgroundSyncEnabled === true && spaceJoined === true);
   }
 }

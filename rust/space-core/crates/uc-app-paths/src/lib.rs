@@ -54,6 +54,242 @@ pub const OHOS_CACHE_DIR_ENV: &str = "UC_OHOS_CACHE_DIR";
 /// "delete this to reset" story and keeps the zip root tidy.
 const PORTABLE_DATA_SUBDIR: &str = "data";
 
+/// Process-independent directory and secure-storage inputs for one runtime.
+///
+/// Unlike the legacy helpers in this crate, this value never consults
+/// `UC_PROFILE`, `UC_OHOS_DATA_DIR`, or `UC_OHOS_CACHE_DIR`. Hosts that keep
+/// multiple runtimes alive in one process must construct one value per
+/// runtime and pass it through the composition root.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProfilePathConfig {
+    profile_id: String,
+    data_root: PathBuf,
+    cache_root: PathBuf,
+    secure_storage_namespace: String,
+}
+
+impl ProfilePathConfig {
+    pub fn builder(profile_id: impl Into<String>) -> ProfilePathConfigBuilder {
+        ProfilePathConfigBuilder {
+            profile_id: profile_id.into(),
+            data_root: None,
+            cache_root: None,
+            secure_storage_namespace: None,
+        }
+    }
+
+    pub fn profile_id(&self) -> &str {
+        &self.profile_id
+    }
+
+    pub fn data_root(&self) -> &Path {
+        &self.data_root
+    }
+
+    pub fn cache_root(&self) -> &Path {
+        &self.cache_root
+    }
+
+    pub fn secure_storage_namespace(&self) -> &str {
+        &self.secure_storage_namespace
+    }
+
+    pub fn namespace_for_profile(profile_id: &str) -> Result<String, ProfilePathConfigError> {
+        validate_profile_id(profile_id)?;
+        Ok(format!("harmony-{profile_id}"))
+    }
+
+    pub fn db_path(&self) -> PathBuf {
+        self.data_root.join("uniclipboard.db")
+    }
+
+    pub fn blob_root(&self) -> PathBuf {
+        self.data_root.join("iroh-blobs")
+    }
+
+    pub fn identity_root(&self) -> PathBuf {
+        self.data_root.join("iroh-identity")
+    }
+
+    pub fn vault_root(&self) -> PathBuf {
+        self.data_root.join("vault")
+    }
+
+    pub fn log_dir(&self) -> PathBuf {
+        self.data_root.join("logs")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProfilePathConfigBuilder {
+    profile_id: String,
+    data_root: Option<PathBuf>,
+    cache_root: Option<PathBuf>,
+    secure_storage_namespace: Option<String>,
+}
+
+impl ProfilePathConfigBuilder {
+    pub fn data_root(mut self, data_root: impl Into<PathBuf>) -> Self {
+        self.data_root = Some(data_root.into());
+        self
+    }
+
+    pub fn cache_root(mut self, cache_root: impl Into<PathBuf>) -> Self {
+        self.cache_root = Some(cache_root.into());
+        self
+    }
+
+    pub fn secure_storage_namespace(mut self, namespace: impl Into<String>) -> Self {
+        self.secure_storage_namespace = Some(namespace.into());
+        self
+    }
+
+    pub fn build(self) -> Result<ProfilePathConfig, ProfilePathConfigError> {
+        if self.profile_id.trim().is_empty() {
+            return Err(ProfilePathConfigError::MissingProfileId);
+        }
+        validate_profile_id(&self.profile_id)?;
+        let data_root = self
+            .data_root
+            .filter(|path| !path.as_os_str().is_empty())
+            .ok_or(ProfilePathConfigError::MissingDataRoot)?;
+        validate_absolute_root(&data_root).map_err(|()| ProfilePathConfigError::InvalidDataRoot)?;
+        let cache_root = self
+            .cache_root
+            .filter(|path| !path.as_os_str().is_empty())
+            .ok_or(ProfilePathConfigError::MissingCacheRoot)?;
+        validate_absolute_root(&cache_root)
+            .map_err(|()| ProfilePathConfigError::InvalidCacheRoot)?;
+        let secure_storage_namespace = self
+            .secure_storage_namespace
+            .filter(|namespace| !namespace.trim().is_empty())
+            .ok_or(ProfilePathConfigError::MissingSecureStorageNamespace)?;
+        if secure_storage_namespace != ProfilePathConfig::namespace_for_profile(&self.profile_id)? {
+            return Err(ProfilePathConfigError::InvalidSecureStorageNamespace);
+        }
+
+        Ok(ProfilePathConfig {
+            profile_id: self.profile_id,
+            data_root,
+            cache_root,
+            secure_storage_namespace,
+        })
+    }
+
+    /// Validate the explicit profile inputs, create both final roots, and
+    /// replace their lexical paths with physical canonical paths.
+    ///
+    /// Multi-runtime composition roots must use this method before registering
+    /// ownership. It deliberately has filesystem side effects; [`Self::build`]
+    /// remains the compatibility path for callers that only resolve a layout.
+    pub fn create_and_build(self) -> Result<ProfilePathConfig, ProfilePathConfigError> {
+        let mut config = self.build()?;
+        config.data_root = create_and_canonicalize_root(&config.data_root)
+            .map_err(|()| ProfilePathConfigError::InvalidDataRoot)?;
+        config.cache_root = create_and_canonicalize_root(&config.cache_root)
+            .map_err(|()| ProfilePathConfigError::InvalidCacheRoot)?;
+        Ok(config)
+    }
+}
+
+fn validate_profile_id(profile_id: &str) -> Result<(), ProfilePathConfigError> {
+    let mut characters = profile_id.chars();
+    let Some(first) = characters.next() else {
+        return Err(ProfilePathConfigError::MissingProfileId);
+    };
+    let valid_edge = |character: char| character.is_ascii_alphanumeric();
+    if !valid_edge(first)
+        || !profile_id.chars().last().is_some_and(valid_edge)
+        || !profile_id.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
+        })
+        || matches!(profile_id, "." | "..")
+    {
+        return Err(ProfilePathConfigError::InvalidProfileId);
+    }
+    Ok(())
+}
+
+fn validate_absolute_root(root: &Path) -> Result<(), ()> {
+    if !root.is_absolute()
+        || root
+            .components()
+            .any(|component| component == std::path::Component::ParentDir)
+    {
+        return Err(());
+    }
+    #[cfg(windows)]
+    {
+        use std::path::{Component, Prefix};
+
+        let Some(Component::Prefix(prefix)) = root.components().next() else {
+            return Err(());
+        };
+        if !matches!(
+            prefix.kind(),
+            Prefix::Disk(_)
+                | Prefix::UNC(_, _)
+                | Prefix::VerbatimDisk(_)
+                | Prefix::VerbatimUNC(_, _)
+        ) {
+            return Err(());
+        }
+    }
+    Ok(())
+}
+
+fn create_and_canonicalize_root(root: &Path) -> Result<PathBuf, ()> {
+    validate_absolute_root(root)?;
+    std::fs::create_dir_all(root).map_err(|_| ())?;
+    let metadata = std::fs::metadata(root).map_err(|_| ())?;
+    if !metadata.is_dir() {
+        return Err(());
+    }
+    let canonical = std::fs::canonicalize(root).map_err(|_| ())?;
+    validate_absolute_root(&canonical)?;
+    let canonical_metadata = std::fs::metadata(&canonical).map_err(|_| ())?;
+    if !canonical_metadata.is_dir() {
+        return Err(());
+    }
+    Ok(canonical)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProfilePathConfigError {
+    MissingProfileId,
+    InvalidProfileId,
+    MissingDataRoot,
+    InvalidDataRoot,
+    MissingCacheRoot,
+    InvalidCacheRoot,
+    MissingSecureStorageNamespace,
+    InvalidSecureStorageNamespace,
+}
+
+impl std::fmt::Display for ProfilePathConfigError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let message = match self {
+            Self::MissingProfileId => "profile id is required",
+            Self::InvalidProfileId => "profile id is invalid",
+            Self::MissingDataRoot => "profile data root is required",
+            Self::InvalidDataRoot => {
+                "profile data root must be a supported absolute, traversal-free directory"
+            }
+            Self::MissingCacheRoot => "profile cache root is required",
+            Self::InvalidCacheRoot => {
+                "profile cache root must be a supported absolute, traversal-free directory"
+            }
+            Self::MissingSecureStorageNamespace => "secure-storage namespace is required",
+            Self::InvalidSecureStorageNamespace => {
+                "secure-storage namespace must match the canonical profile namespace"
+            }
+        };
+        formatter.write_str(message)
+    }
+}
+
+impl std::error::Error for ProfilePathConfigError {}
+
 /// Resolve the active profile name.
 ///
 /// Runtime `UC_PROFILE` takes precedence over `compile_default`; an empty
@@ -277,6 +513,244 @@ pub fn legacy_logs_dir() -> Option<PathBuf> {
 mod tests {
     use super::*;
 
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct EnvRestore {
+        profile: Option<std::ffi::OsString>,
+        data_dir: Option<std::ffi::OsString>,
+        cache_dir: Option<std::ffi::OsString>,
+    }
+
+    impl EnvRestore {
+        fn capture() -> Self {
+            Self {
+                profile: std::env::var_os("UC_PROFILE"),
+                data_dir: std::env::var_os(OHOS_DATA_DIR_ENV),
+                cache_dir: std::env::var_os(OHOS_CACHE_DIR_ENV),
+            }
+        }
+    }
+
+    impl Drop for EnvRestore {
+        fn drop(&mut self) {
+            for (key, value) in [
+                ("UC_PROFILE", self.profile.take()),
+                (OHOS_DATA_DIR_ENV, self.data_dir.take()),
+                (OHOS_CACHE_DIR_ENV, self.cache_dir.take()),
+            ] {
+                match value {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn explicit_profile_paths_are_disjoint_and_ignore_ambient_environment() {
+        // Regression target: consulting UC_PROFILE / UC_OHOS_* here would make
+        // concurrently-created runtimes share or redirect persistent state.
+        let _env = ENV_LOCK.lock().unwrap();
+        let _restore = EnvRestore::capture();
+        std::env::set_var("UC_PROFILE", "ambient-profile");
+        std::env::set_var(OHOS_DATA_DIR_ENV, "/ambient/data");
+        std::env::set_var(OHOS_CACHE_DIR_ENV, "/ambient/cache");
+
+        let root = std::env::temp_dir().join("uc-explicit-profile-paths");
+        let data_a = root.join("a").join("data");
+        let cache_a = root.join("a").join("cache");
+        let data_b = root.join("b").join("data");
+        let cache_b = root.join("b").join("cache");
+        let profile_a = ProfilePathConfig::builder("profile-a")
+            .data_root(&data_a)
+            .cache_root(&cache_a)
+            .secure_storage_namespace("harmony-profile-a")
+            .build()
+            .unwrap();
+        let profile_b = ProfilePathConfig::builder("profile-b")
+            .data_root(&data_b)
+            .cache_root(&cache_b)
+            .secure_storage_namespace("harmony-profile-b")
+            .build()
+            .unwrap();
+
+        assert_eq!(profile_a.db_path(), data_a.join("uniclipboard.db"));
+        assert_eq!(profile_a.blob_root(), data_a.join("iroh-blobs"));
+        assert_eq!(profile_a.identity_root(), data_a.join("iroh-identity"));
+        assert_eq!(profile_a.vault_root(), data_a.join("vault"));
+        assert_eq!(profile_a.cache_root(), cache_a.as_path());
+        assert_eq!(profile_a.secure_storage_namespace(), "harmony-profile-a");
+
+        assert_ne!(profile_a.db_path(), profile_b.db_path());
+        assert_ne!(profile_a.blob_root(), profile_b.blob_root());
+        assert_ne!(profile_a.identity_root(), profile_b.identity_root());
+        assert_ne!(profile_a.vault_root(), profile_b.vault_root());
+        assert_ne!(profile_a.cache_root(), profile_b.cache_root());
+        assert_ne!(
+            profile_a.secure_storage_namespace(),
+            profile_b.secure_storage_namespace()
+        );
+    }
+
+    #[test]
+    fn explicit_profile_builder_rejects_unsafe_identity_roots_and_namespace() {
+        // Regression target: unsafe identifiers can escape a profile directory,
+        // while ':' in a caller-selected namespace can collide with key prefixes.
+        let absolute = std::env::temp_dir().join("uc-explicit-profile-validation");
+        let canonical_namespace = ProfilePathConfig::namespace_for_profile("profile-a").unwrap();
+        assert_eq!(canonical_namespace, "harmony-profile-a");
+
+        for profile_id in ["", " ", ".", "..", "a/b", "a\\b", "a:b"] {
+            assert!(ProfilePathConfig::builder(profile_id)
+                .data_root(absolute.join("data"))
+                .cache_root(absolute.join("cache"))
+                .secure_storage_namespace("harmony-profile-a")
+                .build()
+                .is_err());
+        }
+
+        assert_eq!(
+            ProfilePathConfig::builder("profile-a")
+                .data_root("relative/data")
+                .cache_root(absolute.join("cache"))
+                .secure_storage_namespace("harmony-profile-a")
+                .build(),
+            Err(ProfilePathConfigError::InvalidDataRoot)
+        );
+        assert_eq!(
+            ProfilePathConfig::builder("profile-a")
+                .data_root(absolute.join("data"))
+                .cache_root(absolute.join("cache").join("..").join("shared"))
+                .secure_storage_namespace("harmony-profile-a")
+                .build(),
+            Err(ProfilePathConfigError::InvalidCacheRoot)
+        );
+
+        for namespace in [
+            "harmony-profile-b",
+            "harmony-profile-a:space-kek",
+            "../harmony-profile-a",
+        ] {
+            assert_eq!(
+                ProfilePathConfig::builder("profile-a")
+                    .data_root(absolute.join("data"))
+                    .cache_root(absolute.join("cache"))
+                    .secure_storage_namespace(namespace)
+                    .build(),
+                Err(ProfilePathConfigError::InvalidSecureStorageNamespace)
+            );
+        }
+    }
+
+    #[test]
+    fn canonical_profile_builder_creates_and_physically_resolves_roots() {
+        let root =
+            std::env::temp_dir().join(format!("uc-profile-canonical-{}", std::process::id()));
+        let data_root = root.join("data").join(".");
+        let cache_root = root.join("cache").join(".");
+
+        let profile = ProfilePathConfig::builder("profile-a")
+            .data_root(&data_root)
+            .cache_root(&cache_root)
+            .secure_storage_namespace("harmony-profile-a")
+            .create_and_build()
+            .unwrap();
+
+        assert!(profile.data_root().is_dir());
+        assert!(profile.cache_root().is_dir());
+        assert_eq!(
+            profile.data_root(),
+            std::fs::canonicalize(data_root).unwrap()
+        );
+        assert_eq!(
+            profile.cache_root(),
+            std::fs::canonicalize(cache_root).unwrap()
+        );
+    }
+
+    #[test]
+    fn canonical_profile_builder_fails_closed_for_metadata_and_traversal() {
+        let root = std::env::temp_dir().join(format!(
+            "uc-profile-canonical-invalid-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let file_root = root.join("not-a-directory");
+        std::fs::write(&file_root, b"file").unwrap();
+
+        assert_eq!(
+            ProfilePathConfig::builder("profile-a")
+                .data_root(&file_root)
+                .cache_root(root.join("cache"))
+                .secure_storage_namespace("harmony-profile-a")
+                .create_and_build(),
+            Err(ProfilePathConfigError::InvalidDataRoot)
+        );
+        assert_eq!(
+            ProfilePathConfig::builder("profile-a")
+                .data_root(root.join("child").join("..").join("data"))
+                .cache_root(root.join("cache"))
+                .secure_storage_namespace("harmony-profile-a")
+                .create_and_build(),
+            Err(ProfilePathConfigError::InvalidDataRoot)
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn canonical_profile_builder_rejects_unsupported_windows_prefixes() {
+        for unsupported in [
+            r"\\.\PhysicalDrive0\profile-data",
+            r"\\?\GLOBALROOT\Device\HarddiskVolumeShadowCopy1\profile-data",
+        ] {
+            assert_eq!(
+                ProfilePathConfig::builder("profile-a")
+                    .data_root(unsupported)
+                    .cache_root(std::env::temp_dir().join("uc-profile-prefix-cache"))
+                    .secure_storage_namespace("harmony-profile-a")
+                    .create_and_build(),
+                Err(ProfilePathConfigError::InvalidDataRoot)
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn canonical_profile_builder_resolves_case_and_symlink_aliases_when_supported() {
+        use std::os::windows::fs::symlink_dir;
+
+        let root = std::env::temp_dir().join(format!("uc-profile-alias-{}", std::process::id()));
+        let physical = root.join("PhysicalRoot");
+        std::fs::create_dir_all(&physical).unwrap();
+        let case_alias = root.join("physicalroot");
+        assert_eq!(
+            std::fs::canonicalize(&physical).unwrap(),
+            std::fs::canonicalize(&case_alias).unwrap()
+        );
+
+        let alias = root.join("root-link");
+        if let Err(error) = symlink_dir(&physical, &alias) {
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::Unsupported
+            ) || error.raw_os_error() == Some(1314)
+            {
+                return;
+            }
+            panic!("failed to create directory symlink: {error}");
+        }
+        let profile = ProfilePathConfig::builder("profile-a")
+            .data_root(&alias)
+            .cache_root(root.join("cache"))
+            .secure_storage_namespace("harmony-profile-a")
+            .create_and_build()
+            .unwrap();
+        assert_eq!(
+            profile.data_root(),
+            std::fs::canonicalize(physical).unwrap()
+        );
+    }
+
     #[test]
     fn not_portable_without_marker_or_env() {
         let tmp = std::env::temp_dir().join("uc_app_paths_portable_test_none");
@@ -320,7 +794,6 @@ mod tests {
     #[test]
     fn app_dir_name_has_no_profile_suffix_by_default() {
         // Guard against an ambient UC_PROFILE leaking into the assertion.
-        static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
         let _env = ENV_LOCK.lock().unwrap();
         let prev = std::env::var("UC_PROFILE").ok();
         std::env::remove_var("UC_PROFILE");
@@ -381,6 +854,7 @@ mod tests {
 
     #[test]
     fn legacy_logs_dir_is_none_when_it_equals_current() {
+        let _env = ENV_LOCK.lock().unwrap();
         // On any platform where `app_log_dir()` resolves to the old
         // `<app_data_root>/logs` location (Windows / portable), there is
         // nothing to clean up, so `legacy_logs_dir()` must report `None`.

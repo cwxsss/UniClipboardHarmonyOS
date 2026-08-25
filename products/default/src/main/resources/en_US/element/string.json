@@ -194,7 +194,7 @@
     },
     {
       "name": "entry_pasteboard_permission_reason",
-      "value": "Used only when you choose to read clipboard text or images for sending"
+      "value": "Used to read the clipboard and sync it to trusted devices after you enable background auto-sync"
     },
     {
       "name": "camera_permission_reason",

@@ -1667,6 +1667,30 @@
     {
       "name": "onboarding_feature_file",
       "value": "文件"
+    },
+    {
+      "name": "image_intelligence_title",
+      "value": "图片文字识别"
+    },
+    {
+      "name": "image_intelligence_action",
+      "value": "识别图片"
+    },
+    {
+      "name": "image_intelligence_running",
+      "value": "正在识别…"
+    },
+    {
+      "name": "image_intelligence_text_title",
+      "value": "识别文字"
+    },
+    {
+      "name": "image_intelligence_empty",
+      "value": "未识别到文字"
+    },
+    {
+      "name": "image_intelligence_failed",
+      "value": "图片识别失败，请稍后重试"
     }
   ]
 }

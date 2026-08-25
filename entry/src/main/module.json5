@@ -30,8 +30,9 @@
         "startWindowIcon": "$media:uniclipboard_start_icon",
         "startWindowBackground": "$color:start_window_background",
         "exported": true,
+        // Keep the compatibility entry aligned with products/default. iroh/QUIC requires dataTransfer.
         "backgroundModes": [
-          "multiDeviceConnection"
+          "dataTransfer"
         ],
         "skills": [
           {

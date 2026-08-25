@@ -52,7 +52,8 @@ use uc_application::facade::{
     ActiveClipboardResurfaceHandle, BlobTransferDeps, BlobTransferFacade, ClipboardLiveIndexDeps,
     ClipboardLiveIndexPort, ClipboardLiveIndexer, ClipboardSnapshotDeps, ClipboardSyncDeps,
     ClipboardSyncFacade, HostEvent, HostEventBus, InboundClipboardApplyPort, IngestHandle,
-    MemberRosterDeps, MemberRosterFacade, SpaceSetupDeps, SpaceSetupFacade, TransferHostEvent,
+    IngestWorkerExitSubscription, MemberRosterDeps, MemberRosterFacade, SpaceSetupDeps,
+    SpaceSetupFacade, TransferHostEvent,
 };
 use uc_application::proof::HmacProofAdapter;
 use uc_application::{
@@ -165,6 +166,10 @@ pub struct SyncEngineAssembly {
 }
 
 impl SyncEngineAssembly {
+    pub(crate) fn subscribe_ingest_worker_exit(&self) -> IngestWorkerExitSubscription {
+        self.ingest_handle.subscribe_exit()
+    }
+
     /// Spawn the outbound restore-broadcast worker on the active-clipboard
     /// facade and retain its handle for coordinated teardown. `rx` is the
     /// receiving end of the restore-broadcast channel whose sender the restore
@@ -192,10 +197,11 @@ impl SyncEngineAssembly {
     pub async fn shutdown(self) {
         // Abort ingest loop ahead of router shutdown so the broadcast
         // receiver task exits before its sender (the receiver adapter
-        // owned by the router) drops. Drop on `IngestHandle` would do the
-        // same when `self` falls out of scope; the explicit call only
-        // shaves a tick off teardown latency and makes ordering obvious.
-        self.ingest_handle.abort();
+        // owned by the router) drops. Explicit shutdown aborts the real
+        // ingest worker and joins its lifecycle observer before the remaining
+        // workers are torn down, so a normal runtime stop cannot be reported
+        // as an unexpected background failure.
+        self.ingest_handle.shutdown().await;
         self.active_clipboard_inbound_handle.abort();
         self.active_clipboard_peer_online_resync_handle.abort();
         self.active_clipboard_resurface_handle.abort();

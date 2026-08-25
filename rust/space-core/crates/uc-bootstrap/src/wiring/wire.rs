@@ -74,8 +74,11 @@ use uc_observability::analytics::{
     AnalyticsFacade, AnalyticsIdentityPort, DefaultAnalyticsFacade, LocalAnalyticsIdentity,
 };
 
-use crate::layer::paths::{apply_profile_suffix, get_default_app_dirs, resolve_app_paths};
-use crate::layer::platform::create_platform_layer;
+use crate::layer::paths::{
+    apply_profile_suffix, get_default_app_dirs, resolve_app_paths, CliAppRuntimeProfileConfig,
+    CliAppRuntimeProfileLayout,
+};
+use crate::layer::platform::{create_platform_layer_with_policy, SystemClipboardPolicy};
 use crate::wiring::deps::{
     BackgroundRuntimeDeps, DaemonRuntimeDeps, SharedRuntimeDeps, SyncEngineDeps, WiredDependencies,
     WiringError, WiringResult,
@@ -196,12 +199,46 @@ struct SecureStoragePrelude {
     iroh_identity_dir: PathBuf,
 }
 
+struct NamespacedSecureStorage {
+    inner: Arc<dyn SecureStoragePort>,
+    namespace: String,
+}
+
+impl NamespacedSecureStorage {
+    fn new(inner: Arc<dyn SecureStoragePort>, namespace: impl Into<String>) -> Self {
+        Self {
+            inner,
+            namespace: namespace.into(),
+        }
+    }
+
+    fn namespaced_key(&self, key: &str) -> String {
+        format!("{}:{key}", self.namespace)
+    }
+}
+
+impl SecureStoragePort for NamespacedSecureStorage {
+    fn get(&self, key: &str) -> Result<Option<Vec<u8>>, SecureStorageError> {
+        self.inner.get(&self.namespaced_key(key))
+    }
+
+    fn set(&self, key: &str, value: &[u8]) -> Result<(), SecureStorageError> {
+        self.inner.set(&self.namespaced_key(key), value)
+    }
+
+    fn delete(&self, key: &str) -> Result<(), SecureStorageError> {
+        self.inner.delete(&self.namespaced_key(key))
+    }
+}
+
 /// Build the [`SecureStoragePrelude`]: create the secure-storage backend, resolve
 /// and create the (profile-suffixed) iroh-identity dir, then apply any pending
 /// staged import. Runs ahead of the db pool. Idempotent and crash-safe
 /// (secrets-first); the common no-marker import case is a cheap existence check.
 fn build_secure_storage_prelude(
     paths: &uc_application::facade::AppPaths,
+    iroh_identity_dir: PathBuf,
+    secure_storage_namespace: Option<&str>,
 ) -> WiringResult<SecureStoragePrelude> {
     let app_data_root = paths.app_data_root_dir.clone();
 
@@ -210,12 +247,15 @@ fn build_secure_storage_prelude(
             app_data_root.clone(),
         )
         .map_err(|e| WiringError::SecureStorageInit(e.to_string()))?;
+    let secure_storage: Arc<dyn SecureStoragePort> = match secure_storage_namespace {
+        Some(namespace) => Arc::new(NamespacedSecureStorage::new(secure_storage, namespace)),
+        None => secure_storage,
+    };
 
     // iroh device-identity dir (0600 files, profile-suffixed): the staged-import
     // bridge migrates the identity as *files* here, and the config-migration
     // adapter reads its fingerprint from this same dir. `create_dir_all` ensures
     // `FileSecureStorage::with_base_dir` never fails on first identity write.
-    let iroh_identity_dir = apply_profile_suffix(app_data_root.join("iroh-identity"));
     std::fs::create_dir_all(&iroh_identity_dir).map_err(|e| {
         WiringError::SecureStorageInit(format!(
             "failed to create iroh-identity dir {}: {e}",
@@ -734,6 +774,33 @@ pub fn wire_dependencies(
 ) -> WiringResult<(WiredDependencies, BackgroundRuntimeDeps)> {
     let platform_dirs = get_default_app_dirs()?;
     let paths = resolve_app_paths(&platform_dirs, config)?;
+    let layout = CliAppRuntimeProfileLayout {
+        profile_id: String::new(),
+        iroh_identity_dir: apply_profile_suffix(paths.app_data_root_dir.join("iroh-identity")),
+        iroh_blob_dir: apply_profile_suffix(paths.app_data_root_dir.join("iroh-blobs")),
+        secure_storage_namespace: String::new(),
+        paths,
+    };
+    wire_dependencies_with_layout(layout, false)
+}
+
+pub(crate) fn wire_dependencies_for_profile(
+    profile: &CliAppRuntimeProfileConfig,
+) -> WiringResult<(WiredDependencies, BackgroundRuntimeDeps)> {
+    wire_dependencies_with_layout(profile.resolve_layout(), true)
+}
+
+fn wire_dependencies_with_layout(
+    layout: CliAppRuntimeProfileLayout,
+    explicit_profile: bool,
+) -> WiringResult<(WiredDependencies, BackgroundRuntimeDeps)> {
+    let CliAppRuntimeProfileLayout {
+        profile_id: _,
+        paths,
+        iroh_blob_dir,
+        iroh_identity_dir,
+        secure_storage_namespace,
+    } = layout;
 
     // Secure storage + iroh device-identity dir, prepared before the db pool so a
     // staged config import (gap-3 bridge) can land secrets into the same backend
@@ -743,7 +810,11 @@ pub fn wire_dependencies(
     let SecureStoragePrelude {
         secure_storage,
         iroh_identity_dir,
-    } = build_secure_storage_prelude(&paths)?;
+    } = build_secure_storage_prelude(
+        &paths,
+        iroh_identity_dir,
+        explicit_profile.then_some(secure_storage_namespace.as_str()),
+    )?;
 
     let db_path = paths.db_path;
     let vault_path = paths.vault_dir;
@@ -766,13 +837,18 @@ pub fn wire_dependencies(
     )?;
 
     let storage_config = Arc::new(ClipboardStorageConfig::defaults());
-    let platform = create_platform_layer(
+    let platform = create_platform_layer_with_policy(
         secure_storage,
         &vault_path,
         infra.blob_repository.clone(),
         infra.member_repo.clone(),
         infra.clock.clone(),
         storage_config.clone(),
+        if explicit_profile {
+            SystemClipboardPolicy::Noop
+        } else {
+            SystemClipboardPolicy::Auto
+        },
     )?;
 
     // Space access — single session/key access entry. See
@@ -897,8 +973,7 @@ pub fn wire_dependencies(
     // `WiredDependencies` / space_setup instead of recomputing it (avoids divergence).
     // The remaining bypass repos are `Arc::clone`d directly from `infra` at the
     // `WiredDependencies` construction site below (infra retains ownership).
-    let iroh_blob_store_dir_for_wiring =
-        apply_profile_suffix(paths.app_data_root_dir.join("iroh-blobs"));
+    let iroh_blob_store_dir_for_wiring = iroh_blob_dir;
     let iroh_identity_dir_for_wiring = iroh_identity_dir.clone();
 
     // `key_migration` adapter consumes secure_storage from PlatformLayer,
@@ -1098,4 +1173,79 @@ pub(crate) fn build_clipboard_write_coordinator(
             clipboard_change_origin,
         ),
     )
+}
+
+#[cfg(test)]
+mod profile_secure_storage_tests {
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+
+    use uc_core::ports::{SecureStorageError, SecureStoragePort};
+
+    use crate::layer::platform::SystemClipboardWiring;
+
+    use super::{wire_dependencies_for_profile, NamespacedSecureStorage};
+
+    #[derive(Default)]
+    struct MemorySecureStorage {
+        values: Mutex<HashMap<String, Vec<u8>>>,
+    }
+
+    impl SecureStoragePort for MemorySecureStorage {
+        fn get(&self, key: &str) -> Result<Option<Vec<u8>>, SecureStorageError> {
+            Ok(self.values.lock().unwrap().get(key).cloned())
+        }
+
+        fn set(&self, key: &str, value: &[u8]) -> Result<(), SecureStorageError> {
+            self.values
+                .lock()
+                .unwrap()
+                .insert(key.to_string(), value.to_vec());
+            Ok(())
+        }
+
+        fn delete(&self, key: &str) -> Result<(), SecureStorageError> {
+            self.values.lock().unwrap().remove(key);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn explicit_namespaces_isolate_same_secure_storage_key() {
+        // Regression target: forwarding the raw key would let A overwrite B
+        // when a system-backed secure store is shared by the process.
+        let inner = Arc::new(MemorySecureStorage::default());
+        let profile_a = NamespacedSecureStorage::new(inner.clone(), "harmony-profile-a");
+        let profile_b = NamespacedSecureStorage::new(inner.clone(), "harmony-profile-b");
+
+        profile_a.set("space-kek", b"a").unwrap();
+        profile_b.set("space-kek", b"b").unwrap();
+
+        assert_eq!(profile_a.get("space-kek").unwrap(), Some(b"a".to_vec()));
+        assert_eq!(profile_b.get("space-kek").unwrap(), Some(b"b".to_vec()));
+        let values = inner.values.lock().unwrap();
+        assert_eq!(
+            values.get("harmony-profile-a:space-kek"),
+            Some(&b"a".to_vec())
+        );
+        assert_eq!(
+            values.get("harmony-profile-b:space-kek"),
+            Some(&b"b".to_vec())
+        );
+    }
+
+    #[test]
+    fn explicit_profile_wiring_never_owns_the_system_clipboard() {
+        let temp = tempfile::tempdir().unwrap();
+        let profile = crate::layer::paths::CliAppRuntimeProfileConfig::builder("profile-a")
+            .data_root(temp.path().join("data"))
+            .cache_root(temp.path().join("cache"))
+            .secure_storage_namespace("harmony-profile-a")
+            .build()
+            .unwrap();
+
+        let (wired, _background) = wire_dependencies_for_profile(&profile).unwrap();
+
+        assert_eq!(wired.system_clipboard_wiring, SystemClipboardWiring::Noop);
+    }
 }

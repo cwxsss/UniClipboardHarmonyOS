@@ -1,15 +1,19 @@
 import { bundleManager, common } from '@kit.AbilityKit';
+import { util } from '@kit.ArkTS';
 import engine from '@uniclipboard/engine';
+import { createNapiBuffer } from 'uniclipboard_native';
 import {
   EngineHostAdapter,
   EngineHostCallbacks
 } from '../engine/EngineHostAdapter';
-import { EngineClipboardObserver } from '../engine/EngineClipboardHost';
+import { EngineClipboardObserver, EngineClipboardSnapshot } from '../engine/EngineClipboardHost';
 import { EngineHostError } from '../engine/EngineHostError';
+import { Logger } from '../util/Logger';
 
 const ENGINE_EVENT_TIMEOUT_MS: number = 1000;
 const ENGINE_SHUTDOWN_DEADLINE_MS: number = 3000;
-const ENGINE_PROFILE_SUFFIX: string = '.default';
+const ENGINE_PROFILE_SUFFIX: string = '.engine-v1-1';
+const logger: Logger = new Logger('EngineRuntime');
 
 export enum EngineRuntimeState {
   IDLE = 'idle',
@@ -218,6 +222,27 @@ export class EngineWorkspaceConvergence {
   }
 }
 
+export class EngineMemberSyncPreferences {
+  sendEnabled: boolean;
+  text: boolean;
+  image: boolean;
+  file: boolean;
+  link: boolean;
+  codeSnippet: boolean;
+  richText: boolean;
+
+  constructor(sendEnabled: boolean, text: boolean, imageEnabled: boolean, file: boolean,
+    link: boolean, codeSnippet: boolean, richText: boolean) {
+    this.sendEnabled = sendEnabled;
+    this.text = text;
+    this.image = imageEnabled;
+    this.file = file;
+    this.link = link;
+    this.codeSnippet = codeSnippet;
+    this.richText = richText;
+  }
+}
+
 // rc.3 exports these methods from libuc_ohos_napi.so, but omits them from
 // OhEngine in Index.d.ets. Keep the compatibility contract private to this
 // adapter so the rest of the product never touches the native object.
@@ -237,6 +262,13 @@ interface EngineCompatibilityNativeSpaceJoined {
   preservedUnreadableRecords: string | undefined;
 }
 
+interface EngineCompatibilityNativeJoinSpaceStatus {
+  status: string;
+  joinId: string;
+  joinedSpace: EngineCompatibilityNativeSpaceJoined | undefined;
+  rejectionReason: string | undefined;
+}
+
 interface EngineCompatibilityNativeSendReport {
   entryId: string;
   atMs: number;
@@ -247,24 +279,71 @@ interface EngineCompatibilityNativeSendReport {
   totalPending: number;
 }
 
+interface EngineCompatibilityNativeContentTypes {
+  text: boolean;
+  image: boolean;
+  link: boolean;
+  file: boolean;
+  codeSnippet: boolean;
+  richText: boolean;
+}
+
+interface EngineCompatibilityNativeContentTypesPatch {
+  text?: boolean;
+  image?: boolean;
+  link?: boolean;
+  file?: boolean;
+  codeSnippet?: boolean;
+  richText?: boolean;
+}
+
+interface EngineCompatibilityNativeMemberSyncPreferences {
+  sendEnabled: boolean;
+  sendContentTypes: EngineCompatibilityNativeContentTypes;
+}
+
+interface EngineCompatibilityNativeMemberSyncPreferencesPatch {
+  sendEnabled?: boolean;
+  sendContentTypes?: EngineCompatibilityNativeContentTypesPatch;
+}
+
 interface EngineCompatibilityNativeHandle {
   issueInvitation(): Promise<EngineCompatibilityNativeInvitation>;
   joinSpace(invitationCode: string, deviceName: string | null, passphrase: string,
-    preserveUnreadableHistory: boolean): Promise<EngineCompatibilityNativeSpaceJoined>;
-  sendImage(bytes: Uint8Array, mimeType: string, targetDevices: string[]):
+    preserveUnreadableHistory: boolean): Promise<EngineCompatibilityNativeJoinSpaceStatus>;
+  // The helper returns an actual N-API Buffer even though its ArkTS type is
+  // declared as ArrayBuffer because the generated bridge declaration cannot
+  // express the native Buffer class.
+  sendImage(bytes: ArrayBuffer, mimeType: string, targetDevices: string[]):
     Promise<EngineCompatibilityNativeSendReport>;
   sendFiles(fileHandles: string[], targetDevices: string[]): Promise<EngineCompatibilityNativeSendReport>;
   captureCurrentClipboard(): Promise<string | null>;
   restoreClipboard(entryId: string, mode: string): Promise<string>;
   queryDeviceTrust(): Promise<string>;
+  queryMemberSyncPreferences(deviceId: string): Promise<EngineCompatibilityNativeMemberSyncPreferences>;
+  updateMemberSyncPreferences(deviceId: string, patch: EngineCompatibilityNativeMemberSyncPreferencesPatch):
+    Promise<EngineCompatibilityNativeMemberSyncPreferences>;
   decideDeviceTrustChange(changeId: string, choice: string,
     confirmLocalRemoval: boolean): Promise<string>;
+}
+
+function normalizeMemberSyncPreferences(
+  preferences: EngineCompatibilityNativeMemberSyncPreferences): EngineMemberSyncPreferences {
+  return new EngineMemberSyncPreferences(
+    preferences.sendEnabled,
+    preferences.sendContentTypes.text,
+    preferences.sendContentTypes.image,
+    preferences.sendContentTypes.file,
+    preferences.sendContentTypes.link,
+    preferences.sendContentTypes.codeSnippet,
+    preferences.sendContentTypes.richText);
 }
 
 export interface EngineRuntimeHandle {
   lifecycleState(): Promise<string>;
   suspend(): Promise<void>;
   resume(): Promise<void>;
+  recoverNetwork(): Promise<void>;
   nextEvent(timeoutMs: number): Promise<EngineRuntimeEvent | null>;
   shutdown(deadlineMs: number): Promise<void>;
   createSpace(deviceName: string | null, passphrase: string): Promise<EngineSpaceCreated>;
@@ -277,6 +356,10 @@ export interface EngineRuntimeHandle {
   sendFiles(fileHandles: string[], targetDevices: string[]): Promise<EngineSendReport>;
   captureCurrentClipboard(): Promise<string | null>;
   queryActiveClipboard(): Promise<EngineActiveClipboard | null>;
+  queryMemberSyncPreferences(deviceId: string): Promise<EngineMemberSyncPreferences>;
+  updateMemberSendPreferences(deviceId: string, sendEnabled: boolean, text: boolean, imageEnabled: boolean,
+    file: boolean, link: boolean, richText: boolean): Promise<EngineMemberSyncPreferences>;
+  resetMemberSyncPreferences(deviceId: string): Promise<EngineMemberSyncPreferences>;
   restoreClipboard(entryId: string, mode: string): Promise<string>;
   exportEntry(entryId: string, destinationHandle: string): Promise<void>;
   removeMember(deviceId: string): Promise<EngineWorkspaceConvergence>;
@@ -293,6 +376,8 @@ export interface EngineRuntimeBackend {
 export interface EngineRuntimeHost {
   prepare(context: common.UIAbilityContext): EngineHostCallbacks;
   listenClipboard(observer: EngineClipboardObserver): void;
+  releaseClipboardListener(): void;
+  setClipboardPollingEnabled(enabled: boolean): void;
   registerInputFile(uri: string, mimeType: string): string;
   registerOutputFile(uri: string, mimeType: string): string;
   releaseFile(handle: string): void;
@@ -312,6 +397,7 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
       (): Promise<string> => rawHandle.lifecycleState(),
       (): Promise<void> => rawHandle.suspend(),
       (): Promise<void> => rawHandle.resume(),
+      (): Promise<void> => rawHandle.recoverNetwork(),
       async (timeoutMs: number): Promise<EngineRuntimeEvent | null> => {
         let rawEvent = await rawHandle.nextEvent(timeoutMs);
         if (rawEvent === null) {
@@ -345,8 +431,13 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
       },
       async (invitationCode: string, deviceName: string | null, passphrase: string,
         preserveUnreadableHistory: boolean): Promise<EngineSpaceJoined> => {
-        let result: EngineCompatibilityNativeSpaceJoined = await compatibilityHandle.joinSpace(invitationCode, deviceName, passphrase,
+        let status: EngineCompatibilityNativeJoinSpaceStatus = await compatibilityHandle.joinSpace(invitationCode, deviceName, passphrase,
           preserveUnreadableHistory);
+        if (status.status !== 'active' || status.joinedSpace === undefined) {
+          let reason: string = status.rejectionReason === undefined ? status.status : status.rejectionReason;
+          throw new Error('join_space_' + reason);
+        }
+        let result: EngineCompatibilityNativeSpaceJoined = status.joinedSpace;
         return new EngineSpaceJoined(result.sponsorDeviceId, result.sponsorIdentityFingerprint,
           result.spaceId, result.selfDeviceId, result.selfIdentityFingerprint,
           result.migratedRecords, result.preservedUnreadableRecords);
@@ -357,7 +448,9 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
           result.totalDuplicate, result.totalOffline, result.totalErrored, result.totalPending);
       },
       async (bytes: Uint8Array, mimeType: string, targetDevices: string[]): Promise<EngineSendReport> => {
-        let result: EngineCompatibilityNativeSendReport = await compatibilityHandle.sendImage(bytes, mimeType, targetDevices);
+        let nativeBytes: ArrayBuffer = createNapiBuffer(bytes);
+        let result: EngineCompatibilityNativeSendReport = await compatibilityHandle.sendImage(nativeBytes,
+          mimeType, targetDevices);
         return new EngineSendReport(result.entryId, result.atMs, result.totalAccepted,
           result.totalDuplicate, result.totalOffline, result.totalErrored, result.totalPending);
       },
@@ -373,6 +466,43 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
           return null;
         }
         return new EngineActiveClipboard(result.entryId, result.activatedBy);
+      },
+      async (deviceId: string): Promise<EngineMemberSyncPreferences> => {
+        let result: EngineCompatibilityNativeMemberSyncPreferences =
+          await compatibilityHandle.queryMemberSyncPreferences(deviceId);
+        return normalizeMemberSyncPreferences(result);
+      },
+      async (deviceId: string, sendEnabled: boolean, text: boolean, imageEnabled: boolean,
+        file: boolean, link: boolean, richText: boolean): Promise<EngineMemberSyncPreferences> => {
+        let patch: EngineCompatibilityNativeMemberSyncPreferencesPatch = {
+          sendEnabled: sendEnabled,
+          sendContentTypes: {
+            text: text,
+            image: imageEnabled,
+            file: file,
+            link: link,
+            richText: richText
+          }
+        };
+        let result: EngineCompatibilityNativeMemberSyncPreferences =
+          await compatibilityHandle.updateMemberSyncPreferences(deviceId, patch);
+        return normalizeMemberSyncPreferences(result);
+      },
+      async (deviceId: string): Promise<EngineMemberSyncPreferences> => {
+        let patch: EngineCompatibilityNativeMemberSyncPreferencesPatch = {
+          sendEnabled: true,
+          sendContentTypes: {
+            text: true,
+            image: true,
+            file: true,
+            link: true,
+            codeSnippet: true,
+            richText: true
+          }
+        };
+        let result: EngineCompatibilityNativeMemberSyncPreferences =
+          await compatibilityHandle.updateMemberSyncPreferences(deviceId, patch);
+        return normalizeMemberSyncPreferences(result);
       },
       (entryId: string, mode: string): Promise<string> => compatibilityHandle.restoreClipboard(entryId, mode),
       (entryId: string, destinationHandle: string): Promise<void> => rawHandle.exportEntry(entryId,
@@ -392,6 +522,7 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
   private lifecycleStateCallback: () => Promise<string>;
   private suspendCallback: () => Promise<void>;
   private resumeCallback: () => Promise<void>;
+  private recoverNetworkCallback: () => Promise<void>;
   private nextEventCallback: (timeoutMs: number) => Promise<EngineRuntimeEvent | null>;
   private shutdownCallback: (deadlineMs: number) => Promise<void>;
   private createSpaceCallback: (deviceName: string | null, passphrase: string) => Promise<EngineSpaceCreated>;
@@ -405,6 +536,10 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
   private sendFilesCallback: (fileHandles: string[], targetDevices: string[]) => Promise<EngineSendReport>;
   private captureCurrentClipboardCallback: () => Promise<string | null>;
   private queryActiveClipboardCallback: () => Promise<EngineActiveClipboard | null>;
+  private queryMemberSyncPreferencesCallback: (deviceId: string) => Promise<EngineMemberSyncPreferences>;
+  private updateMemberSendPreferencesCallback: (deviceId: string, sendEnabled: boolean, text: boolean,
+    imageEnabled: boolean, file: boolean, link: boolean, richText: boolean) => Promise<EngineMemberSyncPreferences>;
+  private resetMemberSyncPreferencesCallback: (deviceId: string) => Promise<EngineMemberSyncPreferences>;
   private restoreClipboardCallback: (entryId: string, mode: string) => Promise<string>;
   private exportEntryCallback: (entryId: string, destinationHandle: string) => Promise<void>;
   private removeMemberCallback: (deviceId: string) => Promise<EngineWorkspaceConvergence>;
@@ -414,6 +549,7 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
 
   constructor(lifecycleStateCallback: () => Promise<string>, suspendCallback: () => Promise<void>,
     resumeCallback: () => Promise<void>,
+    recoverNetworkCallback: () => Promise<void>,
     nextEventCallback: (timeoutMs: number) => Promise<EngineRuntimeEvent | null>,
     shutdownCallback: (deadlineMs: number) => Promise<void>,
     createSpaceCallback: (deviceName: string | null, passphrase: string) => Promise<EngineSpaceCreated>,
@@ -426,6 +562,10 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
     sendFilesCallback: (fileHandles: string[], targetDevices: string[]) => Promise<EngineSendReport>,
     captureCurrentClipboardCallback: () => Promise<string | null>,
     queryActiveClipboardCallback: () => Promise<EngineActiveClipboard | null>,
+    queryMemberSyncPreferencesCallback: (deviceId: string) => Promise<EngineMemberSyncPreferences>,
+    updateMemberSendPreferencesCallback: (deviceId: string, sendEnabled: boolean, text: boolean,
+      imageEnabled: boolean, file: boolean, link: boolean, richText: boolean) => Promise<EngineMemberSyncPreferences>,
+    resetMemberSyncPreferencesCallback: (deviceId: string) => Promise<EngineMemberSyncPreferences>,
     restoreClipboardCallback: (entryId: string, mode: string) => Promise<string>,
     exportEntryCallback: (entryId: string, destinationHandle: string) => Promise<void>,
     removeMemberCallback: (deviceId: string) => Promise<EngineWorkspaceConvergence>,
@@ -435,6 +575,7 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
     this.lifecycleStateCallback = lifecycleStateCallback;
     this.suspendCallback = suspendCallback;
     this.resumeCallback = resumeCallback;
+    this.recoverNetworkCallback = recoverNetworkCallback;
     this.nextEventCallback = nextEventCallback;
     this.shutdownCallback = shutdownCallback;
     this.createSpaceCallback = createSpaceCallback;
@@ -446,6 +587,9 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
     this.sendFilesCallback = sendFilesCallback;
     this.captureCurrentClipboardCallback = captureCurrentClipboardCallback;
     this.queryActiveClipboardCallback = queryActiveClipboardCallback;
+    this.queryMemberSyncPreferencesCallback = queryMemberSyncPreferencesCallback;
+    this.updateMemberSendPreferencesCallback = updateMemberSendPreferencesCallback;
+    this.resetMemberSyncPreferencesCallback = resetMemberSyncPreferencesCallback;
     this.restoreClipboardCallback = restoreClipboardCallback;
     this.exportEntryCallback = exportEntryCallback;
     this.removeMemberCallback = removeMemberCallback;
@@ -463,6 +607,10 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
 
   async resume(): Promise<void> {
     await this.resumeCallback();
+  }
+
+  async recoverNetwork(): Promise<void> {
+    await this.recoverNetworkCallback();
   }
 
   async nextEvent(timeoutMs: number): Promise<EngineRuntimeEvent | null> {
@@ -510,6 +658,20 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
     return await this.queryActiveClipboardCallback();
   }
 
+  async queryMemberSyncPreferences(deviceId: string): Promise<EngineMemberSyncPreferences> {
+    return await this.queryMemberSyncPreferencesCallback(deviceId);
+  }
+
+  async updateMemberSendPreferences(deviceId: string, sendEnabled: boolean, text: boolean, imageEnabled: boolean,
+    file: boolean, link: boolean, richText: boolean): Promise<EngineMemberSyncPreferences> {
+    return await this.updateMemberSendPreferencesCallback(deviceId, sendEnabled, text, imageEnabled,
+      file, link, richText);
+  }
+
+  async resetMemberSyncPreferences(deviceId: string): Promise<EngineMemberSyncPreferences> {
+    return await this.resetMemberSyncPreferencesCallback(deviceId);
+  }
+
   async restoreClipboard(entryId: string, mode: string): Promise<string> {
     return await this.restoreClipboardCallback(entryId, mode);
   }
@@ -534,13 +696,26 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
 
 class OfficialEngineRuntimeHost implements EngineRuntimeHost {
   private adapter: EngineHostAdapter = new EngineHostAdapter();
+  private profileId: string;
+
+  constructor(profileId: string) {
+    this.profileId = profileId;
+  }
 
   prepare(context: common.UIAbilityContext): EngineHostCallbacks {
-    return this.adapter.prepare(context);
+    return this.adapter.prepare(context, this.profileId);
   }
 
   listenClipboard(observer: EngineClipboardObserver): void {
     this.adapter.listenClipboard(observer);
+  }
+
+  releaseClipboardListener(): void {
+    this.adapter.releaseClipboardListener();
+  }
+
+  setClipboardPollingEnabled(enabled: boolean): void {
+    this.adapter.setClipboardPollingEnabled(enabled);
   }
 
   registerInputFile(uri: string, mimeType: string): string {
@@ -565,6 +740,8 @@ export class EngineRuntimeService implements EngineClipboardObserver {
 
   private backend: EngineRuntimeBackend;
   private host: EngineRuntimeHost;
+  private profileId: string;
+  private clipboardCaptureEnabled: boolean;
   private state: EngineRuntimeState = EngineRuntimeState.IDLE;
   private lastErrorCategory: string = '';
   private callbacks: EngineHostCallbacks | null = null;
@@ -573,31 +750,78 @@ export class EngineRuntimeService implements EngineClipboardObserver {
   private handle: EngineRuntimeHandle | null = null;
   private prepareTask: Promise<void> | null = null;
   private startTask: Promise<void> | null = null;
+  private recoverSessionTask: Promise<EngineSessionRecovery> | null = null;
   private suspendTask: Promise<void> | null = null;
   private resumeTask: Promise<void> | null = null;
   private shutdownTask: Promise<void> | null = null;
   private eventPollTask: Promise<void> | null = null;
   private clipboardCaptureTask: Promise<void> | null = null;
+  private pendingClipboardSnapshot: EngineClipboardSnapshot | null = null;
   private clipboardWriteSuppression: boolean = false;
+  private clipboardAutoSendTargets: string[] = [];
   private eventPolling: boolean = false;
   private observers: EngineRuntimeObserver[] = [];
   private eventObservers: EngineRuntimeEventObserver[] = [];
 
-  private constructor(backend: EngineRuntimeBackend, host: EngineRuntimeHost) {
+  private constructor(backend: EngineRuntimeBackend, host: EngineRuntimeHost,
+    profileId: string = ENGINE_PROFILE_SUFFIX, clipboardCaptureEnabled: boolean = true) {
     this.backend = backend;
     this.host = host;
+    this.profileId = profileId;
+    this.clipboardCaptureEnabled = clipboardCaptureEnabled;
   }
 
   static getInstance(): EngineRuntimeService {
     if (EngineRuntimeService.instance === null) {
       EngineRuntimeService.instance = new EngineRuntimeService(
-        new OfficialEngineRuntimeBackend(), new OfficialEngineRuntimeHost());
+        new OfficialEngineRuntimeBackend(), new OfficialEngineRuntimeHost(ENGINE_PROFILE_SUFFIX));
     }
     return EngineRuntimeService.instance;
   }
 
   static createForTesting(backend: EngineRuntimeBackend, host: EngineRuntimeHost): EngineRuntimeService {
     return new EngineRuntimeService(backend, host);
+  }
+
+  static createForProfile(profileId: string, clipboardCaptureEnabled: boolean): EngineRuntimeService {
+    return new EngineRuntimeService(new OfficialEngineRuntimeBackend(), new OfficialEngineRuntimeHost(profileId),
+      profileId, clipboardCaptureEnabled);
+  }
+
+  getProfileId(): string {
+    return this.profileId;
+  }
+
+  async activateProfile(context: common.UIAbilityContext, profileId: string): Promise<EngineSessionRecovery> {
+    if (profileId.length === 0) {
+      throw new EngineRuntimeError('invalid_profile', 'activate_profile');
+    }
+    if (this.profileId !== profileId) {
+      await this.shutdown();
+      if (!(this.host instanceof OfficialEngineRuntimeHost)) {
+        throw new EngineRuntimeError('invalid_runtime', 'activate_profile');
+      }
+      this.profileId = profileId;
+      this.host = new OfficialEngineRuntimeHost(profileId);
+    }
+    await this.prepare(context);
+    await this.start();
+    return await this.recoverSession(true);
+  }
+
+  setClipboardCaptureEnabled(enabled: boolean): void {
+    if (this.clipboardCaptureEnabled === enabled) {
+      return;
+    }
+    this.clipboardCaptureEnabled = enabled;
+    if (this.state !== EngineRuntimeState.RUNNING && this.state !== EngineRuntimeState.SUSPENDED) {
+      return;
+    }
+    if (enabled) {
+      this.host.listenClipboard(this);
+    } else {
+      this.host.releaseClipboardListener();
+    }
   }
 
   async prepareForTesting(callbacks: EngineHostCallbacks, config: EngineRuntimeStartConfig): Promise<void> {
@@ -694,9 +918,29 @@ export class EngineRuntimeService implements EngineClipboardObserver {
   }
 
   async recoverSession(allowSecureStorageUnlock: boolean): Promise<EngineSessionRecovery> {
+    let activeTask: Promise<EngineSessionRecovery> | null = this.recoverSessionTask;
+    if (activeTask === null) {
+      activeTask = this.performRecoverSession(allowSecureStorageUnlock);
+      this.recoverSessionTask = activeTask;
+    }
+    try {
+      return await activeTask;
+    } finally {
+      if (this.recoverSessionTask === activeTask) {
+        this.recoverSessionTask = null;
+      }
+    }
+  }
+
+  private async performRecoverSession(allowSecureStorageUnlock: boolean): Promise<EngineSessionRecovery> {
     return await this.executeFeature('recover_session',
       (handle: EngineRuntimeHandle): Promise<EngineSessionRecovery> =>
         handle.recoverSession(allowSecureStorageUnlock));
+  }
+
+  async recoverNetwork(): Promise<void> {
+    await this.executeFeature('recover_network',
+      (handle: EngineRuntimeHandle): Promise<void> => handle.recoverNetwork());
   }
 
   async issueInvitation(): Promise<EngineInvitationIssued> {
@@ -750,9 +994,44 @@ export class EngineRuntimeService implements EngineClipboardObserver {
       (handle: EngineRuntimeHandle): Promise<string | null> => handle.captureCurrentClipboard());
   }
 
+  setClipboardPollingEnabled(enabled: boolean): void {
+    this.host.setClipboardPollingEnabled(enabled && this.clipboardCaptureEnabled);
+  }
+
+  setClipboardAutoSendTargets(targetDevices: string[]): void {
+    let sanitizedTargets: string[] = [];
+    for (let index: number = 0; index < targetDevices.length; index += 1) {
+      let deviceId: string = targetDevices[index].trim();
+      if (deviceId.length > 0 && sanitizedTargets.indexOf(deviceId) < 0) {
+        sanitizedTargets.push(deviceId);
+      }
+    }
+    this.clipboardAutoSendTargets = sanitizedTargets;
+    logger.info('Clipboard automatic send target count=' + sanitizedTargets.length.toString());
+  }
+
   async queryActiveClipboard(): Promise<EngineActiveClipboard | null> {
     return await this.executeReadOnly('query_active_clipboard',
       (handle: EngineRuntimeHandle): Promise<EngineActiveClipboard | null> => handle.queryActiveClipboard());
+  }
+
+  async queryMemberSyncPreferences(deviceId: string): Promise<EngineMemberSyncPreferences> {
+    return await this.executeReadOnly('query_member_sync_preferences',
+      (handle: EngineRuntimeHandle): Promise<EngineMemberSyncPreferences> =>
+        handle.queryMemberSyncPreferences(deviceId));
+  }
+
+  async updateMemberSendPreferences(deviceId: string, sendEnabled: boolean, text: boolean, imageEnabled: boolean,
+    file: boolean, link: boolean, richText: boolean): Promise<EngineMemberSyncPreferences> {
+    return await this.executeFeature('update_member_sync_preferences',
+      (handle: EngineRuntimeHandle): Promise<EngineMemberSyncPreferences> =>
+        handle.updateMemberSendPreferences(deviceId, sendEnabled, text, imageEnabled, file, link, richText));
+  }
+
+  async resetMemberSyncPreferences(deviceId: string): Promise<EngineMemberSyncPreferences> {
+    return await this.executeFeature('reset_member_sync_preferences',
+      (handle: EngineRuntimeHandle): Promise<EngineMemberSyncPreferences> =>
+        handle.resetMemberSyncPreferences(deviceId));
   }
 
   async queryDevices(): Promise<EngineRuntimeDevice[]> {
@@ -835,12 +1114,16 @@ export class EngineRuntimeService implements EngineClipboardObserver {
         choice, confirmLocalRemoval));
   }
 
-  onClipboardChanged(): void {
-    if (this.clipboardWriteSuppression || this.clipboardCaptureTask !== null ||
-      this.state !== EngineRuntimeState.RUNNING) {
+  onClipboardChanged(snapshot: EngineClipboardSnapshot): void {
+    logger.info('Clipboard observer invoked state=' + this.state);
+    if (this.clipboardWriteSuppression || this.state !== EngineRuntimeState.RUNNING) {
       return;
     }
-    let task: Promise<void> = this.captureCurrentClipboardFromHost();
+    if (this.clipboardCaptureTask !== null) {
+      this.pendingClipboardSnapshot = snapshot;
+      return;
+    }
+    let task: Promise<void> = this.drainClipboardSnapshots(snapshot);
     this.clipboardCaptureTask = task;
     task.then((): void => {
       if (this.clipboardCaptureTask === task) {
@@ -876,6 +1159,13 @@ export class EngineRuntimeService implements EngineClipboardObserver {
     let pendingStart: Promise<void> | null = this.startTask;
     if (pendingStart !== null) {
       await pendingStart;
+    }
+    let pendingRecovery: Promise<EngineSessionRecovery> | null = this.recoverSessionTask;
+    if (pendingRecovery !== null) {
+      try {
+        await pendingRecovery;
+      } catch (error) {
+      }
     }
     if (this.state !== EngineRuntimeState.RUNNING || this.handle === null) {
       return;
@@ -946,8 +1236,7 @@ export class EngineRuntimeService implements EngineClipboardObserver {
       this.callbacks = this.host.prepare(context);
       let bundleInfo: bundleManager.BundleInfo = bundleManager.getBundleInfoForSelfSync(
         bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_APPLICATION);
-      this.startConfig = new EngineRuntimeStartConfig(
-        bundleInfo.versionName, bundleInfo.name + ENGINE_PROFILE_SUFFIX);
+      this.startConfig = new EngineRuntimeStartConfig(bundleInfo.versionName, this.profileId);
       this.lastErrorCategory = '';
       this.setState(EngineRuntimeState.IDLE);
     } catch (error) {
@@ -970,7 +1259,9 @@ export class EngineRuntimeService implements EngineClipboardObserver {
       let preparedHost: Object = this.preparedHost;
       let startedHandle: EngineRuntimeHandle = await this.backend.startEngine(config, preparedHost);
       this.handle = startedHandle;
-      this.host.listenClipboard(this);
+      if (this.clipboardCaptureEnabled) {
+        this.host.listenClipboard(this);
+      }
       this.startEventPolling(startedHandle);
       this.lastErrorCategory = '';
       this.setState(EngineRuntimeState.RUNNING);
@@ -1005,6 +1296,13 @@ export class EngineRuntimeService implements EngineClipboardObserver {
     if (pendingResume !== null) {
       try {
         await pendingResume;
+      } catch (error) {
+      }
+    }
+    let pendingRecovery: Promise<EngineSessionRecovery> | null = this.recoverSessionTask;
+    if (pendingRecovery !== null) {
+      try {
+        await pendingRecovery;
       } catch (error) {
       }
     }
@@ -1062,12 +1360,14 @@ export class EngineRuntimeService implements EngineClipboardObserver {
           break;
         }
         if (event !== null) {
+          logger.info('Engine event kind=' + event.kind);
           this.notifyEventObservers(event);
         }
       }
     } catch (error) {
       if (this.eventPolling && this.handle === startedHandle) {
-        this.fail('event_poll', error);
+        let runtimeError: EngineRuntimeError = this.toRuntimeError('event_poll', error as Object);
+        logger.warn('Engine event polling stopped category=' + runtimeError.category);
       }
     } finally {
       this.eventPolling = false;
@@ -1105,19 +1405,53 @@ export class EngineRuntimeService implements EngineClipboardObserver {
     this.startConfig = null;
     this.eventPollTask = null;
     this.clipboardCaptureTask = null;
+    this.pendingClipboardSnapshot = null;
     this.clipboardWriteSuppression = false;
     this.eventPolling = false;
   }
 
-  private async captureCurrentClipboardFromHost(): Promise<void> {
+  private async sendClipboardSnapshotFromHost(snapshot: EngineClipboardSnapshot): Promise<void> {
+    let text: string = this.extractClipboardText(snapshot);
+    if (text.length === 0) {
+      logger.info('Automatic clipboard send skipped reason=no_text');
+      return;
+    }
+    if (this.clipboardAutoSendTargets.length === 0) {
+      logger.warn('Automatic clipboard send skipped reason=no_target');
+      return;
+    }
     try {
       let handle: EngineRuntimeHandle = this.requireRunningHandle('capture_clipboard');
-      await handle.captureCurrentClipboard();
+      let report: EngineSendReport = await handle.sendText(text, this.clipboardAutoSendTargets);
+      logger.info('Automatic clipboard send completed accepted=' + report.totalAccepted.toString() +
+        ' pending=' + report.totalPending.toString() +
+        ' offline=' + report.totalOffline.toString() +
+        ' errored=' + report.totalErrored.toString());
     } catch (error) {
-      // Clipboard reads can be denied when the app is not running behind a
-      // user-authorized PasteButton. A denied capture must not stop the
-      // official Engine event loop or invalidate an already joined session.
+      let runtimeError: EngineRuntimeError = this.toRuntimeError('send_clipboard', error as Object);
+      logger.warn('Automatic clipboard send failed category=' + runtimeError.category);
     }
+  }
+
+  private async drainClipboardSnapshots(initialSnapshot: EngineClipboardSnapshot): Promise<void> {
+    let snapshot: EngineClipboardSnapshot | null = initialSnapshot;
+    while (snapshot !== null) {
+      await this.sendClipboardSnapshotFromHost(snapshot);
+      snapshot = this.pendingClipboardSnapshot;
+      this.pendingClipboardSnapshot = null;
+    }
+  }
+
+  private extractClipboardText(snapshot: EngineClipboardSnapshot): string {
+    let decoder: util.TextDecoder = util.TextDecoder.create('utf-8', { fatal: false, ignoreBOM: true });
+    for (let index: number = 0; index < snapshot.representations.length; index += 1) {
+      let representation = snapshot.representations[index];
+      if (representation.kind === 'inline' && representation.format === 'text/plain' &&
+        representation.bytes !== undefined) {
+        return decoder.decodeToString(representation.bytes);
+      }
+    }
+    return '';
   }
 
   private requireRunningHandle(operation: string): EngineRuntimeHandle {
@@ -1131,9 +1465,14 @@ export class EngineRuntimeService implements EngineClipboardObserver {
     action: (handle: EngineRuntimeHandle) => Promise<T>): Promise<T> {
     let handle: EngineRuntimeHandle = this.requireRunningHandle(operation);
     try {
-      return await action(handle);
+      let result: T = await action(handle);
+      if (this.state === EngineRuntimeState.RUNNING && this.handle === handle && this.eventPollTask === null) {
+        this.startEventPolling(handle);
+      }
+      return result;
     } catch (error) {
-      throw this.fail(operation, error);
+      // An operation failure such as a stale invitation must not tear down a healthy runtime.
+      throw this.toRuntimeError(operation, error);
     }
   }
 

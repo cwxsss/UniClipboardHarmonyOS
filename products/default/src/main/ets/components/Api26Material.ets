@@ -1,5 +1,4 @@
-import { CommonModifier, uiMaterial } from '@kit.ArkUI';
-import { deviceInfo } from '@kit.BasicServicesKit';
+import { CommonModifier } from '@kit.ArkUI';
 import { ClipboardFeatureController } from 'clipboard_feature';
 
 enum Api26MaterialRole {
@@ -24,57 +23,8 @@ export class Api26MaterialModifier extends CommonModifier {
     this.role = role;
   }
 
-  private resolveStyle(): uiMaterial.ImmersiveStyle {
-    let selectedStyle: number = this.controller.appearanceComponentMaterialStyle;
-    if (selectedStyle === 0) {
-      return uiMaterial.ImmersiveStyle.ULTRA_THIN;
-    }
-    if (selectedStyle === 1) {
-      return uiMaterial.ImmersiveStyle.THIN;
-    }
-    if (selectedStyle === 3) {
-      return uiMaterial.ImmersiveStyle.THICK;
-    }
-    if (selectedStyle === 4) {
-      return uiMaterial.ImmersiveStyle.ULTRA_THICK;
-    }
-    return uiMaterial.ImmersiveStyle.REGULAR;
-  }
-
   applyNormalAttribute(instance: CommonAttribute): void {
-    if (deviceInfo.apiAvailable('26.0.0') && this.controller.appearanceComponentMaterialStyle >= 0) {
-      let style: uiMaterial.ImmersiveStyle = this.resolveStyle();
-      let interactive: boolean = false;
-      let applyShadow: boolean = false;
-      let colorInvert: boolean = false;
-
-      if (this.role === Api26MaterialRole.INTERACTIVE || this.role === Api26MaterialRole.ACCENT ||
-        this.role === Api26MaterialRole.NAVIGATION || this.role === Api26MaterialRole.NAVIGATION_SELECTED) {
-        interactive = true;
-      }
-      if (this.role === Api26MaterialRole.PANEL || this.role === Api26MaterialRole.INTERACTIVE ||
-        this.role === Api26MaterialRole.FLOATING || this.role === Api26MaterialRole.ACCENT) {
-        applyShadow = true;
-      }
-      let options: uiMaterial.ImmersiveOptions = {
-        style: style,
-        colorInvert: colorInvert,
-        applyShadow: applyShadow,
-        interactive: interactive
-      };
-      if (this.role === Api26MaterialRole.ACCENT || this.role === Api26MaterialRole.NAVIGATION_SELECTED) {
-        options.materialColor = this.controller.accentMediumColor();
-      } else if (this.role === Api26MaterialRole.ACCENT_SURFACE) {
-        options.materialColor = this.controller.accentSoftColor();
-      }
-      if (interactive) {
-        let lightEffect: uiMaterial.LightEffectOptions = {
-          color: this.controller.accentColor()
-        };
-        options.lightEffect = lightEffect;
-      }
-      instance.systemMaterial(new uiMaterial.ImmersiveMaterial(options));
-    }
+    // API 26 system material is unavailable when compiling against API 24.
   }
 }
 
@@ -152,18 +102,10 @@ export class Api26Material {
   }
 
   public static accentTextColor(): ResourceColor {
-    if (deviceInfo.apiAvailable('26.0.0') &&
-      ClipboardFeatureController.getInstance().appearanceComponentMaterialStyle >= 0) {
-      return $r('app.color.text_primary');
-    }
     return $r('app.color.on_accent');
   }
 
   public static cardBackgroundColor(): ResourceColor {
-    if (deviceInfo.apiAvailable('26.0.0') &&
-      ClipboardFeatureController.getInstance().appearanceComponentMaterialStyle >= 0) {
-      return Color.Transparent;
-    }
     return $r('app.color.surface');
   }
 

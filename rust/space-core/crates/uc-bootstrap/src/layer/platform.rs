@@ -40,6 +40,29 @@ pub enum SystemClipboardWiring {
     Noop,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SystemClipboardPolicy {
+    /// Preserve the legacy environment/capability decision.
+    Auto,
+    /// Never construct an OS clipboard adapter for this runtime.
+    Noop,
+}
+
+fn select_system_clipboard_wiring(
+    policy: SystemClipboardPolicy,
+    disable_from_env: bool,
+    capability: uc_platform::capability::SystemClipboardCapability,
+) -> SystemClipboardWiring {
+    if policy == SystemClipboardPolicy::Noop
+        || disable_from_env
+        || capability == uc_platform::capability::SystemClipboardCapability::NoDisplaySession
+    {
+        SystemClipboardWiring::Noop
+    } else {
+        SystemClipboardWiring::Real
+    }
+}
+
 pub struct PlatformLayer {
     // System clipboard
     pub clipboard: Arc<dyn PlatformClipboardPort>,
@@ -88,9 +111,28 @@ pub fn create_platform_layer(
     clock: Arc<dyn ClockPort>,
     storage_config: Arc<ClipboardStorageConfig>,
 ) -> WiringResult<PlatformLayer> {
-    // Which system clipboard adapter to wire. Two reasons to substitute the
-    // no-op adapter, both decided here in the composition root (uc-platform
-    // only reports capability):
+    create_platform_layer_with_policy(
+        secure_storage,
+        config_dir,
+        blob_repository,
+        _member_repo,
+        clock,
+        storage_config,
+        SystemClipboardPolicy::Auto,
+    )
+}
+
+pub(crate) fn create_platform_layer_with_policy(
+    secure_storage: Arc<dyn SecureStoragePort>,
+    config_dir: &PathBuf,
+    blob_repository: Arc<dyn BlobRepositoryPort>,
+    _member_repo: Arc<dyn uc_core::MemberRepositoryPort>,
+    clock: Arc<dyn ClockPort>,
+    storage_config: Arc<ClipboardStorageConfig>,
+    system_clipboard_policy: SystemClipboardPolicy,
+) -> WiringResult<PlatformLayer> {
+    // Which system clipboard adapter to wire. Explicit profile runtimes force
+    // Noop; legacy callers retain the environment/capability decision below.
     //
     // 1. `UC_DISABLE_SYSTEM_CLIPBOARD=1` — explicit opt-out. Slice 1 CLI
     //    commands (init/invite/join) do not touch the system clipboard, but a
@@ -117,13 +159,22 @@ pub fn create_platform_layer(
                 "1" | "true" | "yes" | "on"
             )
         });
-    let system_clipboard_wiring = if disable_system_clipboard {
+    let clipboard_capability = uc_platform::capability::detect_system_clipboard_capability();
+    let system_clipboard_wiring = select_system_clipboard_wiring(
+        system_clipboard_policy,
+        disable_system_clipboard,
+        clipboard_capability,
+    );
+    if system_clipboard_policy == SystemClipboardPolicy::Noop {
+        tracing::info!(
+            "profile runtime uses NoopSystemClipboard; ArkTS owns the only HarmonyOS pasteboard entry"
+        );
+    } else if disable_system_clipboard {
         tracing::info!(
             "UC_DISABLE_SYSTEM_CLIPBOARD set; substituting NoopSystemClipboard \
              (any clipboard capture / write is a no-op)"
         );
-        SystemClipboardWiring::Noop
-    } else if uc_platform::capability::detect_system_clipboard_capability()
+    } else if clipboard_capability
         == uc_platform::capability::SystemClipboardCapability::NoDisplaySession
     {
         tracing::warn!(
@@ -131,10 +182,7 @@ pub fn create_platform_layer(
              substituting NoopSystemClipboard so the process can still serve \
              history / transfer / API duties on this headless host"
         );
-        SystemClipboardWiring::Noop
-    } else {
-        SystemClipboardWiring::Real
-    };
+    }
     let (clipboard, system_clipboard): (
         Arc<dyn PlatformClipboardPort>,
         Arc<dyn SystemClipboardPort>,
@@ -276,4 +324,29 @@ fn is_v2_blob(path: &std::path::Path) -> bool {
             Ok(buf == UCBL_MAGIC)
         })
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod profile_clipboard_policy_tests {
+    use super::*;
+
+    #[test]
+    fn profile_runtime_policy_forces_noop_even_when_clipboard_is_available() {
+        assert_eq!(
+            select_system_clipboard_wiring(
+                SystemClipboardPolicy::Noop,
+                false,
+                uc_platform::capability::SystemClipboardCapability::Available,
+            ),
+            SystemClipboardWiring::Noop
+        );
+        assert_eq!(
+            select_system_clipboard_wiring(
+                SystemClipboardPolicy::Auto,
+                false,
+                uc_platform::capability::SystemClipboardCapability::Available,
+            ),
+            SystemClipboardWiring::Real
+        );
+    }
 }

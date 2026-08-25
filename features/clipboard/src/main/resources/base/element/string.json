@@ -349,6 +349,14 @@
       "value": "加入失败，请检查邀请代码、空间口令和桌面设备网络状态。"
     },
     {
+      "name": "space_migration_success",
+      "value": "空间数据迁移已完成。"
+    },
+    {
+      "name": "space_migration_preserved_warning",
+      "value": "空间已加入，但部分旧数据无法读取，原数据已保留且未被静默删除。请保留旧设备或备份后再处理。"
+    },
+    {
       "name": "space_joined_device",
       "value": "当前 HarmonyOS 设备"
     },
@@ -398,27 +406,15 @@
     },
     {
       "name": "space_create_new_title",
-      "value": "创建并切换到新空间"
+      "value": "创建新的同步空间"
     },
     {
       "name": "space_create_new_note",
-      "value": "新空间会替换当前活动空间；旧空间成员和信任关系将从本机移除。"
+      "value": "新空间会保留在本机；创建完成后可在空间列表中切换发送空间。"
     },
     {
       "name": "space_create_new_action",
-      "value": "创建并切换"
-    },
-    {
-      "name": "space_replace_confirm_title",
-      "value": "创建新的活动空间？"
-    },
-    {
-      "name": "space_replace_confirm_message",
-      "value": "本机将退出当前空间并清除旧空间密钥和成员关系。原生加密历史无法在新空间继续解密；应用内普通历史与其他设置会保留。"
-    },
-    {
-      "name": "space_replace_confirm_action",
-      "value": "退出并创建"
+      "value": "创建空间"
     },
     {
       "name": "settings_note",
@@ -614,7 +610,7 @@
     },
     {
       "name": "background_sync_note",
-      "value": "开启后，加入同步空间的应用退至后台时会保持设备连接；系统将显示持续通知。"
+      "value": "开启后，加入同步空间的应用退至后台时会自动读取新复制的内容并同步到电脑；系统将显示持续通知，并需要授予剪贴板读取权限。"
     },
     {
       "name": "nav_sync",
@@ -1103,6 +1099,14 @@
     {
       "name": "space_revoke_device_confirm",
       "value": "移除此设备"
+    },
+    {
+      "name": "space_revoke_device_success",
+      "value": "设备已移除"
+    },
+    {
+      "name": "space_revoke_device_failed",
+      "value": "移除失败，请检查设备连接后重试"
     },
     {
       "name": "device_management_hint",
@@ -1699,6 +1703,7 @@
     { "name": "history_merge_duplicates_note", "value": "相同内容只保留一条，并累计出现次数。" },
     { "name": "connection_diagnostics_title", "value": "连接诊断" },
     { "name": "connection_diagnostics_subtitle", "value": "检查当前传输路径、网络环境与应用权限" },
+    { "name": "connection_diagnostics_open_action", "value": "查看并导出日志" },
     { "name": "connection_diagnostics_refreshing", "value": "正在重新探测连接…" },
     { "name": "connection_diagnostics_transport_label", "value": "连接方式" },
     { "name": "connection_diagnostics_transport_direct", "value": "直连" },
@@ -1734,6 +1739,7 @@
     { "name": "connection_diagnostics_permissions_title", "value": "权限状态" },
     { "name": "connection_diagnostics_permission_internet", "value": "网络访问" },
     { "name": "connection_diagnostics_permission_background", "value": "后台连接" },
+    { "name": "connection_diagnostics_permission_clipboard", "value": "剪贴板读取" },
     { "name": "connection_diagnostics_permission_granted", "value": "已授权" },
     { "name": "connection_diagnostics_permission_denied", "value": "不可用" },
     { "name": "connection_diagnostics_redaction_note", "value": "导出日志会移除设备标识、设备名、网络地址、连接链接、凭据和剪贴板内容。" },
@@ -1772,6 +1778,9 @@
     { "name": "appearance_component_material_thin", "value": "薄" },
     { "name": "appearance_component_material_regular", "value": "常规" },
     { "name": "appearance_component_material_thick", "value": "厚" },
-    { "name": "appearance_component_material_ultra_thick", "value": "超厚" }
+    { "name": "appearance_component_material_ultra_thick", "value": "超厚" },
+    { "name": "space_profile_default", "value": "默认空间" },
+    { "name": "space_profile_active", "value": "当前发送空间" },
+    { "name": "space_profile_select", "value": "切换为当前发送空间" }
   ]
 }

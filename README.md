@@ -42,6 +42,7 @@ UniClipboard 已正式上架华为应用市场，可直接在 HarmonyOS 手机�
 - 提供连接诊断，检查网络、权限、空间节点和直连/中继状态，并可导出脱敏诊断日志；
 - 历史库支持按设备、标签和常用片段筛选，自定义标签、批量收藏/删除、保留期限及重复记录合并；
 - 支持图片文字识别，并从识别结果中提取链接、电话号码和二维码等智能操作；
+- 支持通过官方 Engine 接收桌面端图片和文件；图片会显示预览并可写入系统剪贴板或进行文字识别，文件可预览和保存；
 - 连接配置使用 Preferences，用户名和密码使用 HarmonyOS Asset Store。
 
 ## 分层架构
@@ -68,7 +69,7 @@ products/default (Entry HAP)
 1. 在桌面端安装并打开官方 UniClipboard，在第一台设备创建空间并设置空间口令。
 2. 在空间内的已有设备打开“设备”，生成短时邀请码。
 3. 在 HarmonyOS 客户端进入“设置 → 加入空间”，扫码或输入邀请码，并填写同一个空间口令。
-4. 加入成功后，在“同步”页主动发送或拉取内容。首次读取系统剪贴板时，按系统提示授权。
+4. 加入成功后，桌面端复制的文本、图片和文件会进入“同步”页；图片可写入本机剪贴板或识别文字，文件可预览和保存。首次读取系统剪贴板时，按系统提示授权。
 
 邀请码是短时凭据，不应截图后长期保存或公开；空间口令不要通过与邀请码相同的渠道发送。
 
@@ -80,7 +81,7 @@ products/default (Entry HAP)
 
 ### 环境要求
 
-- DevEco Studio 与 HarmonyOS SDK；本工程当前目标 API 24，兼容 API 23；
+- DevEco Studio 与 HarmonyOS SDK；本工程当前目标和最低兼容 API 均为 24（官方 Engine `v1.1.0-rc.5` 要求 API 24）；
 - PowerShell 与 `devecocli`；
 - 仅在修改 Rust 原生层时需要 Rust 工具链、`cargo` 和 `ohrs`。
 
@@ -120,6 +121,18 @@ devecocli build
 devecocli run --module entry --product default
 ```
 
+### 后台同步不变量
+
+应用通过 iroh/QUIC 数据通道传输剪贴板内容，因此 HarmonyOS 持续任务必须在入口清单和运行时服务中同时使用 `dataTransfer`。不要改回 `multiDeviceConnection`：该模式虽然能够启动，但应用进入后台约 65 秒后会被系统挂起，表现为电脑复制的内容到达不了手机系统剪贴板。此问题与普通剪贴板授权无关。
+
+根构建入口会自动执行 `tools/verify-background-sync-mode.ps1`。产品入口、兼容入口或任一后台服务出现模式不一致时，构建将直接失败，避免同类回归再次进入 HAP。
+
+### 产品入口回归约束
+
+当前 HAP 的唯一产品入口是 `products/default/`，共享业务状态和 Engine 编排位于 `features/clipboard/`。根目录 `entry/` 只是重构前的兼容源码快照，不是运行时事实来源。修复同步、设备或媒体接收功能时必须先沿 `products/default -> features/clipboard -> common` 跟踪真实调用链；涉及界面交互时必须同时覆盖 Compact 和 Expanded 视图，不能只修改 `entry/src/main/ets/pages/Index.ets`。
+
+每次生成真机 HAP 前至少验证以下路径：应用退到后台后接收桌面文本、桌面图片显示预览和图片识别入口、桌面文件显示预览和保存入口、远端设备同步类型开关可操作并能重新读取已保存状态。后台任务模式由上面的构建检查自动保证，其余路径需要在连接真实 Engine 设备后验证。
+
 ## 源码结构
 
 - `products/default/`：默认产品的 Entry HAP、Ability 和 Compact/Expanded 响应式界面；
@@ -135,9 +148,10 @@ devecocli run --module entry --product default
 
 ## 当前边界
 
-- P2P 空间目前仅稳定支持内联文本；空间图片、大文本和文件传输仍在完善；
+- 官方 Engine 空间已支持桌面到 HarmonyOS 的文本、图片和单文件传输；收到的图片和文件保存在应用受管缓存中，用户可从同步页写入剪贴板、预览或保存；
+- 当前 HarmonyOS Engine 的 `exportEntry` 接口只导出载荷字节，不返回原始文件名和媒体类型，因此接收文件暂时使用通用显示名；该限制应通过扩展 Engine 公共契约解决，客户端不会根据内容任意猜测原文件名；
 - HTTP 兼容模式仍支持文本和 PNG 图片，但不会替代 P2P 空间传输；
-- 空间节点随应用进程运行，尚未注册 HarmonyOS 长时后台任务；
+- 空间节点随应用进程运行，并通过 `dataTransfer` 持续任务维持后台文本接收；系统仍可能依据省电策略终止长期闲置进程；
 - 当前仓库只提供 arm64-v8a 原生库；
 - 应用市场发布不代表 UniClipboard 上游官方背书；协议兼容性仍可能随上游预览版本变化。
 

@@ -56,6 +56,7 @@ import {
   engineRuntimeService,
   EngineInvitationIssued,
   EngineActiveClipboard,
+  EngineMemberSyncPreferences,
   EngineSendReport,
   EngineSpaceCreated,
   EngineSpaceJoined,
@@ -63,23 +64,16 @@ import {
   EngineRuntimeEvent,
   EngineRuntimeEventObserver,
   EngineRuntimeState,
+  EngineWorkspaceConvergence,
   EngineSessionRecovery,
+  SpaceProfileDirectory,
+  SpaceProfileRecord,
+  SpaceProfileStore,
+  spaceRuntimeSupervisor,
   MobileSyncClient,
   MobileSyncServerService,
   NativeProtocolService,
   ReceivedNotificationService,
-  SpaceNodeService,
-  NativeCreateSpaceResult,
-  NativeJoinSpaceResult,
-  NativeSpaceFileEvent,
-  NativeSpaceFileSendResult,
-  NativeSpaceFileStatusEvent,
-  NativeSpaceImageEvent,
-  NativeSpaceInvitation,
-  NativeSpaceMemberSyncPreferences,
-  NativeSpaceNetworkSettings,
-  NativeSpaceStatus,
-  NativeSpaceTextEvent,
   NativeMobileSyncCredential,
   NativeMobileSyncDevice,
   NativeMobileSyncInboundEvent,
@@ -89,6 +83,7 @@ import {
 import { HistoryDataSource } from './HistoryDataSource';
 
 const logger: Logger = new Logger('ClipboardFeature');
+const READ_PASTEBOARD_PERMISSION: Permissions = 'ohos.permission.READ_PASTEBOARD';
 
 const POLL_INTERVAL_BASE_MS: number = 1000;
 const POLL_INTERVAL_RELAXED_MS: number = 2000;
@@ -234,6 +229,8 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   public aboutMaterialLevel: hdsMaterial.MaterialLevel = hdsMaterial.MaterialLevel.SMOOTH;
   public spaceNodeState: number = 0;
   public spaceJoined: boolean = false;
+  public spaceProfiles: SpaceProfileRecord[] = [];
+  public activeSendProfileId: string = '';
   public spacePeerConnected: boolean = false;
   public spaceDevices: EngineRuntimeDevice[] = [];
   public spaceDeviceName: string = '';
@@ -242,6 +239,9 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   public spaceJoinDeviceName: string = '';
   public spaceJoinBusy: boolean = false;
   public spaceJoinState: number = 0;
+  // 0 means no migration report, 1 means records migrated, and 2 means
+  // unreadable records were preserved for manual follow-up.
+  public spaceMigrationState: number = 0;
   public spaceSwitchOpen: boolean = false;
   public spaceActionMode: number = 0;
   public spaceCreateDeviceName: string = '';
@@ -275,6 +275,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   public connectionDiagnosticLastFailureAtMs: number = 0;
   public connectionDiagnosticInternetGranted: boolean = false;
   public connectionDiagnosticBackgroundGranted: boolean = false;
+  public connectionDiagnosticClipboardGranted: boolean = false;
   public largeSection: number = 0;
   public largeSettingsSection: number = 0;
   public desktopSelectedId: string = '';
@@ -349,6 +350,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   public mobileSyncCustomPassword: string = '';
   public mobileSyncCredential: NativeMobileSyncCredential | null = null;
   public mobileSyncPasswordVisible: boolean = false;
+  private pasteboardPermissionRequestTask: Promise<boolean> | null = null;
 
   public clipboardService: ClipboardService = new ClipboardService();
   public appearanceStorageService: AppearanceStorageService = new AppearanceStorageService();
@@ -361,7 +363,10 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   public receivedNotificationService: ReceivedNotificationService =
     ReceivedNotificationService.getInstance();
   public nativeProtocolService: NativeProtocolService = new NativeProtocolService();
-  public spaceNodeService: SpaceNodeService = new SpaceNodeService();
+  private spaceProfileStore: SpaceProfileStore = new SpaceProfileStore();
+  private spaceProfileDirectory: SpaceProfileDirectory | null = null;
+  private spaceAdmissionAddedProfile: boolean = false;
+  private spaceAdmissionPreviousProfileId: string = '';
   public largeNavStack: NavPathStack = new NavPathStack();
   public sseTimerId: number = -1;
   private pollingActive: boolean = false;
@@ -370,6 +375,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   public historySearchTimerId: number = -1;
   public sseEventBusy: boolean = false;
   public spaceDeviceRefreshBusy: boolean = false;
+  private spaceDeviceRefreshQueued: boolean = false;
   public historyResetPending: boolean = false;
   public historyRestoreStarted: boolean = false;
   public historyRestored: boolean = false;
@@ -436,6 +442,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   public setSpaceJoined(joined: boolean): void {
     this.spaceJoined = joined;
     AppStorage.setOrCreate('spaceJoined', joined);
+    engineRuntimeService.setClipboardPollingEnabled(joined && this.backgroundSyncEnabled);
   }
 
   public prepareSharedHistory(uiContext: UIContext): void {
@@ -616,17 +623,95 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     if (context === undefined) {
       return;
     }
-    this.backgroundSyncEnabled = this.backgroundSyncPreferenceService.load(context);
+    let storedBackgroundSyncEnabled: boolean = this.backgroundSyncPreferenceService.load(context);
+    this.backgroundSyncEnabled = storedBackgroundSyncEnabled;
     AppStorage.setOrCreate('backgroundSyncEnabled', this.backgroundSyncEnabled);
+    if (!storedBackgroundSyncEnabled || this.hasPasteboardReadPermission()) {
+      return;
+    }
+    this.requestPasteboardReadPermissionOnce().then((granted: boolean): void => {
+      if (granted) {
+        this.persistBackgroundSyncPreference(true);
+        return;
+      }
+      this.persistBackgroundSyncPreference(false);
+      this.recordConnectionDiagnosticFailure('pasteboard_permission_denied');
+      logger.warn('UniClipboard background sync remains disabled because clipboard permission was denied.');
+    }).catch((): void => {
+      this.persistBackgroundSyncPreference(false);
+      this.recordConnectionDiagnosticFailure('pasteboard_permission_denied');
+      logger.warn('UniClipboard background sync permission request did not complete.');
+    });
   }
 
-  public setBackgroundSyncEnabled(enabled: boolean): void {
+  private hasPasteboardReadPermission(): boolean {
+    try {
+      let bundleInfo: bundleManager.BundleInfo = bundleManager.getBundleInfoForSelfSync(
+        bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_APPLICATION);
+      let tokenId: number = bundleInfo.appInfo.accessTokenId;
+      let accessManager: abilityAccessCtrl.AtManager = abilityAccessCtrl.createAtManager();
+      return accessManager.checkAccessTokenSync(
+        tokenId, READ_PASTEBOARD_PERMISSION) === abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  private async requestPasteboardReadPermission(): Promise<boolean> {
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context === undefined) {
+      return false;
+    }
+    if (this.hasPasteboardReadPermission()) {
+      return true;
+    }
+    try {
+      let accessManager: abilityAccessCtrl.AtManager = abilityAccessCtrl.createAtManager();
+      let result: PermissionRequestResult = await accessManager.requestPermissionsFromUser(
+        context, [READ_PASTEBOARD_PERMISSION]);
+      return result.authResults.length > 0 &&
+        result.authResults[0] === abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  private requestPasteboardReadPermissionOnce(): Promise<boolean> {
+    if (this.pasteboardPermissionRequestTask !== null) {
+      return this.pasteboardPermissionRequestTask;
+    }
+    let task: Promise<boolean> = this.requestPasteboardReadPermission();
+    this.pasteboardPermissionRequestTask = task;
+    let clearTask = (): void => {
+      if (this.pasteboardPermissionRequestTask === task) {
+        this.pasteboardPermissionRequestTask = null;
+      }
+    };
+    task.then(clearTask, clearTask);
+    return task;
+  }
+
+  private persistBackgroundSyncPreference(enabled: boolean): void {
     this.backgroundSyncEnabled = enabled;
     AppStorage.setOrCreate('backgroundSyncEnabled', enabled);
+    engineRuntimeService.setClipboardPollingEnabled(enabled && this.spaceJoined);
     let context: common.Context | undefined = this.getUIContext().getHostContext();
     if (context !== undefined) {
       this.backgroundSyncPreferenceService.save(context, enabled);
     }
+  }
+
+  public async setBackgroundSyncEnabled(enabled: boolean): Promise<void> {
+    if (enabled) {
+      let granted: boolean = await this.requestPasteboardReadPermissionOnce();
+      if (!granted) {
+        this.persistBackgroundSyncPreference(false);
+        this.recordConnectionDiagnosticFailure('pasteboard_permission_denied');
+        logger.warn('UniClipboard background sync remains disabled because clipboard permission was denied.');
+        return;
+      }
+    }
+    this.persistBackgroundSyncPreference(enabled);
   }
 
   public restoreAppearanceMode(): void {
@@ -999,11 +1084,21 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
         this.recordConnectionDiagnosticFailure('node_unavailable');
         return;
       }
-      await engineRuntimeService.prepare(context as common.UIAbilityContext);
-      await engineRuntimeService.start();
-      let recovery = await engineRuntimeService.recoverSession(true);
       this.spaceNodeState = 2;
-      this.setSpaceJoined(recovery.resumed);
+      try {
+        let directory: SpaceProfileDirectory = this.spaceProfileStore.load(context);
+        this.spaceProfileDirectory = directory;
+        this.spaceProfiles = directory.profiles;
+        this.activeSendProfileId = directory.activeProfileId();
+        let recovery = await spaceRuntimeSupervisor.restore(context as common.UIAbilityContext, directory);
+        this.setSpaceJoined(recovery.resumed);
+        this.markSpaceProfileJoined(this.activeSendProfileId, recovery.resumed);
+      } catch (error) {
+        this.setSpaceJoined(false);
+        this.spaceSwitchOpen = false;
+        this.reportError('space', 'recover space session failed; re-pairing is required: ' +
+          this.errorDetail(error));
+      }
       await this.refreshSpaceNetworkSettings();
       if (this.spaceJoined) {
         await this.refreshSpaceDevices();
@@ -1012,6 +1107,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     } catch (error) {
       this.spaceNodeState = 3;
       this.recordConnectionDiagnosticFailure('node_unavailable');
+      this.reportError('space', 'initialize space node failed: ' + this.errorDetail(error));
     }
   }
 
@@ -1191,11 +1287,22 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
         return;
       }
       this.desktopDeviceMutationBusy = true;
-      await engineRuntimeService.removeMember(device.deviceId);
+      logger.info('Space device removal started.');
+      let convergence: EngineWorkspaceConvergence = await engineRuntimeService.removeMember(device.deviceId);
+      this.spaceDevices = this.spaceDevices.filter((item: EngineRuntimeDevice): boolean =>
+        item.deviceId !== device.deviceId);
+      if (this.desktopSelectedSpaceDeviceId === device.deviceId) {
+        this.desktopSelectedSpaceDeviceId = '';
+        engineRuntimeService.setClipboardAutoSendTargets([]);
+      }
       await this.refreshSpaceDevices();
       this.statusCode = 2;
+      this.showFeedbackToast($r('app.string.space_revoke_device_success'));
+      logger.info('Space device removal finished phase=' + convergence.phase);
     } catch (error) {
       this.statusCode = 3;
+      this.reportError('space', 'remove space device failed: ' + this.errorDetail(error),
+        $r('app.string.space_revoke_device_failed'));
     } finally {
       this.desktopDeviceMutationBusy = false;
     }
@@ -1305,9 +1412,6 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       this.spaceInvitationCode.trim().length === 0 || this.spacePassphrase.length === 0) {
       return false;
     }
-    if (this.spaceJoined) {
-      return this.spaceSwitchOpen;
-    }
     return this.spaceJoinDeviceName.trim().length > 0;
   }
 
@@ -1317,34 +1421,43 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     }
     this.spaceJoinBusy = true;
     this.spaceJoinState = 0;
+    let profileId: string = '';
+    let addedProfile: boolean = false;
     try {
-      let switching: boolean = this.spaceJoined;
       let deviceName: string = this.spaceJoinDeviceName.trim();
-      let requestedDeviceName: string | null = switching ? null : deviceName;
+      profileId = await this.prepareSpaceAdmissionProfile();
+      addedProfile = this.spaceAdmissionAddedProfile;
       let result: EngineSpaceJoined = await engineRuntimeService.joinSpace(
-        this.spaceInvitationCode.trim(), requestedDeviceName, this.spacePassphrase, true);
+        this.spaceInvitationCode.trim(), deviceName, this.spacePassphrase, true);
+      this.markSpaceProfileJoined(profileId);
+      let hasMigratedRecords: boolean = this.hasMigrationRecords(result.migratedRecords);
+      let hasPreservedUnreadableRecords: boolean = this.hasMigrationRecords(result.preservedUnreadableRecords);
+      this.spaceMigrationState = hasPreservedUnreadableRecords ? 2 : (hasMigratedRecords ? 1 : 0);
       this.setSpaceJoined(result.spaceId.length > 0);
       this.spacePeerConnected = false;
-      if (!switching) {
-        this.spaceDeviceName = deviceName;
-      }
+      this.spaceDeviceName = deviceName;
       this.spaceCreatedId = result.spaceId;
       this.spaceCreatePassphrase = this.spacePassphrase;
       this.spaceInvitationCode = '';
       this.spacePassphrase = '';
       this.spaceJoinDeviceName = '';
       this.spaceJoinState = 1;
-      await this.refreshSpaceDevices();
-      if (switching) {
-        this.spaceSwitchOpen = false;
+      if (hasPreservedUnreadableRecords) {
+        this.reportError('space', 'Engine preserved unreadable records during space migration.',
+          $r('app.string.space_migration_preserved_warning'));
+      } else if (hasMigratedRecords) {
+        this.showFeedbackToast($r('app.string.space_migration_success'));
       }
+      await this.refreshSpaceDevices();
+      this.spaceSwitchOpen = false;
     } catch (error) {
       let errorMessage: string = 'unavailable';
       if (error instanceof Error) {
         let joinError: Error = error as Error;
         errorMessage = joinError.message;
       }
-      this.reportError('space', 'join space failed: ' + errorMessage);
+      await this.restoreSpaceAdmissionProfile(profileId, addedProfile);
+      this.reportError('space', 'join space failed: ' + errorMessage, $r('app.string.space_join_failed'));
       this.spaceJoinState = 2;
     } finally {
       this.spaceJoinBusy = false;
@@ -1352,44 +1465,26 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   }
 
   public canCreateSpace(): boolean {
-    return this.spaceNodeState === 2 && (!this.spaceJoined || this.spaceSwitchOpen) && !this.spaceCreateBusy &&
+    return this.spaceNodeState === 2 && !this.spaceCreateBusy &&
       this.spaceCreateDeviceName.trim().length > 0 && this.spaceCreatePassphrase.length >= 8 &&
       this.spaceCreatePassphrase === this.spaceCreatePassphraseConfirm;
-  }
-
-  public async confirmReplaceCurrentSpace(): Promise<boolean> {
-    try {
-      let result = await this.getUIContext().getPromptAction().showDialog({
-        title: $r('app.string.space_replace_confirm_title'),
-        message: $r('app.string.space_replace_confirm_message'),
-        buttons: [
-          { text: $r('app.string.cancel_action'), color: $r('app.color.text_secondary') },
-          { text: $r('app.string.space_replace_confirm_action'), color: $r('app.color.danger') }
-        ]
-      });
-      return result.index === 1;
-    } catch (error) {
-      return false;
-    }
   }
 
   public async createCurrentSpace(): Promise<void> {
     if (!this.canCreateSpace()) {
       return;
     }
-    let replacing: boolean = this.spaceJoined;
-    if (replacing) {
-      let confirmed: boolean = await this.confirmReplaceCurrentSpace();
-      if (!confirmed) {
-        return;
-      }
-    }
     this.spaceCreateBusy = true;
     this.spaceCreateState = 0;
+    let profileId: string = '';
+    let addedProfile: boolean = false;
     try {
       let deviceName: string = this.spaceCreateDeviceName.trim();
+      profileId = await this.prepareSpaceAdmissionProfile();
+      addedProfile = this.spaceAdmissionAddedProfile;
       let result: EngineSpaceCreated = await engineRuntimeService.createSpace(
         deviceName, this.spaceCreatePassphrase);
+      this.markSpaceProfileJoined(profileId);
       this.setSpaceJoined(result.spaceId.length > 0);
       this.spacePeerConnected = false;
       this.spaceCreatedId = result.spaceId;
@@ -1398,14 +1493,117 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       this.spaceCreatePassphraseConfirm = '';
       this.spaceCreateState = 1;
       await this.refreshSpaceDevices();
-      if (replacing) {
-        this.spaceSwitchOpen = false;
-      }
+      this.spaceSwitchOpen = false;
     } catch (error) {
+      await this.restoreSpaceAdmissionProfile(profileId, addedProfile);
       this.spaceCreateState = 2;
     } finally {
       this.spaceCreateBusy = false;
     }
+  }
+
+  public async activateSpaceProfile(profileId: string): Promise<void> {
+    if (this.spaceJoinBusy || this.spaceCreateBusy || profileId === this.activeSendProfileId) {
+      return;
+    }
+    let directory: SpaceProfileDirectory | null = this.spaceProfileDirectory;
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (directory === null || context === undefined) {
+      return;
+    }
+    let previousProfileId: string = directory.activeProfileId();
+    try {
+      this.spaceProfileStore.setActive(directory, profileId);
+      this.spaceProfileStore.save(context, directory);
+      let recovery: EngineSessionRecovery = await spaceRuntimeSupervisor.activate(
+        context as common.UIAbilityContext, directory, profileId);
+      this.activeSendProfileId = profileId;
+      this.spaceProfiles = directory.profiles;
+      this.setSpaceJoined(recovery.resumed);
+      this.spacePeerConnected = false;
+      await this.refreshSpaceDevices();
+    } catch (error) {
+      this.spaceProfileStore.setActive(directory, previousProfileId);
+      this.spaceProfileStore.save(context, directory);
+      this.activeSendProfileId = previousProfileId;
+      this.spaceProfiles = directory.profiles;
+      this.reportError('space', 'activate space profile failed: ' + this.errorDetail(error));
+    }
+  }
+
+  private async prepareSpaceAdmissionProfile(): Promise<string> {
+    let directory: SpaceProfileDirectory | null = this.spaceProfileDirectory;
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (directory === null || context === undefined) {
+      throw new Error('space profile directory is unavailable');
+    }
+    this.spaceAdmissionAddedProfile = false;
+    this.spaceAdmissionPreviousProfileId = directory.activeProfileId();
+    if (!this.spaceJoined) {
+      return this.spaceAdmissionPreviousProfileId;
+    }
+    let profile: SpaceProfileRecord = this.spaceProfileStore.add(directory);
+    this.spaceProfileStore.save(context, directory);
+    this.spaceProfiles = directory.profiles;
+    this.activeSendProfileId = profile.profileId;
+    this.spaceAdmissionAddedProfile = true;
+    try {
+      await spaceRuntimeSupervisor.activate(context as common.UIAbilityContext, directory, profile.profileId);
+      this.setSpaceJoined(false);
+      return profile.profileId;
+    } catch (error) {
+      this.spaceProfileStore.remove(directory, profile.profileId);
+      this.spaceProfileStore.setActive(directory, this.spaceAdmissionPreviousProfileId);
+      this.spaceProfileStore.save(context, directory);
+      this.spaceProfiles = directory.profiles;
+      this.activeSendProfileId = this.spaceAdmissionPreviousProfileId;
+      this.spaceAdmissionAddedProfile = false;
+      throw new Error('space admission profile activation failed');
+    }
+  }
+
+  private async restoreSpaceAdmissionProfile(profileId: string, addedProfile: boolean): Promise<void> {
+    if (!addedProfile || profileId.length === 0) {
+      return;
+    }
+    let directory: SpaceProfileDirectory | null = this.spaceProfileDirectory;
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (directory === null || context === undefined) {
+      return;
+    }
+    try {
+      this.spaceProfileStore.remove(directory, profileId);
+      this.spaceProfileStore.setActive(directory, this.spaceAdmissionPreviousProfileId);
+      this.spaceProfileStore.save(context, directory);
+      let recovery: EngineSessionRecovery = await spaceRuntimeSupervisor.activate(
+        context as common.UIAbilityContext, directory, this.spaceAdmissionPreviousProfileId);
+      this.activeSendProfileId = this.spaceAdmissionPreviousProfileId;
+      this.spaceProfiles = directory.profiles;
+      this.setSpaceJoined(recovery.resumed);
+      this.spacePeerConnected = false;
+      await this.refreshSpaceDevices();
+    } catch (error) {
+      this.reportError('space', 'restore active space after admission failed: ' + this.errorDetail(error));
+    }
+  }
+
+  private markSpaceProfileJoined(profileId: string, joined: boolean = true): void {
+    let directory: SpaceProfileDirectory | null = this.spaceProfileDirectory;
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (directory === null || context === undefined) {
+      return;
+    }
+    for (let index: number = 0; index < directory.profiles.length; index += 1) {
+      if (directory.profiles[index].profileId === profileId) {
+        directory.profiles[index].joined = joined;
+        if (joined) {
+          this.spaceProfileStore.setActive(directory, profileId);
+        }
+        break;
+      }
+    }
+    this.spaceProfileStore.save(context, directory);
+    this.spaceProfiles = directory.profiles;
   }
 
   public async issueCurrentSpaceInvitation(): Promise<void> {
@@ -1613,6 +1811,14 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     return JSON.stringify(error);
   }
 
+  private hasMigrationRecords(value: string | undefined): boolean {
+    if (value === undefined) {
+      return false;
+    }
+    let normalized: string = value.trim();
+    return normalized.length > 0 && normalized !== '0' && normalized !== '[]' && normalized !== '{}';
+  }
+
   private padTimeUnit(value: number): string {
     return value < 10 ? '0' + value.toString() : value.toString();
   }
@@ -1734,6 +1940,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   private refreshConnectionDiagnosticPermissions(): void {
     this.connectionDiagnosticInternetGranted = false;
     this.connectionDiagnosticBackgroundGranted = false;
+    this.connectionDiagnosticClipboardGranted = false;
     try {
       let bundleInfo: bundleManager.BundleInfo = bundleManager.getBundleInfoForSelfSync(
         bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_APPLICATION);
@@ -1745,9 +1952,12 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
         tokenId, internetPermission) === abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED;
       this.connectionDiagnosticBackgroundGranted = accessManager.checkAccessTokenSync(
         tokenId, backgroundPermission) === abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED;
+      this.connectionDiagnosticClipboardGranted = accessManager.checkAccessTokenSync(
+        tokenId, READ_PASTEBOARD_PERMISSION) === abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED;
     } catch (error) {
       this.connectionDiagnosticInternetGranted = false;
       this.connectionDiagnosticBackgroundGranted = false;
+      this.connectionDiagnosticClipboardGranted = false;
     }
   }
 
@@ -1804,7 +2014,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     }
     if (this.spaceNodeState === 2 && this.spaceJoined) {
       try {
-        this.spaceNodeService.wakeConnections();
+        await engineRuntimeService.recoverNetwork();
         let devices: EngineRuntimeDevice[] = await engineRuntimeService.queryDevices();
         let target: EngineRuntimeDevice | null = this.applyConnectionDiagnosticDevices(devices);
         if (target === null) {
@@ -1873,6 +2083,17 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
 
   private buildRedactedConnectionDiagnosticLog(): string {
     let generatedAt: string = new Date().toISOString();
+    let recentErrorLog: string = 'recent_errors_begin\n';
+    if (this.recentErrors.length === 0) {
+      recentErrorLog += 'none\n';
+    } else {
+      for (let index: number = 0; index < this.recentErrors.length; index++) {
+        let record: AppErrorRecord = this.recentErrors[index];
+        recentErrorLog += record.timeLabel + '|' + this.redactDiagnosticText(record.source) + '|' +
+          this.redactDiagnosticText(record.message) + '\n';
+      }
+    }
+    recentErrorLog += 'recent_errors_end\n';
     return 'UniClipboard connection diagnostics\n' +
       'redaction=enabled\n' +
       'generated_at=' + generatedAt + '\n' +
@@ -1888,10 +2109,22 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
         this.connectionDiagnosticInternetGranted) + '\n' +
       'background_permission=' + this.connectionDiagnosticPermissionCode(
         this.connectionDiagnosticBackgroundGranted) + '\n' +
+      'clipboard_permission=' + this.connectionDiagnosticPermissionCode(
+        this.connectionDiagnosticClipboardGranted) + '\n' +
       'background_sync=' + (this.backgroundSyncEnabled ? 'enabled' : 'disabled') + '\n' +
       'last_failure=' + this.connectionDiagnosticLastFailure + '\n' +
       'last_failure_at_ms=' + this.connectionDiagnosticLastFailureAtMs.toString() + '\n' +
+      recentErrorLog +
       'redacted_fields=device_ids,device_names,addresses,urls,credentials,clipboard_content\n';
+  }
+
+  private redactDiagnosticText(value: string): string {
+    let redacted: string = value.replace(/https?:\/\/[^\s]+/gi, '[redacted-url]');
+    redacted = redacted.replace(/(password|token|secret|authorization)=?[^\s]*/gi, '$1=[redacted]');
+    if (redacted.length > 512) {
+      return redacted.substring(0, 512) + '...';
+    }
+    return redacted;
   }
 
   public async exportRedactedConnectionDiagnostics(): Promise<void> {
@@ -1941,7 +2174,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     }
   }
 
-  private applyDesktopDeviceSyncPreferences(preferences: NativeSpaceMemberSyncPreferences): void {
+  private applyDesktopDeviceSyncPreferences(preferences: EngineMemberSyncPreferences): void {
     this.desktopDeviceSendEnabled = preferences.sendEnabled;
     this.desktopDeviceSyncText = preferences.text;
     this.desktopDeviceSyncImage = preferences.image;
@@ -1957,6 +2190,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     this.desktopSelectedSpaceDeviceOnline = device.online;
     this.desktopSelectedSpaceDeviceState = device.state;
     this.desktopSelectedSpaceDeviceIsLocal = device.isLocal;
+    engineRuntimeService.setClipboardAutoSendTargets(device.isLocal ? [] : [device.deviceId]);
   }
 
   public selectDesktopSpaceDevice(device: EngineRuntimeDevice): void {
@@ -1971,10 +2205,13 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   private synchronizeDesktopSpaceDeviceSelection(devices: EngineRuntimeDevice[]): void {
     let selected: EngineRuntimeDevice | null = null;
     let local: EngineRuntimeDevice | null = null;
+    let remote: EngineRuntimeDevice | null = null;
     for (let index: number = 0; index < devices.length; index++) {
       let device: EngineRuntimeDevice = devices[index];
       if (device.isLocal) {
         local = device;
+      } else if (remote === null || (!remote.online && device.online)) {
+        remote = device;
       }
       if (device.deviceId === this.desktopSelectedSpaceDeviceId) {
         selected = device;
@@ -1984,7 +2221,10 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       this.assignDesktopSelectedSpaceDevice(selected);
       return;
     }
-    if (local !== null) {
+    if (remote !== null) {
+      this.assignDesktopSelectedSpaceDevice(remote);
+      this.loadDesktopDeviceSyncPreferences(remote.deviceId);
+    } else if (local !== null) {
       this.assignDesktopSelectedSpaceDevice(local);
     } else if (devices.length > 0) {
       this.assignDesktopSelectedSpaceDevice(devices[0]);
@@ -1996,6 +2236,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       this.desktopSelectedSpaceDeviceState = 'unknown';
       this.desktopSelectedSpaceDeviceIsLocal = true;
       this.desktopDeviceSyncState = 0;
+      engineRuntimeService.setClipboardAutoSendTargets([]);
     }
   }
 
@@ -2005,14 +2246,15 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     }
     this.desktopDeviceSyncState = 1;
     try {
-      let preferences: NativeSpaceMemberSyncPreferences =
-        await this.spaceNodeService.memberSyncPreferences(deviceId);
+      let preferences: EngineMemberSyncPreferences =
+        await engineRuntimeService.queryMemberSyncPreferences(deviceId);
       if (this.desktopSelectedSpaceDeviceId !== deviceId || this.desktopSelectedSpaceDeviceIsLocal) {
         return;
       }
       this.applyDesktopDeviceSyncPreferences(preferences);
       this.desktopDeviceSyncState = 2;
     } catch (error) {
+      logger.error('UniClipboard failed to load device sync preferences: ' + this.errorDetail(error));
       if (this.desktopSelectedSpaceDeviceId === deviceId) {
         this.desktopDeviceSyncState = 3;
       }
@@ -2048,8 +2290,8 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     this.desktopDeviceSyncSaving = true;
     let deviceId: string = this.desktopSelectedSpaceDeviceId;
     try {
-      let preferences: NativeSpaceMemberSyncPreferences =
-        await this.spaceNodeService.updateMemberSendPreferences(
+      let preferences: EngineMemberSyncPreferences =
+        await engineRuntimeService.updateMemberSendPreferences(
           deviceId,
           this.desktopDeviceSendEnabled,
           this.desktopDeviceSyncText,
@@ -2063,6 +2305,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       }
       this.statusCode = 2;
     } catch (error) {
+      logger.error('UniClipboard failed to update device sync preferences: ' + this.errorDetail(error));
       if (this.desktopSelectedSpaceDeviceId === deviceId) {
         this.desktopDeviceSendEnabled = previousSendEnabled;
         this.desktopDeviceSyncText = previousText;
@@ -2086,14 +2329,15 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     this.desktopDeviceSyncSaving = true;
     let deviceId: string = this.desktopSelectedSpaceDeviceId;
     try {
-      let preferences: NativeSpaceMemberSyncPreferences =
-        await this.spaceNodeService.resetMemberSyncPreferences(deviceId);
+      let preferences: EngineMemberSyncPreferences =
+        await engineRuntimeService.resetMemberSyncPreferences(deviceId);
       if (this.desktopSelectedSpaceDeviceId === deviceId) {
         this.applyDesktopDeviceSyncPreferences(preferences);
         this.desktopDeviceSyncState = 2;
       }
       this.statusCode = 2;
     } catch (error) {
+      logger.error('UniClipboard failed to reset device sync preferences: ' + this.errorDetail(error));
       if (this.desktopSelectedSpaceDeviceId === deviceId) {
         this.desktopDeviceSyncState = 3;
       }
@@ -2104,7 +2348,11 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   }
 
   public async refreshSpaceDevices(): Promise<void> {
-    if (!this.spaceJoined || this.spaceNodeState !== 2 || this.spaceDeviceRefreshBusy) {
+    if (!this.spaceJoined || this.spaceNodeState !== 2) {
+      return;
+    }
+    if (this.spaceDeviceRefreshBusy) {
+      this.spaceDeviceRefreshQueued = true;
       return;
     }
     this.spaceDeviceRefreshBusy = true;
@@ -2121,6 +2369,15 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       this.recordConnectionDiagnosticFailure('space_probe_failed');
     } finally {
       this.spaceDeviceRefreshBusy = false;
+      if (this.spaceDeviceRefreshQueued && this.spaceJoined && this.spaceNodeState === 2) {
+        this.spaceDeviceRefreshQueued = false;
+        setTimeout((): void => {
+          this.refreshSpaceDevices().catch((): void => {
+          });
+        }, 0);
+      } else {
+        this.spaceDeviceRefreshQueued = false;
+      }
     }
   }
 
@@ -2133,6 +2390,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     this.spaceConnectingDeviceId = device.deviceId;
     this.spaceConnectState = 1;
     try {
+      await engineRuntimeService.recoverNetwork();
       await this.refreshSpaceDevices();
       this.spaceConnectState = device.online ? 2 : 3;
       if (device.online) {
@@ -2161,6 +2419,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     this.spaceConnectState = 1;
     let anyOnline: boolean = false;
     try {
+      await engineRuntimeService.recoverNetwork();
       await this.refreshSpaceDevices();
       for (let index: number = 0; index < this.spaceDevices.length; index++) {
         let device: EngineRuntimeDevice = this.spaceDevices[index];
@@ -2192,9 +2451,9 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     this.desktopRefreshBusy = true;
     try {
       if (this.spaceJoined) {
-        this.spaceNodeService.wakeConnections();
+        await engineRuntimeService.recoverNetwork();
         await this.connectAllSpaceDevices();
-        await this.consumeSpaceTextEvents();
+        await this.pollOfficialEngineInbound();
       }
       if (this.hasConfig()) {
         await this.loadServerHistory(true);
@@ -4960,21 +5219,22 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       }
       if (!delivered && this.spaceJoined) {
         try {
-          let data: Uint8Array = await this.clipboardService.encodePng(pixelMap);
-          let report: EngineSendReport = await engineRuntimeService.sendImage(data, 'image/png', []);
+          let data: Uint8Array = await this.clipboardService.encodeSpaceImage(pixelMap);
+          let report: EngineSendReport = await engineRuntimeService.sendImage(data, 'image/jpeg', []);
           logger.info('UniClipboard official Engine image accepted peer count: ' +
             report.totalAccepted.toString());
           if (report.totalAccepted > 0 || report.totalPending > 0) {
             this.spacePeerConnected = true;
             this.latestContentId = report.entryId;
-            this.latestText = 'image.png';
+            this.latestText = 'image.jpg';
             delivered = true;
           } else if (!mobilePublished) {
             throw new Error('no online space peer accepted the clipboard image');
           }
         } catch (error) {
+          logger.error('UniClipboard official Engine image send failed: ' + this.errorDetail(error));
           if (!mobilePublished) {
-            throw new Error('space image delivery failed');
+            throw new Error('space image delivery failed: ' + this.errorDetail(error));
           }
         }
       }
@@ -5001,6 +5261,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       }
       this.statusCode = 3;
       this.imageSendState = 3;
+      this.reportError('image', 'image send failed: ' + this.errorDetail(error));
     } finally {
       this.busy = false;
     }
@@ -5221,7 +5482,6 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   public async consumeRealtimeEvents(): Promise<number> {
     let activityCount: number = 0;
     activityCount += await this.consumeMobileSyncEvents();
-    activityCount += await this.consumeSpaceTextEvents();
     this.realtimeTick += 1;
     if (this.spaceJoined) {
       activityCount += await this.pollOfficialEngineInbound();
@@ -5568,124 +5828,6 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     } finally {
       fileIo.closeSync(source.fd);
     }
-  }
-
-  public async consumeSpaceTextEvents(): Promise<number> {
-    // EngineRuntimeService owns the official event stream. The legacy native
-    // event queues are deliberately not consumed by the product UI.
-    return 0;
-    /*
-    if (this.spaceDevices.length === 0) {
-      await this.refreshSpaceDevices();
-    }
-    let events: NativeSpaceTextEvent[] = this.spaceNodeService.drainTextEvents();
-    for (let index: number = 0; index < events.length; index++) {
-      let event: NativeSpaceTextEvent = events[index];
-      this.latestText = event.text;
-      this.latestKind = 'Text';
-      this.latestImage = null;
-      if (this.desktopSelectedId.length === 0) {
-        this.releaseDesktopAudio();
-        this.refreshCurrentLinkPreview();
-      }
-      this.latestContentId = event.snapshotHash;
-      this.addHistory(event.text, 'received', 'Text', null, null, '', event.snapshotHash,
-        this.sourceLabelForDevice(event.fromDeviceId));
-      try {
-        await this.clipboardService.writeText(event.text);
-        this.notifyReceivedContent('Text', event.text, null, 0,
-          this.sourceLabelForDevice(event.fromDeviceId));
-      } catch (error) {
-        this.statusCode = 3;
-      }
-    }
-    if (events.length > 0 && this.statusCode !== 3) {
-      this.spacePeerConnected = true;
-      this.statusCode = 2;
-    }
-    let imageEvents: NativeSpaceImageEvent[] = this.spaceNodeService.drainImageEvents();
-    for (let index: number = 0; index < imageEvents.length; index++) {
-      let event: NativeSpaceImageEvent = imageEvents[index];
-      try {
-        let pixelMap: image.PixelMap = await this.clipboardService.decodeImage(event.data);
-        this.latestImage = pixelMap;
-        this.latestImageRevision += 1;
-        this.latestKind = 'Image';
-        this.latestText = 'image.jpg';
-        if (this.desktopSelectedId.length === 0) {
-          this.releaseDesktopAudio();
-          this.clearLinkPreview();
-        }
-        this.latestContentId = event.snapshotHash;
-        this.addHistory('image.jpg', 'received', 'Image', pixelMap, null, '', event.snapshotHash,
-          this.sourceLabelForDevice(event.fromDeviceId));
-        await this.clipboardService.writeImage(pixelMap);
-        this.notifyReceivedContent('Image', 'image.jpg', pixelMap, 0,
-          this.sourceLabelForDevice(event.fromDeviceId));
-      } catch (error) {
-        this.statusCode = 3;
-      }
-    }
-    if (imageEvents.length > 0 && this.statusCode !== 3) {
-      this.spacePeerConnected = true;
-      this.statusCode = 2;
-    }
-    let fileEvents: NativeSpaceFileEvent[] = this.spaceNodeService.drainFileEvents();
-    for (let index: number = 0; index < fileEvents.length; index++) {
-      let event: NativeSpaceFileEvent = fileEvents[index];
-      let filePreview: image.PixelMap | null = null;
-      if (this.isImageFileName(event.fileName) && event.data.length > 0) {
-        try {
-          filePreview = await this.clipboardService.decodeImage(event.data);
-        } catch (error) {
-          filePreview = null;
-        }
-      }
-      this.latestKind = 'File';
-      this.latestText = event.fileName;
-      this.latestFileName = event.fileName;
-      this.latestFileData = event.data;
-      this.latestFilePath = event.localPath;
-      this.latestFileRevision += 1;
-      this.desktopFilePreviewState = 0;
-      this.resetDesktopVideoAspectRatio();
-      if (this.desktopSelectedId.length === 0) {
-        this.releaseDesktopAudio();
-        this.clearLinkPreview();
-      }
-      this.latestImage = null;
-      this.latestContentId = event.snapshotHash;
-      this.addHistory(event.fileName, 'received', 'File', null,
-        event.data.length > 0 ? event.data : null, event.localPath, event.snapshotHash,
-        this.sourceLabelForDevice(event.fromDeviceId));
-      this.notifyReceivedContent('File', event.fileName, filePreview, event.data.length,
-        this.sourceLabelForDevice(event.fromDeviceId));
-    }
-    if (fileEvents.length > 0) {
-      this.spacePeerConnected = true;
-      this.statusCode = 2;
-    }
-    let fileStatusEvents: NativeSpaceFileStatusEvent[] = this.spaceNodeService.drainFileStatusEvents();
-    for (let index: number = 0; index < fileStatusEvents.length; index++) {
-      let event: NativeSpaceFileStatusEvent = fileStatusEvents[index];
-      if (event.transferId !== this.pendingFileTransferId) {
-        continue;
-      }
-      if (event.status === 'completed') {
-        this.fileTransferState = 6;
-        this.pendingFileTransferId = '';
-        this.statusCode = 2;
-      } else if (event.status === 'failed' || event.status === 'cancelled') {
-        this.fileTransferState = 4;
-        this.pendingFileTransferId = '';
-        this.statusCode = 3;
-      }
-    }
-    if (events.length > 0 || imageEvents.length > 0 || fileEvents.length > 0) {
-      this.animateLatestContent();
-    }
-    return events.length + imageEvents.length + fileEvents.length + fileStatusEvents.length;
-    */
   }
 
   public async pullLatestFromRealtime(client: MobileSyncClient): Promise<void> {

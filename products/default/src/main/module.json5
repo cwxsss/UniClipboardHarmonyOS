@@ -26,6 +26,16 @@
         "name": "ohos.permission.KEEP_BACKGROUND_RUNNING"
       },
       {
+        "name": "ohos.permission.READ_PASTEBOARD",
+        "reason": "$string:entry_pasteboard_permission_reason",
+        "usedScene": {
+          "abilities": [
+            "EntryAbility"
+          ],
+          "when": "always"
+        }
+      },
+      {
         "name": "ohos.permission.GET_NETWORK_INFO"
       },
       {
@@ -41,8 +51,8 @@
           "when": "inuse"
         }
       },
-      // PasteButton grants temporary clipboard-read access after an explicit
-      // user click. The restricted permission is intentionally not declared.
+      // Background auto-sync requests clipboard access only after the user
+      // enables the feature in settings.
     ],
     "abilities": [
       {
@@ -54,8 +64,10 @@
         "startWindowIcon": "$media:uniclipboard_start_icon",
         "startWindowBackground": "$color:start_window_background",
         "exported": true,
+        // iroh/QUIC transfers clipboard payloads. Do not replace this with multiDeviceConnection:
+        // HarmonyOS otherwise suspends background delivery after about 65 seconds.
         "backgroundModes": [
-          "multiDeviceConnection"
+          "dataTransfer"
         ],
         "skills": [
           {

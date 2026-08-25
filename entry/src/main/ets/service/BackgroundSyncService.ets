@@ -5,7 +5,7 @@ import { BusinessError } from '@kit.BasicServicesKit';
 
 const STORE_NAME: string = 'background_sync_preferences';
 const ENABLED_KEY: string = 'background_sync_enabled';
-const BUNDLE_NAME: string = 'com.uniclipboard.hmos';
+const BUNDLE_NAME: string = 'com.sss.uniclipboard';
 const ABILITY_NAME: string = 'EntryAbility';
 
 export class BackgroundSyncPreferenceService {
@@ -58,7 +58,9 @@ export class BackgroundSyncTaskService {
       };
       let notificationWantAgent: WantAgent = await wantAgent.getWantAgent(wantAgentInfo);
       if (this.shouldRun) {
-        let taskModes: string[] = ['multiDeviceConnection'];
+        // Keep this aligned with the product service and manifests. iroh/QUIC requires dataTransfer;
+        // multiDeviceConnection causes background delivery to stop after about 65 seconds.
+        let taskModes: string[] = ['dataTransfer'];
         await backgroundTaskManager.startBackgroundRunning(context, taskModes, notificationWantAgent);
         this.active = true;
         console.info('UniClipboard background device sync started.');

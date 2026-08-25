@@ -56,7 +56,8 @@ import {
   NativeMobileSyncCredential,
   NativeMobileSyncDevice,
   NativeMobileSyncInboundEvent,
-  NativeMobileSyncStatus
+  NativeMobileSyncStatus,
+  SpaceProfileRecord
 } from 'common';
 
 import {
@@ -324,6 +325,37 @@ export struct CompactClipboardView {
         .borderRadius($r('app.float.corner_radius_level10'))
         .backgroundColor($r('app.color.surface_muted'))
         .attributeModifier(Api26Material.subtle())
+        if (this.controller.spaceProfiles.length > 1) {
+          Column({ space: 6 }) {
+            ForEach(this.controller.spaceProfiles, (profile: SpaceProfileRecord): void => {
+              Button(profile.profileId === this.controller.activeSendProfileId ?
+                $r('app.string.space_profile_active') : $r('app.string.space_profile_select'),
+                { type: ButtonType.Normal })
+                .height(40)
+                .width('100%')
+                .fontColor(profile.profileId === this.controller.activeSendProfileId ?
+                  $r('app.color.on_accent') : $r('app.color.text_primary'))
+                .backgroundColor(profile.profileId === this.controller.activeSendProfileId ?
+                  this.controller.accentColor() : $r('app.color.surface_muted'))
+                .borderRadius($r('app.float.corner_radius_level10'))
+                .enabled(profile.profileId !== this.controller.activeSendProfileId && profile.joined)
+                .attributeModifier(Api26Material.interactive())
+                .onClick((): void => {
+                  this.controller.activateSpaceProfile(profile.profileId);
+                })
+              Text(profile.profileId === '.engine-v1-1' ? $r('app.string.space_profile_default') :
+                profile.profileId.substring(0, 13))
+                .fontSize(12)
+                .fontColor($r('app.color.text_secondary'))
+                .width('100%')
+            }, (profile: SpaceProfileRecord): string => profile.profileId)
+          }
+          .width('100%')
+          .padding(10)
+          .borderRadius($r('app.float.corner_radius_level10'))
+          .backgroundColor($r('app.color.surface_muted'))
+          .attributeModifier(Api26Material.subtle())
+        }
         if (this.controller.spaceJoinState === 1 && !this.controller.spaceSwitchOpen) {
           Text($r('app.string.space_switch_success'))
             .fontSize(12)
@@ -1820,6 +1852,58 @@ export struct CompactClipboardView {
 
 
   @Builder
+  private compactDiagnosticsCard() {
+    Column({ space: 10 }) {
+      Row({ space: 12 }) {
+        Column() {
+          SymbolGlyph($r('sys.symbol.connection'))
+            .fontSize(24)
+            .fontWeight(FontWeight.Medium)
+            .fontColor([this.controller.accentColor()])
+        }
+        .width(44)
+        .height(44)
+        .justifyContent(FlexAlign.Center)
+        .borderRadius($r('app.float.corner_radius_level4'))
+        .backgroundColor(this.controller.accentSoftColor())
+        .attributeModifier(Api26Material.accentSurface())
+        Column({ space: 4 }) {
+          Text($r('app.string.connection_diagnostics_title'))
+            .fontSize($r('app.float.font_subtitle_large'))
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('app.color.text_primary'))
+          Text($r('app.string.connection_diagnostics_subtitle'))
+            .width('100%')
+            .fontSize(12)
+            .lineHeight(18)
+            .fontColor($r('app.color.text_secondary'))
+            .maxLines(2)
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+      }
+      .width('100%')
+      Button($r('app.string.connection_diagnostics_open_action'), { type: ButtonType.Normal })
+        .height(44)
+        .width('100%')
+        .fontSize($r('app.float.font_body_medium'))
+        .fontColor(Api26Material.accentTextColor())
+        .backgroundColor(this.controller.accentColor())
+        .borderRadius($r('app.float.corner_radius_level10'))
+        .attributeModifier(Api26Material.accent())
+        .onClick((): void => {
+          this.openConnectionDiagnostics();
+        })
+    }
+    .width('100%')
+    .padding($r('app.float.padding_level8'))
+    .borderRadius($r('app.float.corner_radius_level8'))
+    .backgroundColor($r('app.color.surface'))
+    .attributeModifier(Api26Material.panel())
+  }
+
+
+  @Builder
   private backgroundSyncSwitchRow() {
     Row({ space: 16 }) {
       Column({ space: 4 }) {
@@ -1837,7 +1921,8 @@ export struct CompactClipboardView {
       Toggle({ type: ToggleType.Switch, isOn: this.controller.backgroundSyncEnabled })
         .selectedColor(this.controller.accentColor())
         .onChange((enabled: boolean): void => {
-          this.controller.setBackgroundSyncEnabled(enabled);
+          this.controller.setBackgroundSyncEnabled(enabled).catch((): void => {
+          });
         })
     }
     .width('100%')
@@ -2962,6 +3047,7 @@ export struct CompactClipboardView {
     Scroll(this.controller.settingsScroller) {
       Column({ space: 12 }) {
         this.compactAppearanceCard()
+        this.compactDiagnosticsCard()
 
         Column() {
           this.backgroundSyncSwitchRow()
@@ -4298,7 +4384,9 @@ export struct CompactClipboardView {
         })
           .enabled(!this.controller.desktopDeviceMutationBusy)
           .onClick((): void => {
-            this.controller.revokeSpaceDevice(device);
+            setTimeout((): void => {
+              this.controller.revokeSpaceDevice(device);
+            }, 120);
           })
       }
     }.menuItemDivider({
@@ -4317,10 +4405,12 @@ export struct CompactClipboardView {
         symbolStartIcon: this.controller.historyDeleteMenuSymbol(),
         content: $r('app.string.mobile_sync_revoke_confirm')
       })
-        .enabled(!this.controller.desktopDeviceMutationBusy)
-        .onClick((): void => {
+      .enabled(!this.controller.desktopDeviceMutationBusy)
+      .onClick((): void => {
+        setTimeout((): void => {
           this.controller.revokeMobileSyncDevice(device);
-        })
+        }, 120);
+      })
     }.menuItemDivider({
       strokeWidth: LengthMetrics.vp(1),
       color: $r('app.color.divider'),
@@ -4331,13 +4421,22 @@ export struct CompactClipboardView {
 
 
   @Builder
-  private compactDeviceContentTypeSwitch(title: Resource, contentType: string, checked: boolean) {
+  private compactDeviceContentTypeSwitch(title: Resource, contentType: string) {
     Row({ space: 12 }) {
       Text(title)
         .fontSize($r('app.float.font_body_medium'))
         .fontColor($r('app.color.text_primary'))
         .layoutWeight(1)
-      Toggle({ type: ToggleType.Switch, isOn: checked })
+      // Read observed state here instead of passing a boolean snapshot into the
+      // builder. Otherwise API 26 keeps the old visual state after Engine saves.
+      Toggle({
+        type: ToggleType.Switch,
+        isOn: contentType === 'text' ? this.controller.desktopDeviceSyncText :
+          (contentType === 'image' ? this.controller.desktopDeviceSyncImage :
+            (contentType === 'file' ? this.controller.desktopDeviceSyncFile :
+              (contentType === 'link' ? this.controller.desktopDeviceSyncLink :
+                this.controller.desktopDeviceSyncRichText)))
+      })
         .selectedColor(this.controller.accentColor())
         .enabled(this.controller.desktopDeviceSyncState === 2 && !this.controller.desktopDeviceSyncSaving)
         .onChange((enabled: boolean): void => {
@@ -4443,16 +4542,11 @@ export struct CompactClipboardView {
         .fontWeight(FontWeight.Medium)
         .fontColor($r('app.color.text_secondary'))
         .width('100%')
-      this.compactDeviceContentTypeSwitch($r('app.string.desktop_device_sync_text'), 'text',
-        this.controller.desktopDeviceSyncText)
-      this.compactDeviceContentTypeSwitch($r('app.string.desktop_device_sync_image'), 'image',
-        this.controller.desktopDeviceSyncImage)
-      this.compactDeviceContentTypeSwitch($r('app.string.desktop_device_sync_file'), 'file',
-        this.controller.desktopDeviceSyncFile)
-      this.compactDeviceContentTypeSwitch($r('app.string.desktop_device_sync_link'), 'link',
-        this.controller.desktopDeviceSyncLink)
-      this.compactDeviceContentTypeSwitch($r('app.string.desktop_device_sync_rich_text'), 'rich_text',
-        this.controller.desktopDeviceSyncRichText)
+      this.compactDeviceContentTypeSwitch($r('app.string.desktop_device_sync_text'), 'text')
+      this.compactDeviceContentTypeSwitch($r('app.string.desktop_device_sync_image'), 'image')
+      this.compactDeviceContentTypeSwitch($r('app.string.desktop_device_sync_file'), 'file')
+      this.compactDeviceContentTypeSwitch($r('app.string.desktop_device_sync_link'), 'link')
+      this.compactDeviceContentTypeSwitch($r('app.string.desktop_device_sync_rich_text'), 'rich_text')
     }
     .width('100%')
     .padding(14)
