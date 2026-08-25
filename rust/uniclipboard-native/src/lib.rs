@@ -780,6 +780,29 @@ struct HarmonyRuntimeMonitor {
 }
 
 impl HarmonyRuntimeMonitor {
+    fn activate_worker(
+        worker: &mut Option<
+            tokio::task::JoinHandle<std::result::Result<(), SpaceRuntimeFailureCategory>>,
+        >,
+        report_failure: &mut Option<SpaceRuntimeFailureCallback>,
+    ) -> std::result::Result<Self, SpaceRuntimeFailureCategory> {
+        if worker
+            .as_ref()
+            .expect("Harmony runtime monitor worker activates exactly once")
+            .is_finished()
+        {
+            return Err(SpaceRuntimeFailureCategory::Runtime);
+        }
+        Ok(Self::spawn_worker(
+            worker
+                .take()
+                .expect("Harmony runtime monitor worker activates exactly once"),
+            report_failure
+                .take()
+                .expect("Harmony runtime failure callback activates exactly once"),
+        ))
+    }
+
     fn spawn_worker(
         mut worker: tokio::task::JoinHandle<std::result::Result<(), SpaceRuntimeFailureCategory>>,
         report_failure: SpaceRuntimeFailureCallback,
@@ -824,6 +847,7 @@ struct HarmonyProfileRuntime {
     runtime: CliAppRuntime,
     _generation: u64,
     monitor: Option<HarmonyRuntimeMonitor>,
+    ingest_worker_exit: Option<uc_application::facade::IngestWorkerExitSubscription>,
     monitor_worker:
         Option<tokio::task::JoinHandle<std::result::Result<(), SpaceRuntimeFailureCategory>>>,
     report_failure: Option<SpaceRuntimeFailureCallback>,
@@ -831,16 +855,24 @@ struct HarmonyProfileRuntime {
 }
 
 impl SupervisedSpaceRuntime for HarmonyProfileRuntime {
-    fn on_running(&mut self) {
-        let worker = self
-            .monitor_worker
+    fn activate_and_check(&mut self) -> std::result::Result<(), SpaceRuntimeFailureCategory> {
+        let mut ingest_worker_exit = self
+            .ingest_worker_exit
             .take()
-            .expect("Harmony runtime monitor worker activates exactly once");
-        let report_failure = self
-            .report_failure
-            .take()
-            .expect("Harmony runtime failure callback activates exactly once");
-        self.monitor = Some(HarmonyRuntimeMonitor::spawn_worker(worker, report_failure));
+            .expect("Harmony ingest worker health activates exactly once");
+        if ingest_worker_exit.current_exit().is_some() {
+            self.ingest_worker_exit = Some(ingest_worker_exit);
+            return Err(SpaceRuntimeFailureCategory::Runtime);
+        }
+        self.monitor_worker = Some(tokio::spawn(async move {
+            let _ = ingest_worker_exit.recv().await;
+            Err(SpaceRuntimeFailureCategory::Runtime)
+        }));
+        self.monitor = Some(HarmonyRuntimeMonitor::activate_worker(
+            &mut self.monitor_worker,
+            &mut self.report_failure,
+        )?);
+        Ok(())
     }
 
     fn app_facade(&self) -> Option<Arc<uc_application::facade::AppFacade>> {
@@ -894,18 +926,15 @@ impl SpaceRuntimeFactory for HarmonyProfileRuntimeFactory {
                 .try_resume_session()
                 .await
                 .map_err(|_| SpaceRuntimeFailureCategory::Runtime)?;
-            let mut ingest_worker_exit = runtime
+            let ingest_worker_exit = runtime
                 .subscribe_ingest_worker_exit()
                 .ok_or(SpaceRuntimeFailureCategory::Runtime)?;
-            let worker = tokio::spawn(async move {
-                let _ = ingest_worker_exit.recv().await;
-                Err(SpaceRuntimeFailureCategory::Runtime)
-            });
             Ok(Box::new(HarmonyProfileRuntime {
                 runtime,
                 _generation: generation,
                 monitor: None,
-                monitor_worker: Some(worker),
+                ingest_worker_exit: Some(ingest_worker_exit),
+                monitor_worker: None,
                 report_failure: Some(report_failure),
                 device_type: config.device_type,
             }) as Box<dyn SupervisedSpaceRuntime>)

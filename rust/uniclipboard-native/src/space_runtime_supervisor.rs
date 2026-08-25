@@ -36,7 +36,13 @@ pub(crate) enum SpaceRuntimeFailureCategory {
 }
 
 pub(crate) trait SupervisedSpaceRuntime: Send {
-    fn on_running(&mut self) {}
+    /// Arm background failure monitoring and synchronously reject a runtime
+    /// whose required workers have already terminated. The supervisor invokes
+    /// this while the profile slot is still `Starting` and before publishing
+    /// `Running`, so implementations must not block.
+    fn activate_and_check(&mut self) -> Result<(), SpaceRuntimeFailureCategory> {
+        Ok(())
+    }
 
     fn app_facade(&self) -> Option<Arc<AppFacade>> {
         None
@@ -342,26 +348,48 @@ impl SpaceRuntimeSupervisor {
                     {
                         None
                     } else {
-                        slot.runtime = runtime.take();
-                        slot.pending_start_generation = None;
-                        slot.lifecycle = SpaceRuntimeLifecycle::Running;
-                        slot.last_failure = None;
-                        slot.runtime
+                        match runtime
                             .as_mut()
-                            .expect("committed runtime must be present")
-                            .on_running();
-                        Some((
-                            slot.status(profile_id.clone()),
-                            Arc::clone(&slot.lifecycle_notify),
-                        ))
+                            .expect("created runtime must be present")
+                            .activate_and_check()
+                        {
+                            Ok(()) => {
+                                slot.runtime = runtime.take();
+                                slot.pending_start_generation = None;
+                                slot.lifecycle = SpaceRuntimeLifecycle::Running;
+                                slot.last_failure = None;
+                                Some(Ok((
+                                    slot.status(profile_id.clone()),
+                                    Arc::clone(&slot.lifecycle_notify),
+                                )))
+                            }
+                            Err(category) => {
+                                slot.pending_start_generation = None;
+                                slot.lifecycle = SpaceRuntimeLifecycle::Failed;
+                                slot.last_failure = Some(category);
+                                Some(Err((category, Arc::clone(&slot.lifecycle_notify))))
+                            }
+                        }
                     }
                 };
                 match committed {
-                    Some((status, notify)) => {
+                    Some(Ok((status, notify))) => {
                         notify.notify_waiters();
                         Ok(SpaceRuntimeStart {
                             disposition: SpaceRuntimeStartDisposition::Started,
                             status,
+                        })
+                    }
+                    Some(Err((category, notify))) => {
+                        runtime
+                            .expect("failed activation must retain its runtime")
+                            .shutdown()
+                            .await;
+                        notify.notify_waiters();
+                        Err(SpaceRuntimeStartError {
+                            profile_id,
+                            generation,
+                            category,
                         })
                     }
                     None => {
@@ -1258,15 +1286,16 @@ mod review_tests {
     use std::future::Future;
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
+    use std::task::Poll;
 
-    use tokio::sync::Barrier;
+    use tokio::sync::{Barrier, Notify};
     use uc_core::ids::ProfileId;
 
     use super::{
         SpaceRuntimeFactory, SpaceRuntimeFailureCallback, SpaceRuntimeFailureCategory,
-        SpaceRuntimeFuture, SpaceRuntimeLifecycle, SpaceRuntimeProfileConfig,
-        SpaceRuntimeStartDisposition, SpaceRuntimeStatus, SpaceRuntimeSupervisor,
-        SupervisedSpaceRuntime,
+        SpaceRuntimeFuture, SpaceRuntimeLifecycle, SpaceRuntimeProfileConfig, SpaceRuntimeStart,
+        SpaceRuntimeStartDisposition, SpaceRuntimeStartError, SpaceRuntimeStatus,
+        SpaceRuntimeSupervisor, SupervisedSpaceRuntime,
     };
 
     #[derive(Clone)]
@@ -1485,6 +1514,169 @@ mod review_tests {
             tokio::task::yield_now().await;
         }
         panic!("profile {profile_id} did not reach {lifecycle:?}");
+    }
+
+    async fn start_after_pending_signal(
+        supervisor: Arc<SpaceRuntimeSupervisor>,
+        config: SpaceRuntimeProfileConfig,
+        pending: Arc<Notify>,
+    ) -> Result<SpaceRuntimeStart, SpaceRuntimeStartError> {
+        let mut start = Box::pin(supervisor.start(config));
+        let mut signalled = false;
+        std::future::poll_fn(move |context| match start.as_mut().poll(context) {
+            Poll::Pending => {
+                if !signalled {
+                    signalled = true;
+                    pending.notify_one();
+                }
+                Poll::Pending
+            }
+            Poll::Ready(result) => Poll::Ready(result),
+        })
+        .await
+    }
+
+    struct PreCommitWorkerFactory {
+        gate: TestGate,
+        worker_panics: bool,
+    }
+
+    struct PreCommitWorkerRuntime {
+        precommit_failure: Option<SpaceRuntimeFailureCategory>,
+        healthy_worker: Option<tokio::task::JoinHandle<()>>,
+    }
+
+    impl SupervisedSpaceRuntime for PreCommitWorkerRuntime {
+        fn activate_and_check(&mut self) -> Result<(), SpaceRuntimeFailureCategory> {
+            self.precommit_failure.map_or(Ok(()), Err)
+        }
+
+        fn shutdown(mut self: Box<Self>) -> SpaceRuntimeFuture<()> {
+            Box::pin(async move {
+                if let Some(worker) = self.healthy_worker.take() {
+                    worker.abort();
+                    let _ = worker.await;
+                }
+            })
+        }
+    }
+
+    impl SpaceRuntimeFactory for PreCommitWorkerFactory {
+        fn create(
+            &self,
+            _config: SpaceRuntimeProfileConfig,
+            _generation: u64,
+            _report_failure: SpaceRuntimeFailureCallback,
+        ) -> SpaceRuntimeFuture<Result<Box<dyn SupervisedSpaceRuntime>, SpaceRuntimeFailureCategory>>
+        {
+            let gate = self.gate.clone();
+            let worker_panics = self.worker_panics;
+            Box::pin(async move {
+                gate.wait_until_entered().await;
+                gate.release().await;
+                let (precommit_failure, healthy_worker) = if worker_panics {
+                    let worker = tokio::spawn(async {
+                        panic!("simulated worker failure before Running commit");
+                    });
+                    let exit = worker.await.expect_err("worker must panic before commit");
+                    assert!(exit.is_panic());
+                    (Some(SpaceRuntimeFailureCategory::Runtime), None)
+                } else {
+                    (None, Some(tokio::spawn(std::future::pending::<()>())))
+                };
+                Ok(Box::new(PreCommitWorkerRuntime {
+                    precommit_failure,
+                    healthy_worker,
+                }) as Box<dyn SupervisedSpaceRuntime>)
+            })
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn precommit_worker_failure_is_shared_by_concurrent_starts() {
+        let profile_config = config("profile-precommit-worker-failure");
+        let profile_id = profile_config.profile_id.clone();
+        let gate = TestGate::new();
+        let supervisor = SpaceRuntimeSupervisor::new(Arc::new(PreCommitWorkerFactory {
+            gate: gate.clone(),
+            worker_panics: true,
+        }));
+
+        let first = tokio::spawn({
+            let supervisor = Arc::clone(&supervisor);
+            let config = profile_config.clone();
+            async move { supervisor.start(config).await }
+        });
+        gate.wait_until_entered().await;
+
+        let second_pending = Arc::new(Notify::new());
+        let second = tokio::spawn(start_after_pending_signal(
+            Arc::clone(&supervisor),
+            profile_config.clone(),
+            Arc::clone(&second_pending),
+        ));
+        second_pending.notified().await;
+        assert_eq!(
+            supervisor.status(&profile_id).unwrap().lifecycle,
+            SpaceRuntimeLifecycle::Starting
+        );
+
+        gate.release().await;
+        let first = first.await.unwrap().unwrap_err();
+        let second = second.await.unwrap().unwrap_err();
+        assert_eq!(first.generation, 1);
+        assert_eq!(second.generation, 1);
+        assert_eq!(first.category, SpaceRuntimeFailureCategory::Runtime);
+        assert_eq!(second.category, SpaceRuntimeFailureCategory::Runtime);
+        assert_eq!(
+            supervisor.status(&profile_id).unwrap(),
+            SpaceRuntimeStatus {
+                profile_id,
+                generation: 1,
+                lifecycle: SpaceRuntimeLifecycle::Failed,
+                last_failure: Some(SpaceRuntimeFailureCategory::Runtime),
+            }
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn healthy_precommit_worker_is_shared_by_concurrent_starts() {
+        let profile_config = config("profile-precommit-worker-healthy");
+        let profile_id = profile_config.profile_id.clone();
+        let gate = TestGate::new();
+        let supervisor = SpaceRuntimeSupervisor::new(Arc::new(PreCommitWorkerFactory {
+            gate: gate.clone(),
+            worker_panics: false,
+        }));
+
+        let first = tokio::spawn({
+            let supervisor = Arc::clone(&supervisor);
+            let config = profile_config.clone();
+            async move { supervisor.start(config).await }
+        });
+        gate.wait_until_entered().await;
+
+        let second_pending = Arc::new(Notify::new());
+        let second = tokio::spawn(start_after_pending_signal(
+            Arc::clone(&supervisor),
+            profile_config,
+            Arc::clone(&second_pending),
+        ));
+        second_pending.notified().await;
+        gate.release().await;
+
+        let first = first.await.unwrap().unwrap();
+        let second = second.await.unwrap().unwrap();
+        assert_eq!(first.disposition, SpaceRuntimeStartDisposition::Started);
+        assert_eq!(second.disposition, SpaceRuntimeStartDisposition::Existing);
+        assert_eq!(first.status.generation, 1);
+        assert_eq!(second.status.generation, 1);
+        assert_eq!(first.status.lifecycle, SpaceRuntimeLifecycle::Running);
+        assert_eq!(second.status.lifecycle, SpaceRuntimeLifecycle::Running);
+
+        let stopped = supervisor.stop(&profile_id).await.unwrap();
+        assert_eq!(stopped.lifecycle, SpaceRuntimeLifecycle::Stopped);
+        assert_eq!(stopped.last_failure, None);
     }
 
     #[test]
@@ -1805,11 +1997,12 @@ mod review_tests {
     }
 
     impl SupervisedSpaceRuntime for ActivationFailureRuntime {
-        fn on_running(&mut self) {
+        fn activate_and_check(&mut self) -> Result<(), SpaceRuntimeFailureCategory> {
             let report_failure = Arc::clone(&self.report_failure);
             tokio::spawn(async move {
                 let _ = report_failure(SpaceRuntimeFailureCategory::Runtime).await;
             });
+            Ok(())
         }
 
         fn shutdown(self: Box<Self>) -> SpaceRuntimeFuture<()> {

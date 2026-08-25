@@ -207,6 +207,16 @@ pub struct IngestWorkerExitSubscription {
 }
 
 impl IngestWorkerExitSubscription {
+    /// Return an already-recorded terminal worker state without waiting.
+    /// Runtime supervisors use this during their synchronous start commit.
+    pub fn current_exit(&self) -> Option<IngestWorkerExit> {
+        self.inner.current_exit().map(|exit| match exit {
+            InternalIngestWorkerExit::Completed => IngestWorkerExit::Completed,
+            InternalIngestWorkerExit::Cancelled => IngestWorkerExit::Cancelled,
+            InternalIngestWorkerExit::Panicked => IngestWorkerExit::Panicked,
+        })
+    }
+
     pub async fn recv(&mut self) -> Option<IngestWorkerExit> {
         self.inner.recv().await.map(|exit| match exit {
             InternalIngestWorkerExit::Completed => IngestWorkerExit::Completed,

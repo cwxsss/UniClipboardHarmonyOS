@@ -94,6 +94,10 @@ pub(crate) struct IngestWorkerExitSubscription {
 }
 
 impl IngestWorkerExitSubscription {
+    pub(crate) fn current_exit(&self) -> Option<IngestWorkerExit> {
+        *self.rx.borrow()
+    }
+
     pub(crate) async fn recv(&mut self) -> Option<IngestWorkerExit> {
         loop {
             if let Some(exit) = *self.rx.borrow_and_update() {
@@ -467,11 +471,16 @@ mod tests {
         ));
         let handle = Arc::clone(&uc).spawn_run();
         let mut exits = handle.subscribe_exit();
+        let health_check = handle.subscribe_exit();
 
         assert_eq!(
             tokio::time::timeout(Duration::from_secs(2), exits.recv())
                 .await
                 .expect("worker exit must be observable"),
+            Some(IngestWorkerExit::Panicked)
+        );
+        assert_eq!(
+            health_check.current_exit(),
             Some(IngestWorkerExit::Panicked)
         );
     }
