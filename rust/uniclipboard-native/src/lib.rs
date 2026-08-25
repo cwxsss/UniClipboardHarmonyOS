@@ -774,10 +774,84 @@ async fn current_space_status() -> Result<NativeSpaceStatus> {
 
 struct HarmonyProfileRuntimeFactory;
 
+struct HarmonyRuntimeMonitor {
+    cancel: Option<tokio::sync::oneshot::Sender<()>>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+fn harmony_inbound_event_source(
+    mut subscription: uc_application::facade::InboundNoticeSubscription,
+) -> SpaceRuntimeFuture<SpaceRuntimeFailureCategory> {
+    Box::pin(async move {
+        loop {
+            match subscription.recv().await {
+                Ok(_) => {}
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                    return SpaceRuntimeFailureCategory::Runtime;
+                }
+            }
+        }
+    })
+}
+
+#[cfg(test)]
+fn controlled_harmony_event_source<T>(
+    mut receiver: tokio::sync::broadcast::Receiver<T>,
+) -> SpaceRuntimeFuture<SpaceRuntimeFailureCategory>
+where
+    T: Clone + Send + 'static,
+{
+    Box::pin(async move {
+        loop {
+            match receiver.recv().await {
+                Ok(_) => {}
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                    return SpaceRuntimeFailureCategory::Runtime;
+                }
+            }
+        }
+    })
+}
+
+impl HarmonyRuntimeMonitor {
+    fn spawn(
+        failure_source: SpaceRuntimeFuture<SpaceRuntimeFailureCategory>,
+        report_failure: SpaceRuntimeFailureCallback,
+    ) -> Self {
+        let (cancel, cancelled) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            tokio::select! {
+                _ = cancelled => {}
+                category = failure_source => {
+                    // Run the callback outside this monitor task. The supervisor
+                    // shuts down the runtime (and joins this task) while handling
+                    // the report, so awaiting inline would self-join.
+                    tokio::spawn(async move {
+                        let _ = report_failure(category).await;
+                    });
+                }
+            }
+        });
+        Self {
+            cancel: Some(cancel),
+            task,
+        }
+    }
+
+    async fn shutdown(mut self) {
+        if let Some(cancel) = self.cancel.take() {
+            let _ = cancel.send(());
+        }
+        let _ = self.task.await;
+    }
+}
+
 struct HarmonyProfileRuntime {
     runtime: CliAppRuntime,
     _generation: u64,
-    _report_failure: SpaceRuntimeFailureCallback,
+    monitor: HarmonyRuntimeMonitor,
     device_type: String,
 }
 
@@ -792,7 +866,10 @@ impl SupervisedSpaceRuntime for HarmonyProfileRuntime {
 
     fn shutdown(self: Box<Self>) -> SpaceRuntimeFuture<()> {
         Box::pin(async move {
-            let Self { runtime, .. } = *self;
+            let Self {
+                runtime, monitor, ..
+            } = *self;
+            monitor.shutdown().await;
             runtime.shutdown().await;
         })
     }
@@ -808,10 +885,6 @@ impl SpaceRuntimeFactory for HarmonyProfileRuntimeFactory {
         std::result::Result<Box<dyn SupervisedSpaceRuntime>, SpaceRuntimeFailureCategory>,
     > {
         Box::pin(async move {
-            std::fs::create_dir_all(&config.data_root)
-                .map_err(|_| SpaceRuntimeFailureCategory::Storage)?;
-            std::fs::create_dir_all(&config.cache_root)
-                .map_err(|_| SpaceRuntimeFailureCategory::Storage)?;
             let profile = CliAppRuntimeProfileConfig::builder(config.profile_id.to_string())
                 .data_root(config.data_root)
                 .cache_root(config.cache_root)
@@ -826,10 +899,16 @@ impl SpaceRuntimeFactory for HarmonyProfileRuntimeFactory {
                 .try_resume_session()
                 .await
                 .map_err(|_| SpaceRuntimeFailureCategory::Runtime)?;
+            let inbound_health = runtime
+                .app_facade
+                .subscribe_inbound_clipboard_notices()
+                .map_err(|_| SpaceRuntimeFailureCategory::Runtime)?;
+            let failure_source = harmony_inbound_event_source(inbound_health);
+            let monitor = HarmonyRuntimeMonitor::spawn(failure_source, report_failure);
             Ok(Box::new(HarmonyProfileRuntime {
                 runtime,
                 _generation: generation,
-                _report_failure: report_failure,
+                monitor,
                 device_type: config.device_type,
             }) as Box<dyn SupervisedSpaceRuntime>)
         })
@@ -851,17 +930,17 @@ fn build_profile_runtime_config(
         .map_err(|error| Error::new(Status::InvalidArg, error.to_string()))?;
     let data_root = std::path::PathBuf::from(data_dir);
     let cache_root = std::path::PathBuf::from(cache_dir);
-    CliAppRuntimeProfileConfig::builder(profile_id)
-        .data_root(data_root.clone())
-        .cache_root(cache_root.clone())
+    let profile = CliAppRuntimeProfileConfig::builder(profile_id)
+        .data_root(data_root)
+        .cache_root(cache_root)
         .secure_storage_namespace(namespace.clone())
-        .build()
+        .create_and_build()
         .map_err(|error| Error::new(Status::InvalidArg, error.to_string()))?;
 
     Ok(SpaceRuntimeProfileConfig {
         profile_id: ProfileId::from(profile_id),
-        data_root,
-        cache_root,
+        data_root: profile.data_root().to_path_buf(),
+        cache_root: profile.cache_root().to_path_buf(),
         namespace,
         device_type: normalize_device_type(device_type),
     })
@@ -3420,9 +3499,90 @@ pub async fn delete_history(
 
 #[cfg(test)]
 mod profile_api_contract_tests {
-    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
 
     use super::*;
+
+    #[derive(Default)]
+    struct ProductionMonitorTestFactory {
+        failure_senders: Mutex<Vec<tokio::sync::broadcast::Sender<()>>>,
+        callbacks: Mutex<Vec<SpaceRuntimeFailureCallback>>,
+    }
+
+    impl ProductionMonitorTestFactory {
+        fn close_event_source(&self, index: usize) {
+            drop(self.failure_senders.lock().unwrap().remove(index));
+        }
+    }
+
+    struct ProductionMonitoredTestRuntime {
+        monitor: HarmonyRuntimeMonitor,
+    }
+
+    impl SupervisedSpaceRuntime for ProductionMonitoredTestRuntime {
+        fn shutdown(self: Box<Self>) -> SpaceRuntimeFuture<()> {
+            Box::pin(async move {
+                self.monitor.shutdown().await;
+            })
+        }
+    }
+
+    impl SpaceRuntimeFactory for ProductionMonitorTestFactory {
+        fn create(
+            &self,
+            _config: SpaceRuntimeProfileConfig,
+            _generation: u64,
+            report_failure: SpaceRuntimeFailureCallback,
+        ) -> SpaceRuntimeFuture<
+            std::result::Result<Box<dyn SupervisedSpaceRuntime>, SpaceRuntimeFailureCategory>,
+        > {
+            let (failure_tx, failure_rx) = tokio::sync::broadcast::channel(1);
+            self.failure_senders.lock().unwrap().push(failure_tx);
+            self.callbacks
+                .lock()
+                .unwrap()
+                .push(Arc::clone(&report_failure));
+            Box::pin(async move {
+                Ok(Box::new(ProductionMonitoredTestRuntime {
+                    monitor: HarmonyRuntimeMonitor::spawn(
+                        controlled_harmony_event_source(failure_rx),
+                        report_failure,
+                    ),
+                }) as Box<dyn SupervisedSpaceRuntime>)
+            })
+        }
+    }
+
+    fn monitor_config(profile_id: &str) -> SpaceRuntimeProfileConfig {
+        let root = std::env::temp_dir().join(format!(
+            "uc-native-monitor-{}-{profile_id}",
+            std::process::id()
+        ));
+        SpaceRuntimeProfileConfig {
+            profile_id: ProfileId::from(profile_id),
+            data_root: root.join("data"),
+            cache_root: root.join("cache"),
+            namespace: format!("harmony-{profile_id}"),
+            device_type: "phone".to_string(),
+        }
+    }
+
+    async fn wait_for_lifecycle(
+        supervisor: &SpaceRuntimeSupervisor,
+        profile_id: &ProfileId,
+        expected: SpaceRuntimeLifecycle,
+    ) {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if supervisor.status(profile_id).unwrap().lifecycle == expected {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+    }
 
     #[test]
     fn profile_scoped_start_stop_status_exports_exist() {
@@ -3456,10 +3616,81 @@ mod profile_api_contract_tests {
             config.profile_id,
             uc_core::ids::ProfileId::from("profile-a")
         );
-        assert_eq!(config.data_root, PathBuf::from(data_root));
-        assert_eq!(config.cache_root, PathBuf::from(cache_root));
+        assert_eq!(config.data_root, std::fs::canonicalize(data_root).unwrap());
+        assert_eq!(
+            config.cache_root,
+            std::fs::canonicalize(cache_root).unwrap()
+        );
         assert_eq!(config.namespace, "harmony-profile-a");
         assert_eq!(config.device_type, "phone");
+    }
+
+    #[test]
+    fn production_monitor_failure_marks_profile_failed() {
+        let factory = Arc::new(ProductionMonitorTestFactory::default());
+        let supervisor = SpaceRuntimeSupervisor::new(factory.clone());
+        let config = monitor_config("profile-monitor-failure");
+        let profile_id = config.profile_id.clone();
+
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                supervisor.start(config).await.unwrap();
+                factory.close_event_source(0);
+                wait_for_lifecycle(&supervisor, &profile_id, SpaceRuntimeLifecycle::Failed).await;
+                assert_eq!(
+                    supervisor.status(&profile_id).unwrap().last_failure,
+                    Some(SpaceRuntimeFailureCategory::Runtime)
+                );
+            });
+    }
+
+    #[test]
+    fn production_monitor_old_generation_does_not_pollute_restart() {
+        let factory = Arc::new(ProductionMonitorTestFactory::default());
+        let supervisor = SpaceRuntimeSupervisor::new(factory.clone());
+        let config = monitor_config("profile-monitor-generation");
+        let profile_id = config.profile_id.clone();
+
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                supervisor.start(config.clone()).await.unwrap();
+                let old_callback = factory.callbacks.lock().unwrap()[0].clone();
+                supervisor.stop(&profile_id).await.unwrap();
+                supervisor.start(config).await.unwrap();
+
+                assert!(!(old_callback)(SpaceRuntimeFailureCategory::Runtime).await);
+                let status = supervisor.status(&profile_id).unwrap();
+                assert_eq!(status.lifecycle, SpaceRuntimeLifecycle::Running);
+                assert_eq!(status.last_failure, None);
+            });
+    }
+
+    #[test]
+    fn production_monitor_normal_stop_does_not_report_failure() {
+        let factory = Arc::new(ProductionMonitorTestFactory::default());
+        let supervisor = SpaceRuntimeSupervisor::new(factory);
+        let config = monitor_config("profile-monitor-stop");
+        let profile_id = config.profile_id.clone();
+
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                supervisor.start(config).await.unwrap();
+                let stopped = supervisor.stop(&profile_id).await.unwrap();
+                assert_eq!(stopped.lifecycle, SpaceRuntimeLifecycle::Stopped);
+                tokio::task::yield_now().await;
+                let status = supervisor.status(&profile_id).unwrap();
+                assert_eq!(status.lifecycle, SpaceRuntimeLifecycle::Stopped);
+                assert_eq!(status.last_failure, None);
+            });
     }
 }
 

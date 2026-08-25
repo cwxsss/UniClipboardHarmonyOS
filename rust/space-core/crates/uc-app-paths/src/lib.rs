@@ -175,6 +175,21 @@ impl ProfilePathConfigBuilder {
             secure_storage_namespace,
         })
     }
+
+    /// Validate the explicit profile inputs, create both final roots, and
+    /// replace their lexical paths with physical canonical paths.
+    ///
+    /// Multi-runtime composition roots must use this method before registering
+    /// ownership. It deliberately has filesystem side effects; [`Self::build`]
+    /// remains the compatibility path for callers that only resolve a layout.
+    pub fn create_and_build(self) -> Result<ProfilePathConfig, ProfilePathConfigError> {
+        let mut config = self.build()?;
+        config.data_root = create_and_canonicalize_root(&config.data_root)
+            .map_err(|()| ProfilePathConfigError::InvalidDataRoot)?;
+        config.cache_root = create_and_canonicalize_root(&config.cache_root)
+            .map_err(|()| ProfilePathConfigError::InvalidCacheRoot)?;
+        Ok(config)
+    }
 }
 
 fn validate_profile_id(profile_id: &str) -> Result<(), ProfilePathConfigError> {
@@ -203,7 +218,40 @@ fn validate_absolute_root(root: &Path) -> Result<(), ()> {
     {
         return Err(());
     }
+    #[cfg(windows)]
+    {
+        use std::path::{Component, Prefix};
+
+        let Some(Component::Prefix(prefix)) = root.components().next() else {
+            return Err(());
+        };
+        if !matches!(
+            prefix.kind(),
+            Prefix::Disk(_)
+                | Prefix::UNC(_, _)
+                | Prefix::VerbatimDisk(_)
+                | Prefix::VerbatimUNC(_, _)
+        ) {
+            return Err(());
+        }
+    }
     Ok(())
+}
+
+fn create_and_canonicalize_root(root: &Path) -> Result<PathBuf, ()> {
+    validate_absolute_root(root)?;
+    std::fs::create_dir_all(root).map_err(|_| ())?;
+    let metadata = std::fs::metadata(root).map_err(|_| ())?;
+    if !metadata.is_dir() {
+        return Err(());
+    }
+    let canonical = std::fs::canonicalize(root).map_err(|_| ())?;
+    validate_absolute_root(&canonical)?;
+    let canonical_metadata = std::fs::metadata(&canonical).map_err(|_| ())?;
+    if !canonical_metadata.is_dir() {
+        return Err(());
+    }
+    Ok(canonical)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -224,9 +272,13 @@ impl std::fmt::Display for ProfilePathConfigError {
             Self::MissingProfileId => "profile id is required",
             Self::InvalidProfileId => "profile id is invalid",
             Self::MissingDataRoot => "profile data root is required",
-            Self::InvalidDataRoot => "profile data root must be absolute and traversal-free",
+            Self::InvalidDataRoot => {
+                "profile data root must be a supported absolute, traversal-free directory"
+            }
             Self::MissingCacheRoot => "profile cache root is required",
-            Self::InvalidCacheRoot => "profile cache root must be absolute and traversal-free",
+            Self::InvalidCacheRoot => {
+                "profile cache root must be a supported absolute, traversal-free directory"
+            }
             Self::MissingSecureStorageNamespace => "secure-storage namespace is required",
             Self::InvalidSecureStorageNamespace => {
                 "secure-storage namespace must match the canonical profile namespace"
@@ -588,6 +640,115 @@ mod tests {
                 Err(ProfilePathConfigError::InvalidSecureStorageNamespace)
             );
         }
+    }
+
+    #[test]
+    fn canonical_profile_builder_creates_and_physically_resolves_roots() {
+        let root =
+            std::env::temp_dir().join(format!("uc-profile-canonical-{}", std::process::id()));
+        let data_root = root.join("data").join(".");
+        let cache_root = root.join("cache").join(".");
+
+        let profile = ProfilePathConfig::builder("profile-a")
+            .data_root(&data_root)
+            .cache_root(&cache_root)
+            .secure_storage_namespace("harmony-profile-a")
+            .create_and_build()
+            .unwrap();
+
+        assert!(profile.data_root().is_dir());
+        assert!(profile.cache_root().is_dir());
+        assert_eq!(
+            profile.data_root(),
+            std::fs::canonicalize(data_root).unwrap()
+        );
+        assert_eq!(
+            profile.cache_root(),
+            std::fs::canonicalize(cache_root).unwrap()
+        );
+    }
+
+    #[test]
+    fn canonical_profile_builder_fails_closed_for_metadata_and_traversal() {
+        let root = std::env::temp_dir().join(format!(
+            "uc-profile-canonical-invalid-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let file_root = root.join("not-a-directory");
+        std::fs::write(&file_root, b"file").unwrap();
+
+        assert_eq!(
+            ProfilePathConfig::builder("profile-a")
+                .data_root(&file_root)
+                .cache_root(root.join("cache"))
+                .secure_storage_namespace("harmony-profile-a")
+                .create_and_build(),
+            Err(ProfilePathConfigError::InvalidDataRoot)
+        );
+        assert_eq!(
+            ProfilePathConfig::builder("profile-a")
+                .data_root(root.join("child").join("..").join("data"))
+                .cache_root(root.join("cache"))
+                .secure_storage_namespace("harmony-profile-a")
+                .create_and_build(),
+            Err(ProfilePathConfigError::InvalidDataRoot)
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn canonical_profile_builder_rejects_unsupported_windows_prefixes() {
+        for unsupported in [
+            r"\\.\PhysicalDrive0\profile-data",
+            r"\\?\GLOBALROOT\Device\HarddiskVolumeShadowCopy1\profile-data",
+        ] {
+            assert_eq!(
+                ProfilePathConfig::builder("profile-a")
+                    .data_root(unsupported)
+                    .cache_root(std::env::temp_dir().join("uc-profile-prefix-cache"))
+                    .secure_storage_namespace("harmony-profile-a")
+                    .create_and_build(),
+                Err(ProfilePathConfigError::InvalidDataRoot)
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn canonical_profile_builder_resolves_case_and_symlink_aliases_when_supported() {
+        use std::os::windows::fs::symlink_dir;
+
+        let root = std::env::temp_dir().join(format!("uc-profile-alias-{}", std::process::id()));
+        let physical = root.join("PhysicalRoot");
+        std::fs::create_dir_all(&physical).unwrap();
+        let case_alias = root.join("physicalroot");
+        assert_eq!(
+            std::fs::canonicalize(&physical).unwrap(),
+            std::fs::canonicalize(&case_alias).unwrap()
+        );
+
+        let alias = root.join("root-link");
+        if let Err(error) = symlink_dir(&physical, &alias) {
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::Unsupported
+            ) || error.raw_os_error() == Some(1314)
+            {
+                return;
+            }
+            panic!("failed to create directory symlink: {error}");
+        }
+        let profile = ProfilePathConfig::builder("profile-a")
+            .data_root(&alias)
+            .cache_root(root.join("cache"))
+            .secure_storage_namespace("harmony-profile-a")
+            .create_and_build()
+            .unwrap();
+        assert_eq!(
+            profile.data_root(),
+            std::fs::canonicalize(physical).unwrap()
+        );
     }
 
     #[test]

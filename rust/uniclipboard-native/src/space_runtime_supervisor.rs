@@ -949,6 +949,129 @@ mod tests {
     }
 
     #[test]
+    fn production_configs_reject_physical_root_aliases_across_profiles() {
+        let root =
+            std::env::temp_dir().join(format!("uc-native-profile-alias-{}", std::process::id()));
+        let physical = root.join("physical");
+        let cache_a = root.join("cache-a");
+        let cache_b = root.join("cache-b");
+        std::fs::create_dir_all(&physical).unwrap();
+        let alias = physical.join(".");
+        let config_a = crate::build_profile_runtime_config(
+            "profile-a",
+            physical.to_string_lossy().as_ref(),
+            cache_a.to_string_lossy().as_ref(),
+            "phone",
+        )
+        .unwrap();
+        let config_b = crate::build_profile_runtime_config(
+            "profile-b",
+            alias.to_string_lossy().as_ref(),
+            cache_b.to_string_lossy().as_ref(),
+            "phone",
+        )
+        .unwrap();
+        let factory = Arc::new(FakeRuntimeFactory::default());
+        let supervisor = SpaceRuntimeSupervisor::new(factory);
+
+        let error = run(async {
+            supervisor.start(config_a).await.unwrap();
+            supervisor.start(config_b).await.unwrap_err()
+        });
+        assert_eq!(error.category, SpaceRuntimeFailureCategory::ProfileConflict);
+    }
+
+    #[test]
+    fn production_configs_reject_canonical_ancestor_overlap() {
+        let root =
+            std::env::temp_dir().join(format!("uc-native-profile-ancestor-{}", std::process::id()));
+        let config_a = crate::build_profile_runtime_config(
+            "profile-ancestor-a",
+            root.join("owned").to_string_lossy().as_ref(),
+            root.join("cache-a").to_string_lossy().as_ref(),
+            "phone",
+        )
+        .unwrap();
+        let config_b = crate::build_profile_runtime_config(
+            "profile-ancestor-b",
+            root.join("owned").join("nested").to_string_lossy().as_ref(),
+            root.join("cache-b").to_string_lossy().as_ref(),
+            "phone",
+        )
+        .unwrap();
+        let supervisor = SpaceRuntimeSupervisor::new(Arc::new(FakeRuntimeFactory::default()));
+
+        let error = run(async {
+            supervisor.start(config_a).await.unwrap();
+            supervisor.start(config_b).await.unwrap_err()
+        });
+        assert_eq!(error.category, SpaceRuntimeFailureCategory::ProfileConflict);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn production_configs_reject_case_and_symlink_aliases_when_supported() {
+        use std::os::windows::fs::symlink_dir;
+
+        let root = std::env::temp_dir().join(format!(
+            "uc-native-profile-windows-alias-{}",
+            std::process::id()
+        ));
+        let physical = root.join("PhysicalRoot");
+        std::fs::create_dir_all(&physical).unwrap();
+
+        let assert_conflict = |first_profile: &str,
+                               first_root: &std::path::Path,
+                               second_profile: &str,
+                               second_root: &std::path::Path| {
+            let config_a = crate::build_profile_runtime_config(
+                first_profile,
+                first_root.to_string_lossy().as_ref(),
+                root.join(format!("{first_profile}-cache"))
+                    .to_string_lossy()
+                    .as_ref(),
+                "phone",
+            )
+            .unwrap();
+            let config_b = crate::build_profile_runtime_config(
+                second_profile,
+                second_root.to_string_lossy().as_ref(),
+                root.join(format!("{second_profile}-cache"))
+                    .to_string_lossy()
+                    .as_ref(),
+                "phone",
+            )
+            .unwrap();
+            let supervisor = SpaceRuntimeSupervisor::new(Arc::new(FakeRuntimeFactory::default()));
+            let error = run(async {
+                supervisor.start(config_a).await.unwrap();
+                supervisor.start(config_b).await.unwrap_err()
+            });
+            assert_eq!(error.category, SpaceRuntimeFailureCategory::ProfileConflict);
+        };
+
+        assert_conflict(
+            "profile-case-a",
+            &physical,
+            "profile-case-b",
+            &root.join("physicalroot"),
+        );
+
+        let alias = root.join("root-link");
+        if let Err(error) = symlink_dir(&physical, &alias) {
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::Unsupported
+            ) || error.raw_os_error() == Some(1314)
+            {
+                return;
+            }
+            panic!("failed to create directory symlink: {error}");
+        }
+        assert_conflict("profile-link-a", &physical, "profile-link-b", &alias);
+    }
+
+    #[test]
     fn factory_failure_callback_is_bound_to_its_runtime_generation() {
         let factory = Arc::new(CallbackCapturingFactory::default());
         let supervisor = SpaceRuntimeSupervisor::new(factory.clone());

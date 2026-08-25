@@ -33,6 +33,14 @@ impl CliAppRuntimeProfileConfig {
         self.paths.secure_storage_namespace()
     }
 
+    pub fn data_root(&self) -> &std::path::Path {
+        self.paths.data_root()
+    }
+
+    pub fn cache_root(&self) -> &std::path::Path {
+        self.paths.cache_root()
+    }
+
     pub fn namespace_for_profile(
         profile_id: &str,
     ) -> Result<String, uc_app_paths::ProfilePathConfigError> {
@@ -82,6 +90,14 @@ impl CliAppRuntimeProfileConfigBuilder {
     pub fn build(self) -> Result<CliAppRuntimeProfileConfig, uc_app_paths::ProfilePathConfigError> {
         self.inner
             .build()
+            .map(|paths| CliAppRuntimeProfileConfig { paths })
+    }
+
+    pub fn create_and_build(
+        self,
+    ) -> Result<CliAppRuntimeProfileConfig, uc_app_paths::ProfilePathConfigError> {
+        self.inner
+            .create_and_build()
             .map(|paths| CliAppRuntimeProfileConfig { paths })
     }
 }
