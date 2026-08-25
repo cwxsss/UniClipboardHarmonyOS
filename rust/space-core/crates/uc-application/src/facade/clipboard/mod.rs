@@ -15,6 +15,9 @@ pub use facade::{
     InboundNoticeSubscription, IngestHandle, IngestWorkerExit, IngestWorkerExitSubscription,
 };
 
+#[cfg(feature = "test-util")]
+pub use facade::{RealIngestWorkerTerminator, RealIngestWorkerTestHarness};
+
 // 投递状态视图相关类型——外部 crate 通过 `ClipboardSyncFacade::get_entry_delivery_view`
 // 取得,渲染层使用 view 类型来绘制 UI;失败枚举沿用 `uc_core::clipboard::DeliveryFailureReason`,
 // 外部按需直接从 uc-core 引入。

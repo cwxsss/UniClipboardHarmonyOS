@@ -56,6 +56,8 @@ pub use clipboard::{
     EntryDeliveryView, EntrySource, GetEntryDeliveryViewError, InboundAction, InboundNotice,
     InboundNoticeSubscription, IngestHandle, IngestWorkerExit, IngestWorkerExitSubscription,
 };
+#[cfg(feature = "test-util")]
+pub use clipboard::{RealIngestWorkerTerminator, RealIngestWorkerTestHarness};
 // V3 envelope codec helpers — surfaced through the facade per §11.4.3 so
 // external CLI / test consumers don't reach into `crate::usecases::*`
 // directly. Implementations live in `usecases::clipboard_sync::payload_codec`.

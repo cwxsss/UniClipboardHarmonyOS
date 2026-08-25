@@ -80,6 +80,7 @@ pub(crate) struct IngestSpawnHandle {
     worker_abort: AbortHandle,
     observer: Option<JoinHandle<()>>,
     exit_rx: tokio::sync::watch::Receiver<Option<IngestWorkerExit>>,
+    lifecycle_handoff: IngestWorkerLifecycleHandoff,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,8 +90,38 @@ pub(crate) enum IngestWorkerExit {
     Panicked,
 }
 
+#[derive(Clone, Default)]
+struct IngestWorkerLifecycleHandoff {
+    state: Arc<std::sync::Mutex<IngestWorkerLifecycleState>>,
+}
+
+#[derive(Default)]
+struct IngestWorkerLifecycleState {
+    terminal: Option<IngestWorkerExit>,
+    running_committed: bool,
+}
+
+impl IngestWorkerLifecycleHandoff {
+    fn record_terminal(&self, terminal: IngestWorkerExit) {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        state.terminal.get_or_insert(terminal);
+    }
+
+    fn commit_running(&self, commit_running: &mut dyn FnMut()) -> Result<(), IngestWorkerExit> {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        if let Some(terminal) = state.terminal {
+            return Err(terminal);
+        }
+        commit_running();
+        state.running_committed = true;
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
 pub(crate) struct IngestWorkerExitSubscription {
     rx: tokio::sync::watch::Receiver<Option<IngestWorkerExit>>,
+    lifecycle_handoff: IngestWorkerLifecycleHandoff,
 }
 
 impl IngestWorkerExitSubscription {
@@ -108,6 +139,13 @@ impl IngestWorkerExitSubscription {
             }
         }
     }
+
+    pub(crate) fn commit_running(
+        &self,
+        commit_running: &mut dyn FnMut(),
+    ) -> Result<(), IngestWorkerExit> {
+        self.lifecycle_handoff.commit_running(commit_running)
+    }
 }
 
 impl IngestSpawnHandle {
@@ -118,6 +156,7 @@ impl IngestSpawnHandle {
     pub(crate) fn subscribe_exit(&self) -> IngestWorkerExitSubscription {
         IngestWorkerExitSubscription {
             rx: self.exit_rx.clone(),
+            lifecycle_handoff: self.lifecycle_handoff.clone(),
         }
     }
 
@@ -178,18 +217,22 @@ impl IngestInboundClipboardUseCase {
         let worker = tokio::spawn(async move { uc.run().await });
         let worker_abort = worker.abort_handle();
         let (exit_tx, exit_rx) = tokio::sync::watch::channel(None);
+        let lifecycle_handoff = IngestWorkerLifecycleHandoff::default();
+        let observer_handoff = lifecycle_handoff.clone();
         let observer = tokio::spawn(async move {
             let exit = match worker.await {
                 Ok(()) => IngestWorkerExit::Completed,
                 Err(error) if error.is_cancelled() => IngestWorkerExit::Cancelled,
                 Err(_) => IngestWorkerExit::Panicked,
             };
+            observer_handoff.record_terminal(exit);
             let _ = exit_tx.send(Some(exit));
         });
         IngestSpawnHandle {
             worker_abort,
             observer: Some(observer),
             exit_rx,
+            lifecycle_handoff,
         }
     }
 
@@ -483,6 +526,12 @@ mod tests {
             health_check.current_exit(),
             Some(IngestWorkerExit::Panicked)
         );
+        let mut committed = false;
+        assert_eq!(
+            health_check.commit_running(&mut || committed = true),
+            Err(IngestWorkerExit::Panicked)
+        );
+        assert!(!committed, "a terminal producer must reject Running commit");
     }
 
     /// 1. Happy path — one inbound, decrypt succeeds, notice arrives on

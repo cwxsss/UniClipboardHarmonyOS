@@ -202,6 +202,7 @@ pub enum IngestWorkerExit {
     Panicked,
 }
 
+#[derive(Clone)]
 pub struct IngestWorkerExitSubscription {
     inner: InternalIngestWorkerExitSubscription,
 }
@@ -223,6 +224,153 @@ impl IngestWorkerExitSubscription {
             InternalIngestWorkerExit::Cancelled => IngestWorkerExit::Cancelled,
             InternalIngestWorkerExit::Panicked => IngestWorkerExit::Panicked,
         })
+    }
+
+    /// Atomically confirm that the real ingest producer has not published a
+    /// terminal state and commit the owning runtime's `Running` transition.
+    pub fn commit_running(&self, commit_running: &mut dyn FnMut()) -> Result<(), IngestWorkerExit> {
+        self.inner
+            .commit_running(commit_running)
+            .map_err(|exit| match exit {
+                InternalIngestWorkerExit::Completed => IngestWorkerExit::Completed,
+                InternalIngestWorkerExit::Cancelled => IngestWorkerExit::Cancelled,
+                InternalIngestWorkerExit::Panicked => IngestWorkerExit::Panicked,
+            })
+    }
+}
+
+#[cfg(feature = "test-util")]
+struct RealIngestTestReceiver {
+    sender: std::sync::Mutex<Option<broadcast::Sender<uc_core::ports::InboundClipboard>>>,
+}
+
+#[cfg(feature = "test-util")]
+#[async_trait::async_trait]
+impl ClipboardReceiverPort for RealIngestTestReceiver {
+    fn subscribe(&self) -> broadcast::Receiver<uc_core::ports::InboundClipboard> {
+        if let Some(sender) = self.sender.lock().unwrap().as_ref() {
+            sender.subscribe()
+        } else {
+            let (sender, receiver) = broadcast::channel(1);
+            drop(sender);
+            receiver
+        }
+    }
+}
+
+#[cfg(feature = "test-util")]
+struct RealIngestTestMemberRepository;
+
+#[cfg(feature = "test-util")]
+#[async_trait::async_trait]
+impl MemberRepositoryPort for RealIngestTestMemberRepository {
+    async fn get(
+        &self,
+        _device_id: &DeviceId,
+    ) -> Result<Option<uc_core::SpaceMember>, uc_core::MembershipError> {
+        unreachable!("the controlled ingest test worker receives no clipboard frames")
+    }
+
+    async fn list(&self) -> Result<Vec<uc_core::SpaceMember>, uc_core::MembershipError> {
+        unreachable!("the controlled ingest test worker receives no clipboard frames")
+    }
+
+    async fn save(&self, _member: &uc_core::SpaceMember) -> Result<(), uc_core::MembershipError> {
+        unreachable!("the controlled ingest test worker receives no clipboard frames")
+    }
+
+    async fn remove(&self, _device_id: &DeviceId) -> Result<bool, uc_core::MembershipError> {
+        unreachable!("the controlled ingest test worker receives no clipboard frames")
+    }
+}
+
+#[cfg(feature = "test-util")]
+struct RealIngestTestCipher;
+
+#[cfg(feature = "test-util")]
+#[async_trait::async_trait]
+impl TransferCipherPort for RealIngestTestCipher {
+    async fn encrypt(
+        &self,
+        _plaintext: &[u8],
+    ) -> Result<Vec<u8>, uc_core::ports::security::TransferCipherError> {
+        unreachable!("the controlled ingest test worker receives no clipboard frames")
+    }
+
+    async fn decrypt(
+        &self,
+        _encrypted: &[u8],
+    ) -> Result<Vec<u8>, uc_core::ports::security::TransferCipherError> {
+        unreachable!("the controlled ingest test worker receives no clipboard frames")
+    }
+}
+
+#[cfg(feature = "test-util")]
+struct RealIngestTestClock;
+
+#[cfg(feature = "test-util")]
+impl ClockPort for RealIngestTestClock {
+    fn now_ms(&self) -> i64 {
+        0
+    }
+}
+
+/// Test utility that owns the real ingest loop and its single observer.
+/// The only replaced boundary is the external clipboard receiver, whose
+/// sender can be closed deterministically to terminate the production worker.
+#[cfg(feature = "test-util")]
+pub struct RealIngestWorkerTestHarness {
+    handle: Option<IngestHandle>,
+}
+
+#[cfg(feature = "test-util")]
+#[derive(Clone)]
+pub struct RealIngestWorkerTerminator {
+    receiver: Arc<RealIngestTestReceiver>,
+}
+
+#[cfg(feature = "test-util")]
+impl RealIngestWorkerTestHarness {
+    pub fn spawn() -> (Self, RealIngestWorkerTerminator) {
+        let (sender, _) = broadcast::channel(1);
+        let receiver = Arc::new(RealIngestTestReceiver {
+            sender: std::sync::Mutex::new(Some(sender)),
+        });
+        let usecase = Arc::new(IngestInboundClipboardUseCase::new(
+            receiver.clone(),
+            Arc::new(RealIngestTestMemberRepository),
+            Arc::new(RealIngestTestCipher),
+            Arc::new(RealIngestTestClock),
+        ));
+        let handle = IngestHandle {
+            inner: usecase.spawn_run(),
+        };
+        (
+            Self {
+                handle: Some(handle),
+            },
+            RealIngestWorkerTerminator { receiver },
+        )
+    }
+
+    pub fn subscribe_exit(&self) -> IngestWorkerExitSubscription {
+        self.handle
+            .as_ref()
+            .expect("real ingest test harness remains live")
+            .subscribe_exit()
+    }
+
+    pub async fn shutdown(mut self) {
+        if let Some(handle) = self.handle.take() {
+            handle.shutdown().await;
+        }
+    }
+}
+
+#[cfg(feature = "test-util")]
+impl RealIngestWorkerTerminator {
+    pub fn terminate(&self) {
+        self.receiver.sender.lock().unwrap().take();
     }
 }
 
