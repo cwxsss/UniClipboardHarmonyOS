@@ -38,6 +38,9 @@ use uc_core::{
 use uc_infra::settings::repository::FileSettingsRepository;
 
 mod mobile_sync_server;
+// Task 1 stages the profile-keyed supervisor without activating a second N-API path.
+#[allow(dead_code)]
+mod space_runtime_supervisor;
 
 static MOBILE_CLIENT: OnceLock<Arc<MobileSyncClient>> = OnceLock::new();
 static SSE_HANDLE: OnceLock<Mutex<Option<Arc<SseHandle>>>> = OnceLock::new();
