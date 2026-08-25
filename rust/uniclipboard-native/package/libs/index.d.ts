@@ -330,7 +330,10 @@ export declare function sendSpaceImageToDevice(data: Uint8Array, mimeType: strin
 /** @deprecated Compatibility wrapper for the legacy single-space runtime. */
 export declare function sendSpaceText(text: string): Promise<number>
 
-/** Send text through one supervisor-owned profile runtime. */
+/**
+ * Active-send router seam: the single ArkTS pasteboard watcher sends each local
+ * capture through exactly one selected supervisor-owned profile runtime.
+ */
 export declare function sendSpaceTextForProfile(profileId: string, text: string): Promise<number>
 
 export declare function sendSpaceTextToDevice(text: string, deviceId: string): Promise<number>

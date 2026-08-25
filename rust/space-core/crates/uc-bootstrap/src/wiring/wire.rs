@@ -78,7 +78,7 @@ use crate::layer::paths::{
     apply_profile_suffix, get_default_app_dirs, resolve_app_paths, CliAppRuntimeProfileConfig,
     CliAppRuntimeProfileLayout,
 };
-use crate::layer::platform::create_platform_layer;
+use crate::layer::platform::{create_platform_layer_with_policy, SystemClipboardPolicy};
 use crate::wiring::deps::{
     BackgroundRuntimeDeps, DaemonRuntimeDeps, SharedRuntimeDeps, SyncEngineDeps, WiredDependencies,
     WiringError, WiringResult,
@@ -792,7 +792,7 @@ pub(crate) fn wire_dependencies_for_profile(
 
 fn wire_dependencies_with_layout(
     layout: CliAppRuntimeProfileLayout,
-    use_explicit_secure_namespace: bool,
+    explicit_profile: bool,
 ) -> WiringResult<(WiredDependencies, BackgroundRuntimeDeps)> {
     let CliAppRuntimeProfileLayout {
         profile_id: _,
@@ -813,7 +813,7 @@ fn wire_dependencies_with_layout(
     } = build_secure_storage_prelude(
         &paths,
         iroh_identity_dir,
-        use_explicit_secure_namespace.then_some(secure_storage_namespace.as_str()),
+        explicit_profile.then_some(secure_storage_namespace.as_str()),
     )?;
 
     let db_path = paths.db_path;
@@ -837,13 +837,18 @@ fn wire_dependencies_with_layout(
     )?;
 
     let storage_config = Arc::new(ClipboardStorageConfig::defaults());
-    let platform = create_platform_layer(
+    let platform = create_platform_layer_with_policy(
         secure_storage,
         &vault_path,
         infra.blob_repository.clone(),
         infra.member_repo.clone(),
         infra.clock.clone(),
         storage_config.clone(),
+        if explicit_profile {
+            SystemClipboardPolicy::Noop
+        } else {
+            SystemClipboardPolicy::Auto
+        },
     )?;
 
     // Space access — single session/key access entry. See
@@ -1177,7 +1182,9 @@ mod profile_secure_storage_tests {
 
     use uc_core::ports::{SecureStorageError, SecureStoragePort};
 
-    use super::NamespacedSecureStorage;
+    use crate::layer::platform::SystemClipboardWiring;
+
+    use super::{wire_dependencies_for_profile, NamespacedSecureStorage};
 
     #[derive(Default)]
     struct MemorySecureStorage {
@@ -1225,5 +1232,20 @@ mod profile_secure_storage_tests {
             values.get("harmony-profile-b:space-kek"),
             Some(&b"b".to_vec())
         );
+    }
+
+    #[test]
+    fn explicit_profile_wiring_never_owns_the_system_clipboard() {
+        let temp = tempfile::tempdir().unwrap();
+        let profile = crate::layer::paths::CliAppRuntimeProfileConfig::builder("profile-a")
+            .data_root(temp.path().join("data"))
+            .cache_root(temp.path().join("cache"))
+            .secure_storage_namespace("harmony-profile-a")
+            .build()
+            .unwrap();
+
+        let (wired, _background) = wire_dependencies_for_profile(&profile).unwrap();
+
+        assert_eq!(wired.system_clipboard_wiring, SystemClipboardWiring::Noop);
     }
 }

@@ -550,6 +550,8 @@ pub async fn build_cli_app_runtime(
 /// Construct one CLI runtime from explicit profile-owned roots and namespace.
 /// This path never reads or mutates `UC_PROFILE` or the HarmonyOS directory env
 /// variables; multi-profile hosts must use it instead of the legacy builder.
+/// It also wires `NoopSystemClipboard`: ArkTS owns the process's only pasteboard
+/// watcher and routes each local capture to the selected profile explicitly.
 pub async fn build_cli_app_runtime_for_profile(
     profile: &crate::layer::paths::CliAppRuntimeProfileConfig,
     log_profile: Option<uc_observability::LogProfile>,
