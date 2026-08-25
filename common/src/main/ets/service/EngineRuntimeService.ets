@@ -222,6 +222,27 @@ export class EngineWorkspaceConvergence {
   }
 }
 
+export class EngineMemberSyncPreferences {
+  sendEnabled: boolean;
+  text: boolean;
+  image: boolean;
+  file: boolean;
+  link: boolean;
+  codeSnippet: boolean;
+  richText: boolean;
+
+  constructor(sendEnabled: boolean, text: boolean, imageEnabled: boolean, file: boolean,
+    link: boolean, codeSnippet: boolean, richText: boolean) {
+    this.sendEnabled = sendEnabled;
+    this.text = text;
+    this.image = imageEnabled;
+    this.file = file;
+    this.link = link;
+    this.codeSnippet = codeSnippet;
+    this.richText = richText;
+  }
+}
+
 // rc.3 exports these methods from libuc_ohos_napi.so, but omits them from
 // OhEngine in Index.d.ets. Keep the compatibility contract private to this
 // adapter so the rest of the product never touches the native object.
@@ -258,6 +279,34 @@ interface EngineCompatibilityNativeSendReport {
   totalPending: number;
 }
 
+interface EngineCompatibilityNativeContentTypes {
+  text: boolean;
+  image: boolean;
+  link: boolean;
+  file: boolean;
+  codeSnippet: boolean;
+  richText: boolean;
+}
+
+interface EngineCompatibilityNativeContentTypesPatch {
+  text?: boolean;
+  image?: boolean;
+  link?: boolean;
+  file?: boolean;
+  codeSnippet?: boolean;
+  richText?: boolean;
+}
+
+interface EngineCompatibilityNativeMemberSyncPreferences {
+  sendEnabled: boolean;
+  sendContentTypes: EngineCompatibilityNativeContentTypes;
+}
+
+interface EngineCompatibilityNativeMemberSyncPreferencesPatch {
+  sendEnabled?: boolean;
+  sendContentTypes?: EngineCompatibilityNativeContentTypesPatch;
+}
+
 interface EngineCompatibilityNativeHandle {
   issueInvitation(): Promise<EngineCompatibilityNativeInvitation>;
   joinSpace(invitationCode: string, deviceName: string | null, passphrase: string,
@@ -271,8 +320,23 @@ interface EngineCompatibilityNativeHandle {
   captureCurrentClipboard(): Promise<string | null>;
   restoreClipboard(entryId: string, mode: string): Promise<string>;
   queryDeviceTrust(): Promise<string>;
+  queryMemberSyncPreferences(deviceId: string): Promise<EngineCompatibilityNativeMemberSyncPreferences>;
+  updateMemberSyncPreferences(deviceId: string, patch: EngineCompatibilityNativeMemberSyncPreferencesPatch):
+    Promise<EngineCompatibilityNativeMemberSyncPreferences>;
   decideDeviceTrustChange(changeId: string, choice: string,
     confirmLocalRemoval: boolean): Promise<string>;
+}
+
+function normalizeMemberSyncPreferences(
+  preferences: EngineCompatibilityNativeMemberSyncPreferences): EngineMemberSyncPreferences {
+  return new EngineMemberSyncPreferences(
+    preferences.sendEnabled,
+    preferences.sendContentTypes.text,
+    preferences.sendContentTypes.image,
+    preferences.sendContentTypes.file,
+    preferences.sendContentTypes.link,
+    preferences.sendContentTypes.codeSnippet,
+    preferences.sendContentTypes.richText);
 }
 
 export interface EngineRuntimeHandle {
@@ -292,6 +356,10 @@ export interface EngineRuntimeHandle {
   sendFiles(fileHandles: string[], targetDevices: string[]): Promise<EngineSendReport>;
   captureCurrentClipboard(): Promise<string | null>;
   queryActiveClipboard(): Promise<EngineActiveClipboard | null>;
+  queryMemberSyncPreferences(deviceId: string): Promise<EngineMemberSyncPreferences>;
+  updateMemberSendPreferences(deviceId: string, sendEnabled: boolean, text: boolean, imageEnabled: boolean,
+    file: boolean, link: boolean, richText: boolean): Promise<EngineMemberSyncPreferences>;
+  resetMemberSyncPreferences(deviceId: string): Promise<EngineMemberSyncPreferences>;
   restoreClipboard(entryId: string, mode: string): Promise<string>;
   exportEntry(entryId: string, destinationHandle: string): Promise<void>;
   removeMember(deviceId: string): Promise<EngineWorkspaceConvergence>;
@@ -399,6 +467,43 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
         }
         return new EngineActiveClipboard(result.entryId, result.activatedBy);
       },
+      async (deviceId: string): Promise<EngineMemberSyncPreferences> => {
+        let result: EngineCompatibilityNativeMemberSyncPreferences =
+          await compatibilityHandle.queryMemberSyncPreferences(deviceId);
+        return normalizeMemberSyncPreferences(result);
+      },
+      async (deviceId: string, sendEnabled: boolean, text: boolean, imageEnabled: boolean,
+        file: boolean, link: boolean, richText: boolean): Promise<EngineMemberSyncPreferences> => {
+        let patch: EngineCompatibilityNativeMemberSyncPreferencesPatch = {
+          sendEnabled: sendEnabled,
+          sendContentTypes: {
+            text: text,
+            image: imageEnabled,
+            file: file,
+            link: link,
+            richText: richText
+          }
+        };
+        let result: EngineCompatibilityNativeMemberSyncPreferences =
+          await compatibilityHandle.updateMemberSyncPreferences(deviceId, patch);
+        return normalizeMemberSyncPreferences(result);
+      },
+      async (deviceId: string): Promise<EngineMemberSyncPreferences> => {
+        let patch: EngineCompatibilityNativeMemberSyncPreferencesPatch = {
+          sendEnabled: true,
+          sendContentTypes: {
+            text: true,
+            image: true,
+            file: true,
+            link: true,
+            codeSnippet: true,
+            richText: true
+          }
+        };
+        let result: EngineCompatibilityNativeMemberSyncPreferences =
+          await compatibilityHandle.updateMemberSyncPreferences(deviceId, patch);
+        return normalizeMemberSyncPreferences(result);
+      },
       (entryId: string, mode: string): Promise<string> => compatibilityHandle.restoreClipboard(entryId, mode),
       (entryId: string, destinationHandle: string): Promise<void> => rawHandle.exportEntry(entryId,
         destinationHandle),
@@ -431,6 +536,10 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
   private sendFilesCallback: (fileHandles: string[], targetDevices: string[]) => Promise<EngineSendReport>;
   private captureCurrentClipboardCallback: () => Promise<string | null>;
   private queryActiveClipboardCallback: () => Promise<EngineActiveClipboard | null>;
+  private queryMemberSyncPreferencesCallback: (deviceId: string) => Promise<EngineMemberSyncPreferences>;
+  private updateMemberSendPreferencesCallback: (deviceId: string, sendEnabled: boolean, text: boolean,
+    imageEnabled: boolean, file: boolean, link: boolean, richText: boolean) => Promise<EngineMemberSyncPreferences>;
+  private resetMemberSyncPreferencesCallback: (deviceId: string) => Promise<EngineMemberSyncPreferences>;
   private restoreClipboardCallback: (entryId: string, mode: string) => Promise<string>;
   private exportEntryCallback: (entryId: string, destinationHandle: string) => Promise<void>;
   private removeMemberCallback: (deviceId: string) => Promise<EngineWorkspaceConvergence>;
@@ -453,6 +562,10 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
     sendFilesCallback: (fileHandles: string[], targetDevices: string[]) => Promise<EngineSendReport>,
     captureCurrentClipboardCallback: () => Promise<string | null>,
     queryActiveClipboardCallback: () => Promise<EngineActiveClipboard | null>,
+    queryMemberSyncPreferencesCallback: (deviceId: string) => Promise<EngineMemberSyncPreferences>,
+    updateMemberSendPreferencesCallback: (deviceId: string, sendEnabled: boolean, text: boolean,
+      imageEnabled: boolean, file: boolean, link: boolean, richText: boolean) => Promise<EngineMemberSyncPreferences>,
+    resetMemberSyncPreferencesCallback: (deviceId: string) => Promise<EngineMemberSyncPreferences>,
     restoreClipboardCallback: (entryId: string, mode: string) => Promise<string>,
     exportEntryCallback: (entryId: string, destinationHandle: string) => Promise<void>,
     removeMemberCallback: (deviceId: string) => Promise<EngineWorkspaceConvergence>,
@@ -474,6 +587,9 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
     this.sendFilesCallback = sendFilesCallback;
     this.captureCurrentClipboardCallback = captureCurrentClipboardCallback;
     this.queryActiveClipboardCallback = queryActiveClipboardCallback;
+    this.queryMemberSyncPreferencesCallback = queryMemberSyncPreferencesCallback;
+    this.updateMemberSendPreferencesCallback = updateMemberSendPreferencesCallback;
+    this.resetMemberSyncPreferencesCallback = resetMemberSyncPreferencesCallback;
     this.restoreClipboardCallback = restoreClipboardCallback;
     this.exportEntryCallback = exportEntryCallback;
     this.removeMemberCallback = removeMemberCallback;
@@ -540,6 +656,20 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
 
   async queryActiveClipboard(): Promise<EngineActiveClipboard | null> {
     return await this.queryActiveClipboardCallback();
+  }
+
+  async queryMemberSyncPreferences(deviceId: string): Promise<EngineMemberSyncPreferences> {
+    return await this.queryMemberSyncPreferencesCallback(deviceId);
+  }
+
+  async updateMemberSendPreferences(deviceId: string, sendEnabled: boolean, text: boolean, imageEnabled: boolean,
+    file: boolean, link: boolean, richText: boolean): Promise<EngineMemberSyncPreferences> {
+    return await this.updateMemberSendPreferencesCallback(deviceId, sendEnabled, text, imageEnabled,
+      file, link, richText);
+  }
+
+  async resetMemberSyncPreferences(deviceId: string): Promise<EngineMemberSyncPreferences> {
+    return await this.resetMemberSyncPreferencesCallback(deviceId);
   }
 
   async restoreClipboard(entryId: string, mode: string): Promise<string> {
@@ -883,6 +1013,25 @@ export class EngineRuntimeService implements EngineClipboardObserver {
   async queryActiveClipboard(): Promise<EngineActiveClipboard | null> {
     return await this.executeReadOnly('query_active_clipboard',
       (handle: EngineRuntimeHandle): Promise<EngineActiveClipboard | null> => handle.queryActiveClipboard());
+  }
+
+  async queryMemberSyncPreferences(deviceId: string): Promise<EngineMemberSyncPreferences> {
+    return await this.executeReadOnly('query_member_sync_preferences',
+      (handle: EngineRuntimeHandle): Promise<EngineMemberSyncPreferences> =>
+        handle.queryMemberSyncPreferences(deviceId));
+  }
+
+  async updateMemberSendPreferences(deviceId: string, sendEnabled: boolean, text: boolean, imageEnabled: boolean,
+    file: boolean, link: boolean, richText: boolean): Promise<EngineMemberSyncPreferences> {
+    return await this.executeFeature('update_member_sync_preferences',
+      (handle: EngineRuntimeHandle): Promise<EngineMemberSyncPreferences> =>
+        handle.updateMemberSendPreferences(deviceId, sendEnabled, text, imageEnabled, file, link, richText));
+  }
+
+  async resetMemberSyncPreferences(deviceId: string): Promise<EngineMemberSyncPreferences> {
+    return await this.executeFeature('reset_member_sync_preferences',
+      (handle: EngineRuntimeHandle): Promise<EngineMemberSyncPreferences> =>
+        handle.resetMemberSyncPreferences(deviceId));
   }
 
   async queryDevices(): Promise<EngineRuntimeDevice[]> {

@@ -41,6 +41,7 @@ export {
   EngineRuntimeBackend,
   EngineInvitationIssued,
   EngineActiveClipboard,
+  EngineMemberSyncPreferences,
   EngineRuntimeError,
   EngineRuntimeEvent,
   EngineRuntimeEventObserver,

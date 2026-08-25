@@ -56,6 +56,7 @@ import {
   engineRuntimeService,
   EngineInvitationIssued,
   EngineActiveClipboard,
+  EngineMemberSyncPreferences,
   EngineSendReport,
   EngineSpaceCreated,
   EngineSpaceJoined,
@@ -73,8 +74,6 @@ import {
   MobileSyncServerService,
   NativeProtocolService,
   ReceivedNotificationService,
-  SpaceNodeService,
-  NativeSpaceMemberSyncPreferences,
   NativeMobileSyncCredential,
   NativeMobileSyncDevice,
   NativeMobileSyncInboundEvent,
@@ -364,7 +363,6 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   public receivedNotificationService: ReceivedNotificationService =
     ReceivedNotificationService.getInstance();
   public nativeProtocolService: NativeProtocolService = new NativeProtocolService();
-  public spaceNodeService: SpaceNodeService = new SpaceNodeService();
   private spaceProfileStore: SpaceProfileStore = new SpaceProfileStore();
   private spaceProfileDirectory: SpaceProfileDirectory | null = null;
   private spaceAdmissionAddedProfile: boolean = false;
@@ -2176,7 +2174,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     }
   }
 
-  private applyDesktopDeviceSyncPreferences(preferences: NativeSpaceMemberSyncPreferences): void {
+  private applyDesktopDeviceSyncPreferences(preferences: EngineMemberSyncPreferences): void {
     this.desktopDeviceSendEnabled = preferences.sendEnabled;
     this.desktopDeviceSyncText = preferences.text;
     this.desktopDeviceSyncImage = preferences.image;
@@ -2248,14 +2246,15 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     }
     this.desktopDeviceSyncState = 1;
     try {
-      let preferences: NativeSpaceMemberSyncPreferences =
-        await this.spaceNodeService.memberSyncPreferences(deviceId);
+      let preferences: EngineMemberSyncPreferences =
+        await engineRuntimeService.queryMemberSyncPreferences(deviceId);
       if (this.desktopSelectedSpaceDeviceId !== deviceId || this.desktopSelectedSpaceDeviceIsLocal) {
         return;
       }
       this.applyDesktopDeviceSyncPreferences(preferences);
       this.desktopDeviceSyncState = 2;
     } catch (error) {
+      logger.error('UniClipboard failed to load device sync preferences: ' + this.errorDetail(error));
       if (this.desktopSelectedSpaceDeviceId === deviceId) {
         this.desktopDeviceSyncState = 3;
       }
@@ -2291,8 +2290,8 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     this.desktopDeviceSyncSaving = true;
     let deviceId: string = this.desktopSelectedSpaceDeviceId;
     try {
-      let preferences: NativeSpaceMemberSyncPreferences =
-        await this.spaceNodeService.updateMemberSendPreferences(
+      let preferences: EngineMemberSyncPreferences =
+        await engineRuntimeService.updateMemberSendPreferences(
           deviceId,
           this.desktopDeviceSendEnabled,
           this.desktopDeviceSyncText,
@@ -2306,6 +2305,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       }
       this.statusCode = 2;
     } catch (error) {
+      logger.error('UniClipboard failed to update device sync preferences: ' + this.errorDetail(error));
       if (this.desktopSelectedSpaceDeviceId === deviceId) {
         this.desktopDeviceSendEnabled = previousSendEnabled;
         this.desktopDeviceSyncText = previousText;
@@ -2329,14 +2329,15 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     this.desktopDeviceSyncSaving = true;
     let deviceId: string = this.desktopSelectedSpaceDeviceId;
     try {
-      let preferences: NativeSpaceMemberSyncPreferences =
-        await this.spaceNodeService.resetMemberSyncPreferences(deviceId);
+      let preferences: EngineMemberSyncPreferences =
+        await engineRuntimeService.resetMemberSyncPreferences(deviceId);
       if (this.desktopSelectedSpaceDeviceId === deviceId) {
         this.applyDesktopDeviceSyncPreferences(preferences);
         this.desktopDeviceSyncState = 2;
       }
       this.statusCode = 2;
     } catch (error) {
+      logger.error('UniClipboard failed to reset device sync preferences: ' + this.errorDetail(error));
       if (this.desktopSelectedSpaceDeviceId === deviceId) {
         this.desktopDeviceSyncState = 3;
       }

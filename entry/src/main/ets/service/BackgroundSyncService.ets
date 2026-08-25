@@ -58,7 +58,9 @@ export class BackgroundSyncTaskService {
       };
       let notificationWantAgent: WantAgent = await wantAgent.getWantAgent(wantAgentInfo);
       if (this.shouldRun) {
-        let taskModes: string[] = ['multiDeviceConnection'];
+        // Keep this aligned with the product service and manifests. iroh/QUIC requires dataTransfer;
+        // multiDeviceConnection causes background delivery to stop after about 65 seconds.
+        let taskModes: string[] = ['dataTransfer'];
         await backgroundTaskManager.startBackgroundRunning(context, taskModes, notificationWantAgent);
         this.active = true;
         console.info('UniClipboard background device sync started.');

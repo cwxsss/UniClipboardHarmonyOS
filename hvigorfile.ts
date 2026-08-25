@@ -11,6 +11,13 @@ execFileSync(powershellCommand, [
   '-File',
   resolve(process.cwd(), 'rust', 'verify-engine-release.ps1')
 ], { stdio: 'inherit' });
+execFileSync(powershellCommand, [
+  '-NoProfile',
+  '-ExecutionPolicy',
+  'Bypass',
+  '-File',
+  resolve(process.cwd(), 'tools', 'verify-background-sync-mode.ps1')
+], { stdio: 'inherit' });
 
 export default {
   system: appTasks /* Built-in plugin of Hvigor. It cannot be modified. */,

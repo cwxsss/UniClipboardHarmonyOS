@@ -105,6 +105,11 @@ export class ClipboardService {
     await this.systemPasteboard.setData(data);
   }
 
+  async writeUri(uri: string): Promise<void> {
+    let data: pasteboard.PasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_URI, uri);
+    await this.systemPasteboard.setData(data);
+  }
+
   async encodePng(pixelMap: image.PixelMap): Promise<Uint8Array> {
     return await this.encodeImage(pixelMap, 'image/png', 100);
   }

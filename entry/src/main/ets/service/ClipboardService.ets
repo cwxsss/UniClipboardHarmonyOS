@@ -76,7 +76,7 @@ export class ClipboardService {
     return null;
   }
 
-  private async decodeImageUri(uri: string): Promise<image.PixelMap> {
+  async decodeImageUri(uri: string): Promise<image.PixelMap> {
     let file: fileIo.File = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY);
     try {
       let source: image.ImageSource = image.createImageSource(file.fd);
@@ -92,6 +92,11 @@ export class ClipboardService {
 
   async writeImage(pixelMap: image.PixelMap): Promise<void> {
     let data: pasteboard.PasteData = pasteboard.createData(pasteboard.MIMETYPE_PIXELMAP, pixelMap);
+    await this.systemPasteboard.setData(data);
+  }
+
+  async writeUri(uri: string): Promise<void> {
+    let data: pasteboard.PasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_URI, uri);
     await this.systemPasteboard.setData(data);
   }
 

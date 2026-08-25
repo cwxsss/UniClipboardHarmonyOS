@@ -8,6 +8,7 @@ import {
   EngineRuntimeBackend,
   EngineActiveClipboard,
   EngineInvitationIssued,
+  EngineMemberSyncPreferences,
   EngineRuntimeEvent,
   EngineRuntimeHandle,
   EngineRuntimeHost,
@@ -220,6 +221,19 @@ class TestRuntimeHandle implements EngineRuntimeHandle {
     return new EngineActiveClipboard('entry', 'device');
   }
 
+  async queryMemberSyncPreferences(deviceId: string): Promise<EngineMemberSyncPreferences> {
+    return new EngineMemberSyncPreferences(true, true, true, true, true, true, true);
+  }
+
+  async updateMemberSendPreferences(deviceId: string, sendEnabled: boolean, text: boolean, imageEnabled: boolean,
+    file: boolean, link: boolean, richText: boolean): Promise<EngineMemberSyncPreferences> {
+    return new EngineMemberSyncPreferences(sendEnabled, text, imageEnabled, file, link, true, richText);
+  }
+
+  async resetMemberSyncPreferences(deviceId: string): Promise<EngineMemberSyncPreferences> {
+    return new EngineMemberSyncPreferences(true, true, true, true, true, true, true);
+  }
+
   async restoreClipboard(entryId: string, mode: string): Promise<string> {
     return 'restored';
   }
@@ -342,10 +356,15 @@ export default function engineRuntimeServiceTest(): void {
 
       let invitation: EngineInvitationIssued = await service.issueInvitation();
       let report: EngineSendReport = await service.sendText('hello', []);
+      let preferences: EngineMemberSyncPreferences = await service.queryMemberSyncPreferences('desktop');
+      let updated: EngineMemberSyncPreferences = await service.updateMemberSendPreferences(
+        'desktop', true, true, false, true, true, true);
       await service.recoverNetwork();
 
       expect(invitation.invitationCode).assertEqual('invitation');
       expect(report.totalAccepted).assertEqual(1);
+      expect(preferences.image).assertTrue();
+      expect(updated.image).assertFalse();
       expect(backend.handle.recoverNetworkCount).assertEqual(1);
       await service.shutdown();
     });

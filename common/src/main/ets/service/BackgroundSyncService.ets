@@ -60,7 +60,9 @@ export class BackgroundSyncTaskService {
       };
       let notificationWantAgent: WantAgent = await wantAgent.getWantAgent(wantAgentInfo);
       if (this.shouldRun) {
-        let taskModes: string[] = ['multiDeviceConnection'];
+        // iroh/QUIC carries clipboard payloads as data transfer. Using multiDeviceConnection lets
+        // startup succeed but HarmonyOS suspends the process after about 65 seconds.
+        let taskModes: string[] = ['dataTransfer'];
         await backgroundTaskManager.startBackgroundRunning(context, taskModes, notificationWantAgent);
         this.active = true;
         logger.info('UniClipboard background device sync started.');

@@ -64,8 +64,10 @@
         "startWindowIcon": "$media:uniclipboard_start_icon",
         "startWindowBackground": "$color:start_window_background",
         "exported": true,
+        // iroh/QUIC transfers clipboard payloads. Do not replace this with multiDeviceConnection:
+        // HarmonyOS otherwise suspends background delivery after about 65 seconds.
         "backgroundModes": [
-          "multiDeviceConnection"
+          "dataTransfer"
         ],
         "skills": [
           {

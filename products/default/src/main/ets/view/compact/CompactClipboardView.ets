@@ -4421,13 +4421,22 @@ export struct CompactClipboardView {
 
 
   @Builder
-  private compactDeviceContentTypeSwitch(title: Resource, contentType: string, checked: boolean) {
+  private compactDeviceContentTypeSwitch(title: Resource, contentType: string) {
     Row({ space: 12 }) {
       Text(title)
         .fontSize($r('app.float.font_body_medium'))
         .fontColor($r('app.color.text_primary'))
         .layoutWeight(1)
-      Toggle({ type: ToggleType.Switch, isOn: checked })
+      // Read observed state here instead of passing a boolean snapshot into the
+      // builder. Otherwise API 26 keeps the old visual state after Engine saves.
+      Toggle({
+        type: ToggleType.Switch,
+        isOn: contentType === 'text' ? this.controller.desktopDeviceSyncText :
+          (contentType === 'image' ? this.controller.desktopDeviceSyncImage :
+            (contentType === 'file' ? this.controller.desktopDeviceSyncFile :
+              (contentType === 'link' ? this.controller.desktopDeviceSyncLink :
+                this.controller.desktopDeviceSyncRichText)))
+      })
         .selectedColor(this.controller.accentColor())
         .enabled(this.controller.desktopDeviceSyncState === 2 && !this.controller.desktopDeviceSyncSaving)
         .onChange((enabled: boolean): void => {
@@ -4533,16 +4542,11 @@ export struct CompactClipboardView {
         .fontWeight(FontWeight.Medium)
         .fontColor($r('app.color.text_secondary'))
         .width('100%')
-      this.compactDeviceContentTypeSwitch($r('app.string.desktop_device_sync_text'), 'text',
-        this.controller.desktopDeviceSyncText)
-      this.compactDeviceContentTypeSwitch($r('app.string.desktop_device_sync_image'), 'image',
-        this.controller.desktopDeviceSyncImage)
-      this.compactDeviceContentTypeSwitch($r('app.string.desktop_device_sync_file'), 'file',
-        this.controller.desktopDeviceSyncFile)
-      this.compactDeviceContentTypeSwitch($r('app.string.desktop_device_sync_link'), 'link',
-        this.controller.desktopDeviceSyncLink)
-      this.compactDeviceContentTypeSwitch($r('app.string.desktop_device_sync_rich_text'), 'rich_text',
-        this.controller.desktopDeviceSyncRichText)
+      this.compactDeviceContentTypeSwitch($r('app.string.desktop_device_sync_text'), 'text')
+      this.compactDeviceContentTypeSwitch($r('app.string.desktop_device_sync_image'), 'image')
+      this.compactDeviceContentTypeSwitch($r('app.string.desktop_device_sync_file'), 'file')
+      this.compactDeviceContentTypeSwitch($r('app.string.desktop_device_sync_link'), 'link')
+      this.compactDeviceContentTypeSwitch($r('app.string.desktop_device_sync_rich_text'), 'rich_text')
     }
     .width('100%')
     .padding(14)

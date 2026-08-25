@@ -3539,14 +3539,23 @@ export struct ExpandedClipboardView {
 
 
   @Builder
-  private desktopDeviceContentTypeSwitch(title: Resource, contentType: string, checked: boolean) {
+  private desktopDeviceContentTypeSwitch(title: Resource, contentType: string) {
     Row({ space: 12 }) {
       Text(title)
         .fontSize(15)
         .fontColor($r('app.color.text_primary'))
         .layoutWeight(1)
         .maxLines(1)
-      Toggle({ type: ToggleType.Switch, isOn: checked })
+      // Read observed state here instead of passing a boolean snapshot into the
+      // builder. Otherwise API 26 keeps the old visual state after Engine saves.
+      Toggle({
+        type: ToggleType.Switch,
+        isOn: contentType === 'text' ? this.controller.desktopDeviceSyncText :
+          (contentType === 'image' ? this.controller.desktopDeviceSyncImage :
+            (contentType === 'file' ? this.controller.desktopDeviceSyncFile :
+              (contentType === 'link' ? this.controller.desktopDeviceSyncLink :
+                this.controller.desktopDeviceSyncRichText)))
+      })
         .selectedColor(this.controller.accentColor())
         .enabled(this.controller.desktopDeviceSyncState === 2 && !this.controller.desktopDeviceSyncSaving)
         .onChange((enabled: boolean): void => {
@@ -3672,22 +3681,17 @@ export struct ExpandedClipboardView {
       .width('100%')
       .padding({ top: 26, bottom: 10 })
     Row({ space: 12 }) {
-      this.desktopDeviceContentTypeSwitch($r('app.string.desktop_device_sync_text'), 'text',
-        this.controller.desktopDeviceSyncText)
-      this.desktopDeviceContentTypeSwitch($r('app.string.desktop_device_sync_image'), 'image',
-        this.controller.desktopDeviceSyncImage)
+      this.desktopDeviceContentTypeSwitch($r('app.string.desktop_device_sync_text'), 'text')
+      this.desktopDeviceContentTypeSwitch($r('app.string.desktop_device_sync_image'), 'image')
     }
     .width('100%')
     Row({ space: 12 }) {
-      this.desktopDeviceContentTypeSwitch($r('app.string.desktop_device_sync_file'), 'file',
-        this.controller.desktopDeviceSyncFile)
-      this.desktopDeviceContentTypeSwitch($r('app.string.desktop_device_sync_link'), 'link',
-        this.controller.desktopDeviceSyncLink)
+      this.desktopDeviceContentTypeSwitch($r('app.string.desktop_device_sync_file'), 'file')
+      this.desktopDeviceContentTypeSwitch($r('app.string.desktop_device_sync_link'), 'link')
     }
     .width('100%')
     Row({ space: 12 }) {
-      this.desktopDeviceContentTypeSwitch($r('app.string.desktop_device_sync_rich_text'), 'rich_text',
-        this.controller.desktopDeviceSyncRichText)
+      this.desktopDeviceContentTypeSwitch($r('app.string.desktop_device_sync_rich_text'), 'rich_text')
       Blank().layoutWeight(1)
     }
     .width('100%')
