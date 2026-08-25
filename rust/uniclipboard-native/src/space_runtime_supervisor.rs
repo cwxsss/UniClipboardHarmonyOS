@@ -44,6 +44,21 @@ pub(crate) trait SupervisedSpaceRuntime: Send {
         Ok(())
     }
 
+    /// Activate required workers and publish the supervisor's `Running`
+    /// transition at the runtime's startup linearization point. Implementors
+    /// that supervise concurrently terminating workers override this method
+    /// and invoke `commit_running` while holding the same gate that records a
+    /// worker terminal state. Returning `Ok` without invoking the callback is
+    /// invalid; invoking it and then returning `Err` is invalid as well.
+    fn activate_and_commit(
+        &mut self,
+        commit_running: &mut dyn FnMut(),
+    ) -> Result<(), SpaceRuntimeFailureCategory> {
+        self.activate_and_check()?;
+        commit_running();
+        Ok(())
+    }
+
     fn app_facade(&self) -> Option<Arc<AppFacade>> {
         None
     }
@@ -348,16 +363,17 @@ impl SpaceRuntimeSupervisor {
                     {
                         None
                     } else {
-                        match runtime
+                        let activation = runtime
                             .as_mut()
                             .expect("created runtime must be present")
-                            .activate_and_check()
-                        {
-                            Ok(()) => {
-                                slot.runtime = runtime.take();
+                            .activate_and_commit(&mut || {
                                 slot.pending_start_generation = None;
                                 slot.lifecycle = SpaceRuntimeLifecycle::Running;
                                 slot.last_failure = None;
+                            });
+                        match activation {
+                            Ok(()) => {
+                                slot.runtime = runtime.take();
                                 Some(Ok((
                                     slot.status(profile_id.clone()),
                                     Arc::clone(&slot.lifecycle_notify),

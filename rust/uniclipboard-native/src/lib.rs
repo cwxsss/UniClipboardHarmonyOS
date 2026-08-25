@@ -774,9 +774,47 @@ async fn current_space_status() -> Result<NativeSpaceStatus> {
 
 struct HarmonyProfileRuntimeFactory;
 
+#[derive(Default)]
+struct HarmonyRuntimeStartState {
+    terminal: Option<SpaceRuntimeFailureCategory>,
+    committed: bool,
+}
+
+#[derive(Clone, Default)]
+struct HarmonyRuntimeStartGate {
+    state: Arc<Mutex<HarmonyRuntimeStartState>>,
+}
+
+impl HarmonyRuntimeStartGate {
+    fn record_terminal(&self, category: SpaceRuntimeFailureCategory) -> bool {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        state.terminal.get_or_insert(category);
+        state.committed
+    }
+
+    fn commit_running(
+        &self,
+        final_health_check: impl FnOnce() -> std::result::Result<(), SpaceRuntimeFailureCategory>,
+        commit_running: &mut dyn FnMut(),
+    ) -> std::result::Result<(), SpaceRuntimeFailureCategory> {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        if let Some(category) = state.terminal {
+            return Err(category);
+        }
+        if let Err(category) = final_health_check() {
+            state.terminal = Some(category);
+            return Err(category);
+        }
+        commit_running();
+        state.committed = true;
+        Ok(())
+    }
+}
+
 struct HarmonyRuntimeMonitor {
     cancel: Option<tokio::sync::oneshot::Sender<()>>,
     task: tokio::task::JoinHandle<()>,
+    start_gate: HarmonyRuntimeStartGate,
 }
 
 impl HarmonyRuntimeMonitor {
@@ -804,10 +842,25 @@ impl HarmonyRuntimeMonitor {
     }
 
     fn spawn_worker(
-        mut worker: tokio::task::JoinHandle<std::result::Result<(), SpaceRuntimeFailureCategory>>,
+        worker: tokio::task::JoinHandle<std::result::Result<(), SpaceRuntimeFailureCategory>>,
         report_failure: SpaceRuntimeFailureCallback,
     ) -> Self {
+        Self::spawn_worker_with_terminal_observer(
+            worker,
+            report_failure,
+            HarmonyRuntimeStartGate::default(),
+            None,
+        )
+    }
+
+    fn spawn_worker_with_terminal_observer(
+        mut worker: tokio::task::JoinHandle<std::result::Result<(), SpaceRuntimeFailureCategory>>,
+        report_failure: SpaceRuntimeFailureCallback,
+        start_gate: HarmonyRuntimeStartGate,
+        terminal_observed: Option<Arc<tokio::sync::Notify>>,
+    ) -> Self {
         let (cancel, cancelled) = tokio::sync::oneshot::channel();
+        let monitor_gate = start_gate.clone();
         let task = tokio::spawn(async move {
             tokio::select! {
                 biased;
@@ -820,19 +873,35 @@ impl HarmonyRuntimeMonitor {
                         Ok(Err(category)) => category,
                         Ok(Ok(())) | Err(_) => SpaceRuntimeFailureCategory::Runtime,
                     };
+                    let should_report = monitor_gate.record_terminal(category);
+                    if let Some(terminal_observed) = terminal_observed {
+                        terminal_observed.notify_one();
+                    }
                     // Run the callback outside this monitor task. The supervisor
                     // shuts down the runtime (and joins this task) while handling
                     // the report, so awaiting inline would self-join.
-                    tokio::spawn(async move {
-                        let _ = report_failure(category).await;
-                    });
+                    if should_report {
+                        tokio::spawn(async move {
+                            let _ = report_failure(category).await;
+                        });
+                    }
                 }
             }
         });
         Self {
             cancel: Some(cancel),
             task,
+            start_gate,
         }
+    }
+
+    fn commit_running(
+        &self,
+        final_health_check: impl FnOnce() -> std::result::Result<(), SpaceRuntimeFailureCategory>,
+        commit_running: &mut dyn FnMut(),
+    ) -> std::result::Result<(), SpaceRuntimeFailureCategory> {
+        self.start_gate
+            .commit_running(final_health_check, commit_running)
     }
 
     async fn shutdown(mut self) {
@@ -847,6 +916,7 @@ struct HarmonyProfileRuntime {
     runtime: CliAppRuntime,
     _generation: u64,
     monitor: Option<HarmonyRuntimeMonitor>,
+    ingest_worker_health: Option<uc_application::facade::IngestWorkerExitSubscription>,
     ingest_worker_exit: Option<uc_application::facade::IngestWorkerExitSubscription>,
     monitor_worker:
         Option<tokio::task::JoinHandle<std::result::Result<(), SpaceRuntimeFailureCategory>>>,
@@ -855,15 +925,14 @@ struct HarmonyProfileRuntime {
 }
 
 impl SupervisedSpaceRuntime for HarmonyProfileRuntime {
-    fn activate_and_check(&mut self) -> std::result::Result<(), SpaceRuntimeFailureCategory> {
+    fn activate_and_commit(
+        &mut self,
+        commit_running: &mut dyn FnMut(),
+    ) -> std::result::Result<(), SpaceRuntimeFailureCategory> {
         let mut ingest_worker_exit = self
             .ingest_worker_exit
             .take()
-            .expect("Harmony ingest worker health activates exactly once");
-        if ingest_worker_exit.current_exit().is_some() {
-            self.ingest_worker_exit = Some(ingest_worker_exit);
-            return Err(SpaceRuntimeFailureCategory::Runtime);
-        }
+            .expect("Harmony ingest worker monitor activates exactly once");
         self.monitor_worker = Some(tokio::spawn(async move {
             let _ = ingest_worker_exit.recv().await;
             Err(SpaceRuntimeFailureCategory::Runtime)
@@ -872,7 +941,23 @@ impl SupervisedSpaceRuntime for HarmonyProfileRuntime {
             &mut self.monitor_worker,
             &mut self.report_failure,
         )?);
-        Ok(())
+        let health = self
+            .ingest_worker_health
+            .take()
+            .expect("Harmony ingest worker health activates exactly once");
+        self.monitor
+            .as_ref()
+            .expect("Harmony runtime monitor must be active before commit")
+            .commit_running(
+                || {
+                    if health.current_exit().is_some() {
+                        Err(SpaceRuntimeFailureCategory::Runtime)
+                    } else {
+                        Ok(())
+                    }
+                },
+                commit_running,
+            )
     }
 
     fn app_facade(&self) -> Option<Arc<uc_application::facade::AppFacade>> {
@@ -926,6 +1011,9 @@ impl SpaceRuntimeFactory for HarmonyProfileRuntimeFactory {
                 .try_resume_session()
                 .await
                 .map_err(|_| SpaceRuntimeFailureCategory::Runtime)?;
+            let ingest_worker_health = runtime
+                .subscribe_ingest_worker_exit()
+                .ok_or(SpaceRuntimeFailureCategory::Runtime)?;
             let ingest_worker_exit = runtime
                 .subscribe_ingest_worker_exit()
                 .ok_or(SpaceRuntimeFailureCategory::Runtime)?;
@@ -933,6 +1021,7 @@ impl SpaceRuntimeFactory for HarmonyProfileRuntimeFactory {
                 runtime,
                 _generation: generation,
                 monitor: None,
+                ingest_worker_health: Some(ingest_worker_health),
                 ingest_worker_exit: Some(ingest_worker_exit),
                 monitor_worker: None,
                 report_failure: Some(report_failure),
@@ -3526,9 +3615,12 @@ pub async fn delete_history(
 
 #[cfg(test)]
 mod profile_api_contract_tests {
+    use std::future::Future;
     use std::sync::{Arc, Mutex};
+    use std::task::Poll;
 
     use super::*;
+    use crate::space_runtime_supervisor::{SpaceRuntimeStart, SpaceRuntimeStartError};
 
     #[derive(Default)]
     struct ProductionMonitorTestFactory {
@@ -3552,11 +3644,126 @@ mod profile_api_contract_tests {
     }
 
     impl SupervisedSpaceRuntime for ProductionMonitoredTestRuntime {
+        fn activate_and_commit(
+            &mut self,
+            commit_running: &mut dyn FnMut(),
+        ) -> std::result::Result<(), SpaceRuntimeFailureCategory> {
+            self.monitor.commit_running(|| Ok(()), commit_running)
+        }
+
         fn shutdown(self: Box<Self>) -> SpaceRuntimeFuture<()> {
             Box::pin(async move {
                 self.monitor.shutdown().await;
             })
         }
+    }
+
+    #[derive(Default)]
+    struct PreRunningMonitorFactory {
+        worker_release: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+        runtime_created: Arc<tokio::sync::Notify>,
+        allow_activation: Arc<tokio::sync::Notify>,
+        activation_checked: Arc<tokio::sync::Notify>,
+        allow_running_commit: std::sync::atomic::AtomicBool,
+        terminal_observed: Arc<tokio::sync::Notify>,
+    }
+
+    struct PreRunningMonitorRuntime {
+        monitor: Option<HarmonyRuntimeMonitor>,
+        factory: Arc<PreRunningMonitorFactory>,
+    }
+
+    impl SupervisedSpaceRuntime for PreRunningMonitorRuntime {
+        fn activate_and_commit(
+            &mut self,
+            commit_running: &mut dyn FnMut(),
+        ) -> std::result::Result<(), SpaceRuntimeFailureCategory> {
+            if self
+                .monitor
+                .as_ref()
+                .expect("Harmony runtime monitor activates exactly once")
+                .task
+                .is_finished()
+            {
+                return Err(SpaceRuntimeFailureCategory::Runtime);
+            }
+            self.factory.activation_checked.notify_one();
+            while !self
+                .factory
+                .allow_running_commit
+                .load(std::sync::atomic::Ordering::Acquire)
+            {
+                std::thread::yield_now();
+            }
+            self.monitor
+                .as_ref()
+                .expect("Harmony runtime monitor must remain active")
+                .commit_running(|| Ok(()), commit_running)
+        }
+
+        fn shutdown(self: Box<Self>) -> SpaceRuntimeFuture<()> {
+            Box::pin(async move {
+                if let Some(monitor) = self.monitor {
+                    monitor.shutdown().await;
+                }
+            })
+        }
+    }
+
+    impl SpaceRuntimeFactory for Arc<PreRunningMonitorFactory> {
+        fn create(
+            &self,
+            _config: SpaceRuntimeProfileConfig,
+            _generation: u64,
+            report_failure: SpaceRuntimeFailureCallback,
+        ) -> SpaceRuntimeFuture<
+            std::result::Result<Box<dyn SupervisedSpaceRuntime>, SpaceRuntimeFailureCategory>,
+        > {
+            let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+            *self.worker_release.lock().unwrap() = Some(release_tx);
+            let factory = Arc::clone(self);
+            Box::pin(async move {
+                let worker = tokio::spawn(async move {
+                    release_rx
+                        .await
+                        .expect("worker release sender must stay alive");
+                    Err(SpaceRuntimeFailureCategory::Runtime)
+                });
+                let monitor = HarmonyRuntimeMonitor::spawn_worker_with_terminal_observer(
+                    worker,
+                    report_failure,
+                    HarmonyRuntimeStartGate::default(),
+                    Some(Arc::clone(&factory.terminal_observed)),
+                );
+                tokio::task::yield_now().await;
+                factory.runtime_created.notify_one();
+                factory.allow_activation.notified().await;
+                Ok(Box::new(PreRunningMonitorRuntime {
+                    monitor: Some(monitor),
+                    factory,
+                }) as Box<dyn SupervisedSpaceRuntime>)
+            })
+        }
+    }
+
+    async fn start_after_pending_signal(
+        supervisor: Arc<SpaceRuntimeSupervisor>,
+        config: SpaceRuntimeProfileConfig,
+        pending: Arc<tokio::sync::Notify>,
+    ) -> std::result::Result<SpaceRuntimeStart, SpaceRuntimeStartError> {
+        let mut start = Box::pin(supervisor.start(config));
+        let mut signalled = false;
+        std::future::poll_fn(move |context| match start.as_mut().poll(context) {
+            Poll::Pending => {
+                if !signalled {
+                    signalled = true;
+                    pending.notify_one();
+                }
+                Poll::Pending
+            }
+            Poll::Ready(result) => Poll::Ready(result),
+        })
+        .await
     }
 
     impl SpaceRuntimeFactory for ProductionMonitorTestFactory {
@@ -3682,6 +3889,68 @@ mod profile_api_contract_tests {
                     Some(SpaceRuntimeFailureCategory::Runtime)
                 );
             });
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+    async fn worker_terminal_after_health_check_fails_all_generation_one_starts() {
+        let factory = Arc::new(PreRunningMonitorFactory::default());
+        let supervisor = SpaceRuntimeSupervisor::new(Arc::new(Arc::clone(&factory)));
+        let config = monitor_config("profile-monitor-pre-running-terminal");
+        let profile_id = config.profile_id.clone();
+
+        let runtime_created = factory.runtime_created.notified();
+        let first = tokio::spawn({
+            let supervisor = Arc::clone(&supervisor);
+            let config = config.clone();
+            async move { supervisor.start(config).await }
+        });
+        runtime_created.await;
+
+        let second_pending = Arc::new(tokio::sync::Notify::new());
+        let second = tokio::spawn(start_after_pending_signal(
+            Arc::clone(&supervisor),
+            config,
+            Arc::clone(&second_pending),
+        ));
+        second_pending.notified().await;
+        assert_eq!(
+            supervisor.status(&profile_id).unwrap().lifecycle,
+            SpaceRuntimeLifecycle::Starting
+        );
+
+        let activation_checked = factory.activation_checked.notified();
+        factory.allow_activation.notify_one();
+        activation_checked.await;
+
+        let terminal_observed = factory.terminal_observed.notified();
+        factory
+            .worker_release
+            .lock()
+            .unwrap()
+            .take()
+            .unwrap()
+            .send(())
+            .unwrap();
+        terminal_observed.await;
+        factory
+            .allow_running_commit
+            .store(true, std::sync::atomic::Ordering::Release);
+
+        let first = first.await.unwrap().unwrap_err();
+        let second = second.await.unwrap().unwrap_err();
+        assert_eq!(first.generation, 1);
+        assert_eq!(second.generation, 1);
+        assert_eq!(first.category, SpaceRuntimeFailureCategory::Runtime);
+        assert_eq!(second.category, SpaceRuntimeFailureCategory::Runtime);
+        assert_eq!(
+            supervisor.status(&profile_id).unwrap(),
+            SpaceRuntimeStatus {
+                profile_id,
+                generation: 1,
+                lifecycle: SpaceRuntimeLifecycle::Failed,
+                last_failure: Some(SpaceRuntimeFailureCategory::Runtime),
+            }
+        );
     }
 
     #[test]
