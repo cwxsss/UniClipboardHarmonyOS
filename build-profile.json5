@@ -3,7 +3,6 @@
     "products": [
       {
         "name": "default",
-        "signingConfig": "default",
         "targetSdkVersion": "6.1.1(24)",
         "compatibleSdkVersion": "6.1.1(24)",
         "runtimeOS": "HarmonyOS",
@@ -23,21 +22,7 @@
         "name": "release"
       }
     ],
-    "signingConfigs": [
-      {
-        "name": "default",
-        "type": "HarmonyOS",
-        "material": {
-          "certpath": "C:\\Users\\Fanha\\.ohos\\config\\default_UniClipboardHarmonyOS_c8Ve6zRxCSG0Q_vC5fvY-Tcbul7F1nmIE-VG2FPjvkg=.cer",
-          "keyAlias": "debugKey",
-          "keyPassword": "0000001AB6D5343648AE1B16714DAB42DECF32322A3FDD77608DFDFCE61A38D53F9132FD42331D25A91B",
-          "profile": "C:\\Users\\Fanha\\.ohos\\config\\default_UniClipboardHarmonyOS_c8Ve6zRxCSG0Q_vC5fvY-Tcbul7F1nmIE-VG2FPjvkg=.p7b",
-          "signAlg": "SHA256withECDSA",
-          "storeFile": "C:\\Users\\Fanha\\.ohos\\config\\default_UniClipboardHarmonyOS_c8Ve6zRxCSG0Q_vC5fvY-Tcbul7F1nmIE-VG2FPjvkg=.p12",
-          "storePassword": "0000001AF5E3D081E07650F9C32692727F1A538F1E828BF00860A06356C0EF94E9FD0ECE44B78BE8E6DB"
-        }
-      }
-    ]
+    "signingConfigs": []
   },
   "modules": [
     {
