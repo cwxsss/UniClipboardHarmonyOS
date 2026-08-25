@@ -65,6 +65,10 @@ import {
   EngineRuntimeState,
   EngineWorkspaceConvergence,
   EngineSessionRecovery,
+  SpaceProfileDirectory,
+  SpaceProfileRecord,
+  SpaceProfileStore,
+  spaceRuntimeSupervisor,
   MobileSyncClient,
   MobileSyncServerService,
   NativeProtocolService,
@@ -226,6 +230,8 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   public aboutMaterialLevel: hdsMaterial.MaterialLevel = hdsMaterial.MaterialLevel.SMOOTH;
   public spaceNodeState: number = 0;
   public spaceJoined: boolean = false;
+  public spaceProfiles: SpaceProfileRecord[] = [];
+  public activeSendProfileId: string = '';
   public spacePeerConnected: boolean = false;
   public spaceDevices: EngineRuntimeDevice[] = [];
   public spaceDeviceName: string = '';
@@ -359,6 +365,10 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     ReceivedNotificationService.getInstance();
   public nativeProtocolService: NativeProtocolService = new NativeProtocolService();
   public spaceNodeService: SpaceNodeService = new SpaceNodeService();
+  private spaceProfileStore: SpaceProfileStore = new SpaceProfileStore();
+  private spaceProfileDirectory: SpaceProfileDirectory | null = null;
+  private spaceAdmissionAddedProfile: boolean = false;
+  private spaceAdmissionPreviousProfileId: string = '';
   public largeNavStack: NavPathStack = new NavPathStack();
   public sseTimerId: number = -1;
   private pollingActive: boolean = false;
@@ -1076,12 +1086,15 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
         this.recordConnectionDiagnosticFailure('node_unavailable');
         return;
       }
-      await engineRuntimeService.prepare(context as common.UIAbilityContext);
-      await engineRuntimeService.start();
       this.spaceNodeState = 2;
       try {
-        let recovery = await engineRuntimeService.recoverSession(true);
+        let directory: SpaceProfileDirectory = this.spaceProfileStore.load(context);
+        this.spaceProfileDirectory = directory;
+        this.spaceProfiles = directory.profiles;
+        this.activeSendProfileId = directory.activeProfileId();
+        let recovery = await spaceRuntimeSupervisor.restore(context as common.UIAbilityContext, directory);
         this.setSpaceJoined(recovery.resumed);
+        this.markSpaceProfileJoined(this.activeSendProfileId, recovery.resumed);
       } catch (error) {
         this.setSpaceJoined(false);
         this.spaceSwitchOpen = false;
@@ -1401,9 +1414,6 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       this.spaceInvitationCode.trim().length === 0 || this.spacePassphrase.length === 0) {
       return false;
     }
-    if (this.spaceJoined) {
-      return this.spaceSwitchOpen;
-    }
     return this.spaceJoinDeviceName.trim().length > 0;
   }
 
@@ -1413,20 +1423,21 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     }
     this.spaceJoinBusy = true;
     this.spaceJoinState = 0;
-    let switching: boolean = this.spaceJoined;
+    let profileId: string = '';
+    let addedProfile: boolean = false;
     try {
       let deviceName: string = this.spaceJoinDeviceName.trim();
-      let requestedDeviceName: string | null = switching ? null : deviceName;
+      profileId = await this.prepareSpaceAdmissionProfile();
+      addedProfile = this.spaceAdmissionAddedProfile;
       let result: EngineSpaceJoined = await engineRuntimeService.joinSpace(
-        this.spaceInvitationCode.trim(), requestedDeviceName, this.spacePassphrase, true);
+        this.spaceInvitationCode.trim(), deviceName, this.spacePassphrase, true);
+      this.markSpaceProfileJoined(profileId);
       let hasMigratedRecords: boolean = this.hasMigrationRecords(result.migratedRecords);
       let hasPreservedUnreadableRecords: boolean = this.hasMigrationRecords(result.preservedUnreadableRecords);
       this.spaceMigrationState = hasPreservedUnreadableRecords ? 2 : (hasMigratedRecords ? 1 : 0);
       this.setSpaceJoined(result.spaceId.length > 0);
       this.spacePeerConnected = false;
-      if (!switching) {
-        this.spaceDeviceName = deviceName;
-      }
+      this.spaceDeviceName = deviceName;
       this.spaceCreatedId = result.spaceId;
       this.spaceCreatePassphrase = this.spacePassphrase;
       this.spaceInvitationCode = '';
@@ -1440,17 +1451,15 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
         this.showFeedbackToast($r('app.string.space_migration_success'));
       }
       await this.refreshSpaceDevices();
-      if (switching) {
-        this.spaceSwitchOpen = false;
-      }
+      this.spaceSwitchOpen = false;
     } catch (error) {
       let errorMessage: string = 'unavailable';
       if (error instanceof Error) {
         let joinError: Error = error as Error;
         errorMessage = joinError.message;
       }
-      this.reportError('space', 'join space failed: ' + errorMessage,
-        switching ? $r('app.string.space_switch_failed') : $r('app.string.space_join_failed'));
+      await this.restoreSpaceAdmissionProfile(profileId, addedProfile);
+      this.reportError('space', 'join space failed: ' + errorMessage, $r('app.string.space_join_failed'));
       this.spaceJoinState = 2;
     } finally {
       this.spaceJoinBusy = false;
@@ -1458,44 +1467,26 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   }
 
   public canCreateSpace(): boolean {
-    return this.spaceNodeState === 2 && (!this.spaceJoined || this.spaceSwitchOpen) && !this.spaceCreateBusy &&
+    return this.spaceNodeState === 2 && !this.spaceCreateBusy &&
       this.spaceCreateDeviceName.trim().length > 0 && this.spaceCreatePassphrase.length >= 8 &&
       this.spaceCreatePassphrase === this.spaceCreatePassphraseConfirm;
-  }
-
-  public async confirmReplaceCurrentSpace(): Promise<boolean> {
-    try {
-      let result = await this.getUIContext().getPromptAction().showDialog({
-        title: $r('app.string.space_replace_confirm_title'),
-        message: $r('app.string.space_replace_confirm_message'),
-        buttons: [
-          { text: $r('app.string.cancel_action'), color: $r('app.color.text_secondary') },
-          { text: $r('app.string.space_replace_confirm_action'), color: $r('app.color.danger') }
-        ]
-      });
-      return result.index === 1;
-    } catch (error) {
-      return false;
-    }
   }
 
   public async createCurrentSpace(): Promise<void> {
     if (!this.canCreateSpace()) {
       return;
     }
-    let replacing: boolean = this.spaceJoined;
-    if (replacing) {
-      let confirmed: boolean = await this.confirmReplaceCurrentSpace();
-      if (!confirmed) {
-        return;
-      }
-    }
     this.spaceCreateBusy = true;
     this.spaceCreateState = 0;
+    let profileId: string = '';
+    let addedProfile: boolean = false;
     try {
       let deviceName: string = this.spaceCreateDeviceName.trim();
+      profileId = await this.prepareSpaceAdmissionProfile();
+      addedProfile = this.spaceAdmissionAddedProfile;
       let result: EngineSpaceCreated = await engineRuntimeService.createSpace(
         deviceName, this.spaceCreatePassphrase);
+      this.markSpaceProfileJoined(profileId);
       this.setSpaceJoined(result.spaceId.length > 0);
       this.spacePeerConnected = false;
       this.spaceCreatedId = result.spaceId;
@@ -1504,14 +1495,117 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       this.spaceCreatePassphraseConfirm = '';
       this.spaceCreateState = 1;
       await this.refreshSpaceDevices();
-      if (replacing) {
-        this.spaceSwitchOpen = false;
-      }
+      this.spaceSwitchOpen = false;
     } catch (error) {
+      await this.restoreSpaceAdmissionProfile(profileId, addedProfile);
       this.spaceCreateState = 2;
     } finally {
       this.spaceCreateBusy = false;
     }
+  }
+
+  public async activateSpaceProfile(profileId: string): Promise<void> {
+    if (this.spaceJoinBusy || this.spaceCreateBusy || profileId === this.activeSendProfileId) {
+      return;
+    }
+    let directory: SpaceProfileDirectory | null = this.spaceProfileDirectory;
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (directory === null || context === undefined) {
+      return;
+    }
+    let previousProfileId: string = directory.activeProfileId();
+    try {
+      this.spaceProfileStore.setActive(directory, profileId);
+      this.spaceProfileStore.save(context, directory);
+      let recovery: EngineSessionRecovery = await spaceRuntimeSupervisor.activate(
+        context as common.UIAbilityContext, directory, profileId);
+      this.activeSendProfileId = profileId;
+      this.spaceProfiles = directory.profiles;
+      this.setSpaceJoined(recovery.resumed);
+      this.spacePeerConnected = false;
+      await this.refreshSpaceDevices();
+    } catch (error) {
+      this.spaceProfileStore.setActive(directory, previousProfileId);
+      this.spaceProfileStore.save(context, directory);
+      this.activeSendProfileId = previousProfileId;
+      this.spaceProfiles = directory.profiles;
+      this.reportError('space', 'activate space profile failed: ' + this.errorDetail(error));
+    }
+  }
+
+  private async prepareSpaceAdmissionProfile(): Promise<string> {
+    let directory: SpaceProfileDirectory | null = this.spaceProfileDirectory;
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (directory === null || context === undefined) {
+      throw new Error('space profile directory is unavailable');
+    }
+    this.spaceAdmissionAddedProfile = false;
+    this.spaceAdmissionPreviousProfileId = directory.activeProfileId();
+    if (!this.spaceJoined) {
+      return this.spaceAdmissionPreviousProfileId;
+    }
+    let profile: SpaceProfileRecord = this.spaceProfileStore.add(directory);
+    this.spaceProfileStore.save(context, directory);
+    this.spaceProfiles = directory.profiles;
+    this.activeSendProfileId = profile.profileId;
+    this.spaceAdmissionAddedProfile = true;
+    try {
+      await spaceRuntimeSupervisor.activate(context as common.UIAbilityContext, directory, profile.profileId);
+      this.setSpaceJoined(false);
+      return profile.profileId;
+    } catch (error) {
+      this.spaceProfileStore.remove(directory, profile.profileId);
+      this.spaceProfileStore.setActive(directory, this.spaceAdmissionPreviousProfileId);
+      this.spaceProfileStore.save(context, directory);
+      this.spaceProfiles = directory.profiles;
+      this.activeSendProfileId = this.spaceAdmissionPreviousProfileId;
+      this.spaceAdmissionAddedProfile = false;
+      throw new Error('space admission profile activation failed');
+    }
+  }
+
+  private async restoreSpaceAdmissionProfile(profileId: string, addedProfile: boolean): Promise<void> {
+    if (!addedProfile || profileId.length === 0) {
+      return;
+    }
+    let directory: SpaceProfileDirectory | null = this.spaceProfileDirectory;
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (directory === null || context === undefined) {
+      return;
+    }
+    try {
+      this.spaceProfileStore.remove(directory, profileId);
+      this.spaceProfileStore.setActive(directory, this.spaceAdmissionPreviousProfileId);
+      this.spaceProfileStore.save(context, directory);
+      let recovery: EngineSessionRecovery = await spaceRuntimeSupervisor.activate(
+        context as common.UIAbilityContext, directory, this.spaceAdmissionPreviousProfileId);
+      this.activeSendProfileId = this.spaceAdmissionPreviousProfileId;
+      this.spaceProfiles = directory.profiles;
+      this.setSpaceJoined(recovery.resumed);
+      this.spacePeerConnected = false;
+      await this.refreshSpaceDevices();
+    } catch (error) {
+      this.reportError('space', 'restore active space after admission failed: ' + this.errorDetail(error));
+    }
+  }
+
+  private markSpaceProfileJoined(profileId: string, joined: boolean = true): void {
+    let directory: SpaceProfileDirectory | null = this.spaceProfileDirectory;
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (directory === null || context === undefined) {
+      return;
+    }
+    for (let index: number = 0; index < directory.profiles.length; index += 1) {
+      if (directory.profiles[index].profileId === profileId) {
+        directory.profiles[index].joined = joined;
+        if (joined) {
+          this.spaceProfileStore.setActive(directory, profileId);
+        }
+        break;
+      }
+    }
+    this.spaceProfileStore.save(context, directory);
+    this.spaceProfiles = directory.profiles;
   }
 
   public async issueCurrentSpaceInvitation(): Promise<void> {

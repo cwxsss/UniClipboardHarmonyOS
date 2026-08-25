@@ -78,6 +78,9 @@ class TestRuntimeHost implements EngineRuntimeHost {
   listenClipboard(observer: EngineClipboardObserver): void {
   }
 
+  releaseClipboardListener(): void {
+  }
+
   setClipboardPollingEnabled(enabled: boolean): void {
     this.clipboardPollingEnabled = enabled;
   }

@@ -6,6 +6,7 @@ import { EngineHostError, EngineHostErrorCategory } from './EngineHostError';
 import { EngineSecureAssetStore } from './EngineSecureAssetStore';
 
 const ENGINE_DIRECTORY_NAME: string = 'uniclipboard-engine-v1-1';
+const LEGACY_PROFILE_ID: string = '.engine-v1-1';
 
 // Mirrors the public OhHostResult declaration shipped beside the official HAR.
 export interface EngineHostResult<T> {
@@ -36,10 +37,11 @@ class EngineHostDirectories {
   cacheDirectory: string;
   temporaryDirectory: string;
 
-  constructor(context: common.UIAbilityContext) {
-    this.privateDataDirectory = context.filesDir + '/' + ENGINE_DIRECTORY_NAME;
-    this.cacheDirectory = context.cacheDir + '/' + ENGINE_DIRECTORY_NAME;
-    this.temporaryDirectory = context.tempDir + '/' + ENGINE_DIRECTORY_NAME;
+  constructor(context: common.UIAbilityContext, profileId: string) {
+    let scope: string = profileId === LEGACY_PROFILE_ID ? '' : '/' + profileId;
+    this.privateDataDirectory = context.filesDir + '/' + ENGINE_DIRECTORY_NAME + scope;
+    this.cacheDirectory = context.cacheDir + '/' + ENGINE_DIRECTORY_NAME + scope;
+    this.temporaryDirectory = context.tempDir + '/' + ENGINE_DIRECTORY_NAME + scope;
     this.ensureDirectory(this.privateDataDirectory);
     this.ensureDirectory(this.cacheDirectory);
     this.ensureDirectory(this.temporaryDirectory);
@@ -135,8 +137,9 @@ export class EngineHostAdapter {
   private files: EngineFileHandleRegistry = new EngineFileHandleRegistry();
   private clipboard: EngineClipboardHost = new EngineClipboardHost();
 
-  prepare(context: common.UIAbilityContext): EngineHostCallbacks {
-    let directories: EngineHostDirectories = new EngineHostDirectories(context);
+  prepare(context: common.UIAbilityContext, profileId: string = LEGACY_PROFILE_ID): EngineHostCallbacks {
+    let directories: EngineHostDirectories = new EngineHostDirectories(context, profileId);
+    this.storage = new EngineSecureAssetStore(profileId);
     this.storage.verifyAccess();
     this.clipboard.verifyAccess();
     return new EngineHostCallbacksImpl(directories, this.storage, this.files, this.clipboard);
@@ -156,6 +159,10 @@ export class EngineHostAdapter {
 
   listenClipboard(observer: EngineClipboardObserver): void {
     this.clipboard.listen(observer);
+  }
+
+  releaseClipboardListener(): void {
+    this.clipboard.releaseListener();
   }
 
   setClipboardPollingEnabled(enabled: boolean): void {

@@ -23,6 +23,7 @@ import {
   BackgroundSyncPreferenceService,
   BackgroundSyncTaskService,
   engineRuntimeService,
+  spaceRuntimeSupervisor,
   setSpaceBackgroundMode
 } from 'common';
 
@@ -113,7 +114,7 @@ export default class EntryAbility extends UIAbility {
     this.backgroundSyncTaskService.stop(this.context).catch((): void => {
       hilog.warn(DOMAIN, 'testTag', 'Background sync task shutdown did not complete cleanly.');
     });
-    engineRuntimeService.shutdown().catch((): void => {
+    spaceRuntimeSupervisor.shutdown().catch((): void => {
       hilog.warn(DOMAIN, 'testTag', 'Engine runtime shutdown did not complete cleanly.');
     });
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onDestroy');

@@ -56,7 +56,8 @@ import {
   NativeMobileSyncCredential,
   NativeMobileSyncDevice,
   NativeMobileSyncInboundEvent,
-  NativeMobileSyncStatus
+  NativeMobileSyncStatus,
+  SpaceProfileRecord
 } from 'common';
 
 import {
@@ -324,6 +325,37 @@ export struct CompactClipboardView {
         .borderRadius($r('app.float.corner_radius_level10'))
         .backgroundColor($r('app.color.surface_muted'))
         .attributeModifier(Api26Material.subtle())
+        if (this.controller.spaceProfiles.length > 1) {
+          Column({ space: 6 }) {
+            ForEach(this.controller.spaceProfiles, (profile: SpaceProfileRecord): void => {
+              Button(profile.profileId === this.controller.activeSendProfileId ?
+                $r('app.string.space_profile_active') : $r('app.string.space_profile_select'),
+                { type: ButtonType.Normal })
+                .height(40)
+                .width('100%')
+                .fontColor(profile.profileId === this.controller.activeSendProfileId ?
+                  $r('app.color.on_accent') : $r('app.color.text_primary'))
+                .backgroundColor(profile.profileId === this.controller.activeSendProfileId ?
+                  this.controller.accentColor() : $r('app.color.surface_muted'))
+                .borderRadius($r('app.float.corner_radius_level10'))
+                .enabled(profile.profileId !== this.controller.activeSendProfileId && profile.joined)
+                .attributeModifier(Api26Material.interactive())
+                .onClick((): void => {
+                  this.controller.activateSpaceProfile(profile.profileId);
+                })
+              Text(profile.profileId === '.engine-v1-1' ? $r('app.string.space_profile_default') :
+                profile.profileId.substring(0, 13))
+                .fontSize(12)
+                .fontColor($r('app.color.text_secondary'))
+                .width('100%')
+            }, (profile: SpaceProfileRecord): string => profile.profileId)
+          }
+          .width('100%')
+          .padding(10)
+          .borderRadius($r('app.float.corner_radius_level10'))
+          .backgroundColor($r('app.color.surface_muted'))
+          .attributeModifier(Api26Material.subtle())
+        }
         if (this.controller.spaceJoinState === 1 && !this.controller.spaceSwitchOpen) {
           Text($r('app.string.space_switch_success'))
             .fontSize(12)

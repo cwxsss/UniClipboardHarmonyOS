@@ -101,12 +101,9 @@
     { "name": "space_tablet_invite_note", "value": "The tablet workspace can create a QR code and invitation code. On the phone, open Join space and scan or enter it." },
     { "name": "space_create_new_mode", "value": "Create new space" },
     { "name": "space_join_other_mode", "value": "Join another space" },
-    { "name": "space_create_new_title", "value": "Create and switch to a new space" },
-    { "name": "space_create_new_note", "value": "The new space replaces the active space. Old members and trust relationships are removed from this device." },
-    { "name": "space_create_new_action", "value": "Create and switch" },
-    { "name": "space_replace_confirm_title", "value": "Create a new active space?" },
-    { "name": "space_replace_confirm_message", "value": "This device leaves the current space and clears its keys and members. Native encrypted history cannot be decrypted in the new space; regular in-app history and other settings are preserved." },
-    { "name": "space_replace_confirm_action", "value": "Leave and create" },
+    { "name": "space_create_new_title", "value": "Create a new sync space" },
+    { "name": "space_create_new_note", "value": "The new space remains available on this device. Switch the active sending space from the space list after it is created." },
+    { "name": "space_create_new_action", "value": "Create space" },
     { "name": "settings_note", "value": "Scan or paste a desktop connection QR code, or enter the service URL and credentials manually." },
     { "name": "mobile_space_connection_title", "value": "Encrypted sync space" },
     { "name": "device_space_connection_eyebrow", "value": "Secure sync" },
@@ -524,6 +521,9 @@
     { "name": "appearance_component_material_thin", "value": "Thin" },
     { "name": "appearance_component_material_regular", "value": "Regular" },
     { "name": "appearance_component_material_thick", "value": "Thick" },
-    { "name": "appearance_component_material_ultra_thick", "value": "Ultra thick" }
+    { "name": "appearance_component_material_ultra_thick", "value": "Ultra thick" },
+    { "name": "space_profile_default", "value": "Default space" },
+    { "name": "space_profile_active", "value": "Active send space" },
+    { "name": "space_profile_select", "value": "Use for clipboard send" }
   ]
 }

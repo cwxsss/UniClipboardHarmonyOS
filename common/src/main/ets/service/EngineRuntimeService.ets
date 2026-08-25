@@ -308,6 +308,7 @@ export interface EngineRuntimeBackend {
 export interface EngineRuntimeHost {
   prepare(context: common.UIAbilityContext): EngineHostCallbacks;
   listenClipboard(observer: EngineClipboardObserver): void;
+  releaseClipboardListener(): void;
   setClipboardPollingEnabled(enabled: boolean): void;
   registerInputFile(uri: string, mimeType: string): string;
   registerOutputFile(uri: string, mimeType: string): string;
@@ -565,13 +566,22 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
 
 class OfficialEngineRuntimeHost implements EngineRuntimeHost {
   private adapter: EngineHostAdapter = new EngineHostAdapter();
+  private profileId: string;
+
+  constructor(profileId: string) {
+    this.profileId = profileId;
+  }
 
   prepare(context: common.UIAbilityContext): EngineHostCallbacks {
-    return this.adapter.prepare(context);
+    return this.adapter.prepare(context, this.profileId);
   }
 
   listenClipboard(observer: EngineClipboardObserver): void {
     this.adapter.listenClipboard(observer);
+  }
+
+  releaseClipboardListener(): void {
+    this.adapter.releaseClipboardListener();
   }
 
   setClipboardPollingEnabled(enabled: boolean): void {
@@ -600,6 +610,8 @@ export class EngineRuntimeService implements EngineClipboardObserver {
 
   private backend: EngineRuntimeBackend;
   private host: EngineRuntimeHost;
+  private profileId: string;
+  private clipboardCaptureEnabled: boolean;
   private state: EngineRuntimeState = EngineRuntimeState.IDLE;
   private lastErrorCategory: string = '';
   private callbacks: EngineHostCallbacks | null = null;
@@ -621,21 +633,65 @@ export class EngineRuntimeService implements EngineClipboardObserver {
   private observers: EngineRuntimeObserver[] = [];
   private eventObservers: EngineRuntimeEventObserver[] = [];
 
-  private constructor(backend: EngineRuntimeBackend, host: EngineRuntimeHost) {
+  private constructor(backend: EngineRuntimeBackend, host: EngineRuntimeHost,
+    profileId: string = ENGINE_PROFILE_SUFFIX, clipboardCaptureEnabled: boolean = true) {
     this.backend = backend;
     this.host = host;
+    this.profileId = profileId;
+    this.clipboardCaptureEnabled = clipboardCaptureEnabled;
   }
 
   static getInstance(): EngineRuntimeService {
     if (EngineRuntimeService.instance === null) {
       EngineRuntimeService.instance = new EngineRuntimeService(
-        new OfficialEngineRuntimeBackend(), new OfficialEngineRuntimeHost());
+        new OfficialEngineRuntimeBackend(), new OfficialEngineRuntimeHost(ENGINE_PROFILE_SUFFIX));
     }
     return EngineRuntimeService.instance;
   }
 
   static createForTesting(backend: EngineRuntimeBackend, host: EngineRuntimeHost): EngineRuntimeService {
     return new EngineRuntimeService(backend, host);
+  }
+
+  static createForProfile(profileId: string, clipboardCaptureEnabled: boolean): EngineRuntimeService {
+    return new EngineRuntimeService(new OfficialEngineRuntimeBackend(), new OfficialEngineRuntimeHost(profileId),
+      profileId, clipboardCaptureEnabled);
+  }
+
+  getProfileId(): string {
+    return this.profileId;
+  }
+
+  async activateProfile(context: common.UIAbilityContext, profileId: string): Promise<EngineSessionRecovery> {
+    if (profileId.length === 0) {
+      throw new EngineRuntimeError('invalid_profile', 'activate_profile');
+    }
+    if (this.profileId !== profileId) {
+      await this.shutdown();
+      if (!(this.host instanceof OfficialEngineRuntimeHost)) {
+        throw new EngineRuntimeError('invalid_runtime', 'activate_profile');
+      }
+      this.profileId = profileId;
+      this.host = new OfficialEngineRuntimeHost(profileId);
+    }
+    await this.prepare(context);
+    await this.start();
+    return await this.recoverSession(true);
+  }
+
+  setClipboardCaptureEnabled(enabled: boolean): void {
+    if (this.clipboardCaptureEnabled === enabled) {
+      return;
+    }
+    this.clipboardCaptureEnabled = enabled;
+    if (this.state !== EngineRuntimeState.RUNNING && this.state !== EngineRuntimeState.SUSPENDED) {
+      return;
+    }
+    if (enabled) {
+      this.host.listenClipboard(this);
+    } else {
+      this.host.releaseClipboardListener();
+    }
   }
 
   async prepareForTesting(callbacks: EngineHostCallbacks, config: EngineRuntimeStartConfig): Promise<void> {
@@ -809,7 +865,7 @@ export class EngineRuntimeService implements EngineClipboardObserver {
   }
 
   setClipboardPollingEnabled(enabled: boolean): void {
-    this.host.setClipboardPollingEnabled(enabled);
+    this.host.setClipboardPollingEnabled(enabled && this.clipboardCaptureEnabled);
   }
 
   setClipboardAutoSendTargets(targetDevices: string[]): void {
@@ -1031,8 +1087,7 @@ export class EngineRuntimeService implements EngineClipboardObserver {
       this.callbacks = this.host.prepare(context);
       let bundleInfo: bundleManager.BundleInfo = bundleManager.getBundleInfoForSelfSync(
         bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_APPLICATION);
-      this.startConfig = new EngineRuntimeStartConfig(
-        bundleInfo.versionName, bundleInfo.name + ENGINE_PROFILE_SUFFIX);
+      this.startConfig = new EngineRuntimeStartConfig(bundleInfo.versionName, this.profileId);
       this.lastErrorCategory = '';
       this.setState(EngineRuntimeState.IDLE);
     } catch (error) {
@@ -1055,7 +1110,9 @@ export class EngineRuntimeService implements EngineClipboardObserver {
       let preparedHost: Object = this.preparedHost;
       let startedHandle: EngineRuntimeHandle = await this.backend.startEngine(config, preparedHost);
       this.handle = startedHandle;
-      this.host.listenClipboard(this);
+      if (this.clipboardCaptureEnabled) {
+        this.host.listenClipboard(this);
+      }
       this.startEventPolling(startedHandle);
       this.lastErrorCategory = '';
       this.setState(EngineRuntimeState.RUNNING);

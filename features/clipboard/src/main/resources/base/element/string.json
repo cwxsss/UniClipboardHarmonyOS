@@ -406,27 +406,15 @@
     },
     {
       "name": "space_create_new_title",
-      "value": "创建并切换到新空间"
+      "value": "创建新的同步空间"
     },
     {
       "name": "space_create_new_note",
-      "value": "新空间会替换当前活动空间；旧空间成员和信任关系将从本机移除。"
+      "value": "新空间会保留在本机；创建完成后可在空间列表中切换发送空间。"
     },
     {
       "name": "space_create_new_action",
-      "value": "创建并切换"
-    },
-    {
-      "name": "space_replace_confirm_title",
-      "value": "创建新的活动空间？"
-    },
-    {
-      "name": "space_replace_confirm_message",
-      "value": "本机将退出当前空间并清除旧空间密钥和成员关系。原生加密历史无法在新空间继续解密；应用内普通历史与其他设置会保留。"
-    },
-    {
-      "name": "space_replace_confirm_action",
-      "value": "退出并创建"
+      "value": "创建空间"
     },
     {
       "name": "settings_note",
@@ -1790,6 +1778,9 @@
     { "name": "appearance_component_material_thin", "value": "薄" },
     { "name": "appearance_component_material_regular", "value": "常规" },
     { "name": "appearance_component_material_thick", "value": "厚" },
-    { "name": "appearance_component_material_ultra_thick", "value": "超厚" }
+    { "name": "appearance_component_material_ultra_thick", "value": "超厚" },
+    { "name": "space_profile_default", "value": "默认空间" },
+    { "name": "space_profile_active", "value": "当前发送空间" },
+    { "name": "space_profile_select", "value": "切换为当前发送空间" }
   ]
 }
