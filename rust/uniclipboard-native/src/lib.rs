@@ -7,40 +7,42 @@ use std::time::{Duration, Instant};
 use napi_derive_ohos::napi;
 use napi_ohos::bindgen_prelude::{Buffer, Uint8Array};
 use napi_ohos::{Error, Result, Status};
-use uc_mobile::{
-    ClipboardKind, ClipboardMeta, HistoryPatch, MobileSyncClient, PlatformBridge, ProbeResult,
-    ServerConfig as MobileServerConfig, SseHandle, SseListener,
+use uc_application::facade::mobile_sync::{
+    RegisterMobileShortcutDeviceInput, RevokeMobileDeviceInput, UpdateMobileSyncSettingsInput,
 };
-use uc_mobile::client::{HistoryQuery, HistoryRecord};
+use uc_application::facade::settings::{NetworkSettingsPatch, SettingsFacade};
 use uc_application::facade::space_setup::{
     InitializeSpaceInput, RedeemPairingInvitationInput, SwitchSpaceInput,
 };
-use uc_application::facade::mobile_sync::{
-    RegisterMobileShortcutDeviceInput, RevokeMobileDeviceInput,
-    UpdateMobileSyncSettingsInput,
-};
-use uc_application::facade::settings::{NetworkSettingsPatch, SettingsFacade};
 use uc_application::facade::{
     connection_channel_to_wire, decode_v3_bytes_to_snapshot,
     decode_v3_bytes_to_snapshot_and_blob_refs, BatchPosition, ClipboardHostEvent,
-    ClipboardOriginKind, ContentTypesPatch, EmitError,
-    FetchBlobToPathCommand, FetchTransferContext, HostEvent, HostEventEmitterPort, InboundAction,
+    ClipboardOriginKind, ContentTypesPatch, EmitError, FetchBlobToPathCommand,
+    FetchTransferContext, HostEvent, HostEventEmitterPort, InboundAction,
     MemberSyncPreferencesPatch, MemberSyncPreferencesView, PublishBlobPathCommand, SettingsPatch,
     TransferHostEvent, V3BlobRef,
 };
-use uc_bootstrap::CliAppRuntime;
-use uc_core::ids::{DeviceId, EntryId, FormatId, RepresentationId};
+use uc_bootstrap::{CliAppRuntime, CliAppRuntimeProfileConfig};
+use uc_core::ids::{DeviceId, EntryId, FormatId, ProfileId, RepresentationId};
 use uc_core::mobile_sync::MobileDeviceId;
 use uc_core::ports::ReachabilityState;
 use uc_core::{
     ClipboardChangeOrigin, MimeType, ObservedClipboardRepresentation, SystemClipboardSnapshot,
 };
 use uc_infra::settings::repository::FileSettingsRepository;
+use uc_mobile::client::{HistoryQuery, HistoryRecord};
+use uc_mobile::{
+    ClipboardKind, ClipboardMeta, HistoryPatch, MobileSyncClient, PlatformBridge, ProbeResult,
+    ServerConfig as MobileServerConfig, SseHandle, SseListener,
+};
 
 mod mobile_sync_server;
-// Task 1 stages the profile-keyed supervisor without activating a second N-API path.
-#[allow(dead_code)]
 mod space_runtime_supervisor;
+use space_runtime_supervisor::{
+    SpaceRuntimeFactory, SpaceRuntimeFailureCallback, SpaceRuntimeFailureCategory,
+    SpaceRuntimeFuture, SpaceRuntimeLifecycle, SpaceRuntimeProfileConfig, SpaceRuntimeStatus,
+    SpaceRuntimeSupervisor, SupervisedSpaceRuntime,
+};
 
 static MOBILE_CLIENT: OnceLock<Arc<MobileSyncClient>> = OnceLock::new();
 static SSE_HANDLE: OnceLock<Mutex<Option<Arc<SseHandle>>>> = OnceLock::new();
@@ -64,6 +66,7 @@ static SPACE_FILE_TRANSFER_SEQ: AtomicU64 = AtomicU64::new(1);
 static SPACE_DEVICE_TYPES: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
 static SPACE_LOCAL_DEVICE_TYPE: OnceLock<Mutex<String>> = OnceLock::new();
 static SPACE_PROFILE_ANNOUNCED: AtomicBool = AtomicBool::new(false);
+static PROFILE_SPACE_SUPERVISOR: OnceLock<Arc<SpaceRuntimeSupervisor>> = OnceLock::new();
 
 const MAX_PENDING_SSE_EVENTS: usize = 64;
 const MAX_PENDING_SPACE_EVENTS: usize = 64;
@@ -171,9 +174,9 @@ impl HostEventEmitterPort for HarmonyHostEventEmitter {
             _ => None,
         };
         if let Some(signal) = signal {
-            self.sender
-                .send(signal)
-                .map_err(|_| EmitError::Failed("HarmonyOS file event channel closed".to_string()))?;
+            self.sender.send(signal).map_err(|_| {
+                EmitError::Failed("HarmonyOS file event channel closed".to_string())
+            })?;
         }
         Ok(())
     }
@@ -280,6 +283,18 @@ pub struct NativeSseEvent {
 
 #[napi(object)]
 pub struct NativeSpaceStatus {
+    pub running: bool,
+    pub joined: bool,
+    pub device_name: String,
+    pub space_id: String,
+}
+
+#[napi(object)]
+pub struct NativeProfileSpaceStatus {
+    pub profile_id: String,
+    pub generation: f64,
+    pub lifecycle: String,
+    pub last_failure: String,
     pub running: bool,
     pub joined: bool,
     pub device_name: String,
@@ -444,8 +459,8 @@ fn mobile_client() -> Result<Arc<MobileSyncClient>> {
     }
 
     uc_mobile::uc_mobile_init();
-    let created = MobileSyncClient::new(Arc::new(HarmonyPlatformBridge), false)
-        .map_err(sync_error)?;
+    let created =
+        MobileSyncClient::new(Arc::new(HarmonyPlatformBridge), false).map_err(sync_error)?;
     if MOBILE_CLIENT.set(created.clone()).is_ok() {
         return Ok(created);
     }
@@ -741,9 +756,10 @@ async fn current_space_status() -> Result<NativeSpaceStatus> {
             space_id: String::new(),
         });
     };
-    let setup = app_facade.space_setup.get().cloned().ok_or_else(|| {
-        Error::new(Status::GenericFailure, "space setup service is unavailable")
-    })?;
+    let setup =
+        app_facade.space_setup.get().cloned().ok_or_else(|| {
+            Error::new(Status::GenericFailure, "space setup service is unavailable")
+        })?;
     let state = setup.query_setup_state().await.map_err(space_error)?;
     Ok(NativeSpaceStatus {
         running: true,
@@ -754,6 +770,159 @@ async fn current_space_status() -> Result<NativeSpaceStatus> {
             .map(|space_id| space_id.to_string())
             .unwrap_or_default(),
     })
+}
+
+struct HarmonyProfileRuntimeFactory;
+
+struct HarmonyProfileRuntime {
+    runtime: CliAppRuntime,
+    _generation: u64,
+    _report_failure: SpaceRuntimeFailureCallback,
+    device_type: String,
+}
+
+impl SupervisedSpaceRuntime for HarmonyProfileRuntime {
+    fn app_facade(&self) -> Option<Arc<uc_application::facade::AppFacade>> {
+        Some(Arc::clone(&self.runtime.app_facade))
+    }
+
+    fn device_type(&self) -> Option<String> {
+        Some(self.device_type.clone())
+    }
+
+    fn shutdown(self: Box<Self>) -> SpaceRuntimeFuture<()> {
+        Box::pin(async move {
+            let Self { runtime, .. } = *self;
+            runtime.shutdown().await;
+        })
+    }
+}
+
+impl SpaceRuntimeFactory for HarmonyProfileRuntimeFactory {
+    fn create(
+        &self,
+        config: SpaceRuntimeProfileConfig,
+        generation: u64,
+        report_failure: SpaceRuntimeFailureCallback,
+    ) -> SpaceRuntimeFuture<
+        std::result::Result<Box<dyn SupervisedSpaceRuntime>, SpaceRuntimeFailureCategory>,
+    > {
+        Box::pin(async move {
+            std::fs::create_dir_all(&config.data_root)
+                .map_err(|_| SpaceRuntimeFailureCategory::Storage)?;
+            std::fs::create_dir_all(&config.cache_root)
+                .map_err(|_| SpaceRuntimeFailureCategory::Storage)?;
+            let profile = CliAppRuntimeProfileConfig::builder(config.profile_id.to_string())
+                .data_root(config.data_root)
+                .cache_root(config.cache_root)
+                .secure_storage_namespace(config.namespace)
+                .build()
+                .map_err(|_| SpaceRuntimeFailureCategory::Bootstrap)?;
+            let runtime = uc_bootstrap::build_cli_app_runtime_for_profile(&profile, None)
+                .await
+                .map_err(|_| SpaceRuntimeFailureCategory::Bootstrap)?;
+            runtime
+                .app_facade
+                .try_resume_session()
+                .await
+                .map_err(|_| SpaceRuntimeFailureCategory::Runtime)?;
+            Ok(Box::new(HarmonyProfileRuntime {
+                runtime,
+                _generation: generation,
+                _report_failure: report_failure,
+                device_type: config.device_type,
+            }) as Box<dyn SupervisedSpaceRuntime>)
+        })
+    }
+}
+
+fn profile_space_supervisor() -> &'static Arc<SpaceRuntimeSupervisor> {
+    PROFILE_SPACE_SUPERVISOR
+        .get_or_init(|| SpaceRuntimeSupervisor::new(Arc::new(HarmonyProfileRuntimeFactory)))
+}
+
+fn build_profile_runtime_config(
+    profile_id: &str,
+    data_dir: &str,
+    cache_dir: &str,
+    device_type: &str,
+) -> Result<SpaceRuntimeProfileConfig> {
+    let namespace = CliAppRuntimeProfileConfig::namespace_for_profile(profile_id)
+        .map_err(|error| Error::new(Status::InvalidArg, error.to_string()))?;
+    let data_root = std::path::PathBuf::from(data_dir);
+    let cache_root = std::path::PathBuf::from(cache_dir);
+    CliAppRuntimeProfileConfig::builder(profile_id)
+        .data_root(data_root.clone())
+        .cache_root(cache_root.clone())
+        .secure_storage_namespace(namespace.clone())
+        .build()
+        .map_err(|error| Error::new(Status::InvalidArg, error.to_string()))?;
+
+    Ok(SpaceRuntimeProfileConfig {
+        profile_id: ProfileId::from(profile_id),
+        data_root,
+        cache_root,
+        namespace,
+        device_type: normalize_device_type(device_type),
+    })
+}
+
+fn profile_lifecycle_name(lifecycle: SpaceRuntimeLifecycle) -> &'static str {
+    match lifecycle {
+        SpaceRuntimeLifecycle::Starting => "starting",
+        SpaceRuntimeLifecycle::Running => "running",
+        SpaceRuntimeLifecycle::Stopping => "stopping",
+        SpaceRuntimeLifecycle::Failed => "failed",
+        SpaceRuntimeLifecycle::Stopped => "stopped",
+    }
+}
+
+fn profile_failure_name(failure: Option<SpaceRuntimeFailureCategory>) -> &'static str {
+    match failure {
+        Some(SpaceRuntimeFailureCategory::Bootstrap) => "bootstrap",
+        Some(SpaceRuntimeFailureCategory::Runtime) => "runtime",
+        Some(SpaceRuntimeFailureCategory::Storage) => "storage",
+        Some(SpaceRuntimeFailureCategory::Network) => "network",
+        Some(SpaceRuntimeFailureCategory::ProfileConflict) => "profile_conflict",
+        Some(SpaceRuntimeFailureCategory::Superseded) => "superseded",
+        None => "",
+    }
+}
+
+async fn current_profile_space_status(profile_id: &ProfileId) -> Result<NativeProfileSpaceStatus> {
+    let status = profile_space_supervisor()
+        .status(profile_id)
+        .unwrap_or_else(|| SpaceRuntimeStatus {
+            profile_id: profile_id.clone(),
+            generation: 0,
+            lifecycle: SpaceRuntimeLifecycle::Stopped,
+            last_failure: None,
+        });
+    let mut native = NativeProfileSpaceStatus {
+        profile_id: profile_id.to_string(),
+        generation: status.generation as f64,
+        lifecycle: profile_lifecycle_name(status.lifecycle).to_string(),
+        last_failure: profile_failure_name(status.last_failure).to_string(),
+        running: status.lifecycle == SpaceRuntimeLifecycle::Running,
+        joined: false,
+        device_name: String::new(),
+        space_id: String::new(),
+    };
+    let Some(app_facade) = profile_space_supervisor().app_facade(profile_id) else {
+        return Ok(native);
+    };
+    let setup =
+        app_facade.space_setup.get().cloned().ok_or_else(|| {
+            Error::new(Status::GenericFailure, "space setup service is unavailable")
+        })?;
+    let state = setup.query_setup_state().await.map_err(space_error)?;
+    native.joined = state.has_completed;
+    native.device_name = state.device_name.unwrap_or_default();
+    native.space_id = state
+        .space_id
+        .map(|space_id| space_id.to_string())
+        .unwrap_or_default();
+    Ok(native)
 }
 
 fn cancel_sse_subscription() {
@@ -812,9 +981,8 @@ fn native_history_item(record: HistoryRecord) -> NativeHistoryItem {
 
 #[napi]
 pub fn parse_connect_uri(uri: String) -> Result<ConnectPayload> {
-    let payload = uc_mobile_proto::parse_mobile_sync_connect_uri(&uri).map_err(|error| {
-        Error::new(Status::InvalidArg, error.to_string())
-    })?;
+    let payload = uc_mobile_proto::parse_mobile_sync_connect_uri(&uri)
+        .map_err(|error| Error::new(Status::InvalidArg, error.to_string()))?;
 
     Ok(ConnectPayload {
         url: payload.url,
@@ -827,6 +995,193 @@ pub fn parse_connect_uri(uri: String) -> Result<ConnectPayload> {
 #[napi]
 pub fn sha256_hex_upper(text: String) -> String {
     uc_mobile_proto::sha256_hex_upper(text.as_bytes())
+}
+
+/// Start one explicitly-scoped HarmonyOS runtime. `data_dir` and `cache_dir`
+/// are the final roots for this profile, not process-wide base directories.
+#[napi]
+pub async fn start_space_node_for_profile(
+    profile_id: String,
+    data_dir: String,
+    cache_dir: String,
+    device_type: String,
+) -> Result<NativeProfileSpaceStatus> {
+    let config = build_profile_runtime_config(
+        profile_id.trim(),
+        data_dir.trim(),
+        cache_dir.trim(),
+        &device_type,
+    )?;
+    let profile_id = config.profile_id.clone();
+    profile_space_supervisor()
+        .start(config)
+        .await
+        .map_err(|error| {
+            Error::new(
+                Status::GenericFailure,
+                format!(
+                    "profile {} generation {} failed to start: {}",
+                    error.profile_id,
+                    error.generation,
+                    profile_failure_name(Some(error.category))
+                ),
+            )
+        })?;
+    current_profile_space_status(&profile_id).await
+}
+
+#[napi]
+pub async fn get_space_status_for_profile(profile_id: String) -> Result<NativeProfileSpaceStatus> {
+    CliAppRuntimeProfileConfig::namespace_for_profile(profile_id.trim())
+        .map_err(|error| Error::new(Status::InvalidArg, error.to_string()))?;
+    current_profile_space_status(&ProfileId::from(profile_id.trim())).await
+}
+
+#[napi]
+pub async fn stop_space_node_for_profile(profile_id: String) -> Result<NativeProfileSpaceStatus> {
+    CliAppRuntimeProfileConfig::namespace_for_profile(profile_id.trim())
+        .map_err(|error| Error::new(Status::InvalidArg, error.to_string()))?;
+    let profile_id = ProfileId::from(profile_id.trim());
+    profile_space_supervisor().stop(&profile_id).await;
+    current_profile_space_status(&profile_id).await
+}
+
+fn profile_app_facade(
+    profile_id: &str,
+) -> Result<(ProfileId, Arc<uc_application::facade::AppFacade>)> {
+    CliAppRuntimeProfileConfig::namespace_for_profile(profile_id)
+        .map_err(|error| Error::new(Status::InvalidArg, error.to_string()))?;
+    let profile_id = ProfileId::from(profile_id);
+    let app_facade = profile_space_supervisor()
+        .app_facade(&profile_id)
+        .ok_or_else(|| {
+            Error::new(
+                Status::GenericFailure,
+                format!("space profile {profile_id} is not running"),
+            )
+        })?;
+    Ok((profile_id, app_facade))
+}
+
+#[napi]
+pub async fn issue_space_invitation_for_profile(
+    profile_id: String,
+) -> Result<NativeSpaceInvitation> {
+    let (_, app_facade) = profile_app_facade(profile_id.trim())?;
+    let result = app_facade
+        .issue_pairing_invitation()
+        .await
+        .map_err(space_error)?;
+    Ok(NativeSpaceInvitation {
+        code: result.code.as_str().to_string(),
+        expires_at_ms: result.expires_at.timestamp_millis() as f64,
+    })
+}
+
+#[napi]
+pub async fn join_space_for_profile(
+    profile_id: String,
+    invitation_code: String,
+    passphrase: String,
+    device_name: String,
+) -> Result<NativeJoinSpaceResult> {
+    let code = invitation_code.trim().to_ascii_uppercase();
+    let name = device_name.trim().to_string();
+    if code.is_empty() || passphrase.is_empty() || name.is_empty() {
+        return Err(Error::new(
+            Status::InvalidArg,
+            "invitation code, space passphrase, and device name are required",
+        ));
+    }
+    let (_, app_facade) = profile_app_facade(profile_id.trim())?;
+    app_facade
+        .set_device_name(name)
+        .await
+        .map_err(space_error)?;
+    let result = app_facade
+        .redeem_pairing_invitation(RedeemPairingInvitationInput { code, passphrase })
+        .await
+        .map_err(space_error)?;
+    Ok(NativeJoinSpaceResult {
+        space_id: result.space_id.to_string(),
+        sponsor_device_id: result.sponsor_device_id.to_string(),
+        self_device_id: result.self_device_id.to_string(),
+    })
+}
+
+#[napi]
+pub async fn send_space_text_for_profile(profile_id: String, text: String) -> Result<u32> {
+    let (_, app_facade) = profile_app_facade(profile_id.trim())?;
+    dispatch_space_text_with_filter(app_facade, text, None).await
+}
+
+#[napi]
+pub async fn get_space_devices_for_profile(profile_id: String) -> Result<Vec<NativeSpaceDevice>> {
+    let (profile_id, app_facade) = profile_app_facade(profile_id.trim())?;
+    let local = app_facade
+        .device
+        .local_device_info()
+        .await
+        .map_err(space_error)?;
+    let local_type = profile_space_supervisor()
+        .device_type(&profile_id)
+        .unwrap_or_else(|| "unknown".to_string());
+    let entries = app_facade
+        .list_roster_entries()
+        .await
+        .map_err(space_error)?;
+    let peer_snapshots = app_facade
+        .list_peer_snapshots()
+        .await
+        .map_err(space_error)?;
+    let mut devices = Vec::with_capacity(entries.len() + 1);
+    let mut has_local = false;
+    for entry in entries {
+        if entry.is_local {
+            has_local = true;
+        }
+        let channel = if entry.is_local {
+            "direct".to_string()
+        } else {
+            peer_snapshots
+                .iter()
+                .find(|snapshot| snapshot.peer_id == entry.device_id.as_str())
+                .map(|snapshot| connection_channel_to_wire(snapshot.channel).to_string())
+                .unwrap_or_else(|| "unknown".to_string())
+        };
+        devices.push(NativeSpaceDevice {
+            device_id: entry.device_id.to_string(),
+            device_name: entry.device_name,
+            device_type: if entry.is_local {
+                local_type.clone()
+            } else {
+                "unknown".to_string()
+            },
+            is_local: entry.is_local,
+            online: entry.is_local || entry.state == ReachabilityState::Online,
+            state: if entry.is_local {
+                "online".to_string()
+            } else {
+                reachability_name(entry.state)
+            },
+            channel,
+        });
+    }
+    if !has_local {
+        devices.insert(
+            0,
+            NativeSpaceDevice {
+                device_id: local.peer_id,
+                device_name: local.device_name,
+                device_type: local_type,
+                is_local: true,
+                online: true,
+                state: "online".to_string(),
+                channel: "direct".to_string(),
+            },
+        );
+    }
+    Ok(devices)
 }
 
 /// Start the embedded UniClipboard P2P node inside the HarmonyOS application
@@ -885,9 +1240,7 @@ pub async fn start_space_node(
             let background_active = SPACE_BACKGROUND_SYNC_ACTIVE.load(Ordering::Acquire);
             let periodic_force_verify = if background_active {
                 match last_background_verify {
-                    Some(last_verify) => {
-                        last_verify.elapsed() >= SPACE_BACKGROUND_VERIFY_INTERVAL
-                    }
+                    Some(last_verify) => last_verify.elapsed() >= SPACE_BACKGROUND_VERIFY_INTERVAL,
                     None => true,
                 }
             } else {
@@ -943,12 +1296,11 @@ pub async fn start_space_node(
             if notice.action != InboundAction::NewEntry {
                 continue;
             }
-            let (snapshot, blob_refs) = match
-                decode_v3_bytes_to_snapshot_and_blob_refs(notice.plaintext.as_ref())
-            {
-                Ok(decoded) => decoded,
-                Err(_) => continue,
-            };
+            let (snapshot, blob_refs) =
+                match decode_v3_bytes_to_snapshot_and_blob_refs(notice.plaintext.as_ref()) {
+                    Ok(decoded) => decoded,
+                    Err(_) => continue,
+                };
             if !blob_refs.is_empty() {
                 for blob_ref in blob_refs {
                     if blob_ref.representation_index.is_some() {
@@ -1030,7 +1382,8 @@ pub async fn start_space_node(
                     }
                     let transfer_id = u64::from_le_bytes(bytes[1..9].try_into().unwrap());
                     let chunk_index = u32::from_le_bytes(bytes[9..13].try_into().unwrap()) as usize;
-                    let chunk_count = u32::from_le_bytes(bytes[13..17].try_into().unwrap()) as usize;
+                    let chunk_count =
+                        u32::from_le_bytes(bytes[13..17].try_into().unwrap()) as usize;
                     let total_size = u64::from_le_bytes(bytes[17..25].try_into().unwrap()) as usize;
                     let name_len = u16::from_le_bytes(bytes[25..27].try_into().unwrap()) as usize;
                     let expected_chunk_count = total_size.div_ceil(SPACE_FILE_CHUNK_BYTES);
@@ -1070,15 +1423,16 @@ pub async fn start_space_node(
                         assemblies.retain(|_, assembly| {
                             now_ms.saturating_sub(assembly.updated_at_ms) < 5 * 60 * 1000
                         });
-                        let assembly = assemblies.entry(assembly_key.clone()).or_insert_with(|| {
-                            SpaceFileAssembly {
-                                file_name: file_name.clone(),
-                                total_size,
-                                chunks: vec![None; chunk_count],
-                                received_chunks: 0,
-                                updated_at_ms: now_ms,
-                            }
-                        });
+                        let assembly =
+                            assemblies.entry(assembly_key.clone()).or_insert_with(|| {
+                                SpaceFileAssembly {
+                                    file_name: file_name.clone(),
+                                    total_size,
+                                    chunks: vec![None; chunk_count],
+                                    received_chunks: 0,
+                                    updated_at_ms: now_ms,
+                                }
+                            });
                         if assembly.total_size != total_size
                             || assembly.chunks.len() != chunk_count
                             || assembly.file_name != file_name
@@ -1353,11 +1707,21 @@ pub async fn get_space_devices() -> Result<Vec<NativeSpaceDevice>> {
             .map(|runtime| runtime.app_facade.clone())
             .ok_or_else(|| Error::new(Status::GenericFailure, "space node has not been started"))?
     };
-    let local = app_facade.device.local_device_info().await.map_err(space_error)?;
+    let local = app_facade
+        .device
+        .local_device_info()
+        .await
+        .map_err(space_error)?;
     let local_type = current_local_device_type();
     let _ = set_known_device_type(local.peer_id.clone(), local_type.clone());
-    let entries = app_facade.list_roster_entries().await.map_err(space_error)?;
-    let peer_snapshots = app_facade.list_peer_snapshots().await.map_err(space_error)?;
+    let entries = app_facade
+        .list_roster_entries()
+        .await
+        .map_err(space_error)?;
+    let peer_snapshots = app_facade
+        .list_peer_snapshots()
+        .await
+        .map_err(space_error)?;
     let mut devices = Vec::with_capacity(entries.len() + 1);
     let mut has_local = false;
     let mut has_online_peer = false;
@@ -1439,7 +1803,10 @@ pub async fn get_space_member_sync_preferences(
 ) -> Result<NativeSpaceMemberSyncPreferences> {
     let trimmed = device_id.trim();
     if trimmed.is_empty() {
-        return Err(Error::new(Status::InvalidArg, "space device id is required"));
+        return Err(Error::new(
+            Status::InvalidArg,
+            "space device id is required",
+        ));
     }
     let member_roster = {
         let guard = space_runtime().lock().await;
@@ -1474,7 +1841,10 @@ pub async fn update_space_member_send_preferences(
 ) -> Result<NativeSpaceMemberSyncPreferences> {
     let trimmed = device_id.trim();
     if trimmed.is_empty() {
-        return Err(Error::new(Status::InvalidArg, "space device id is required"));
+        return Err(Error::new(
+            Status::InvalidArg,
+            "space device id is required",
+        ));
     }
     let member_roster = {
         let guard = space_runtime().lock().await;
@@ -1517,7 +1887,10 @@ pub async fn reset_space_member_sync_preferences(
 ) -> Result<NativeSpaceMemberSyncPreferences> {
     let trimmed = device_id.trim();
     if trimmed.is_empty() {
-        return Err(Error::new(Status::InvalidArg, "space device id is required"));
+        return Err(Error::new(
+            Status::InvalidArg,
+            "space device id is required",
+        ));
     }
     let member_roster = {
         let guard = space_runtime().lock().await;
@@ -1593,9 +1966,7 @@ pub async fn create_space(
         guard
             .as_ref()
             .map(|runtime| runtime.app_facade.clone())
-            .ok_or_else(|| {
-                Error::new(Status::GenericFailure, "space node has not been started")
-            })?
+            .ok_or_else(|| Error::new(Status::GenericFailure, "space node has not been started"))?
     };
     let result = app_facade
         .initialize_space(InitializeSpaceInput {
@@ -1619,9 +1990,7 @@ pub async fn issue_space_invitation() -> Result<NativeSpaceInvitation> {
         guard
             .as_ref()
             .map(|runtime| runtime.app_facade.clone())
-            .ok_or_else(|| {
-                Error::new(Status::GenericFailure, "space node has not been started")
-            })?
+            .ok_or_else(|| Error::new(Status::GenericFailure, "space node has not been started"))?
     };
     let result = app_facade
         .issue_pairing_invitation()
@@ -1652,9 +2021,7 @@ pub async fn join_space(
         guard
             .as_ref()
             .map(|runtime| runtime.app_facade.clone())
-            .ok_or_else(|| {
-                Error::new(Status::GenericFailure, "space node has not been started")
-            })?
+            .ok_or_else(|| Error::new(Status::GenericFailure, "space node has not been started"))?
     };
     app_facade
         .set_device_name(name)
@@ -1692,9 +2059,7 @@ pub async fn switch_space(
         guard
             .as_ref()
             .map(|runtime| runtime.app_facade.clone())
-            .ok_or_else(|| {
-                Error::new(Status::GenericFailure, "space node has not been started")
-            })?
+            .ok_or_else(|| Error::new(Status::GenericFailure, "space node has not been started"))?
     };
     let result = app_facade
         .switch_space(SwitchSpaceInput {
@@ -1737,9 +2102,7 @@ pub async fn replace_space(
         guard
             .as_ref()
             .map(|runtime| runtime.app_facade.clone())
-            .ok_or_else(|| {
-                Error::new(Status::GenericFailure, "space node has not been started")
-            })?
+            .ok_or_else(|| Error::new(Status::GenericFailure, "space node has not been started"))?
     };
 
     // Snapshot peer ids before reset. The local owner row is retained and
@@ -1781,7 +2144,8 @@ pub async fn replace_space(
 
 /// Dispatch UTF-8 text through the joined UniClipboard space. The return
 /// value is the number of online peers that accepted the encrypted frame.
-async fn send_space_text_with_filter(
+async fn dispatch_space_text_with_filter(
+    app_facade: Arc<uc_application::facade::AppFacade>,
     text: String,
     target_filter: Option<Vec<DeviceId>>,
 ) -> Result<u32> {
@@ -1794,13 +2158,6 @@ async fn send_space_text_with_filter(
             "clipboard text exceeds the 1 MiB inline limit",
         ));
     }
-    let app_facade = {
-        let guard = space_runtime().lock().await;
-        guard
-            .as_ref()
-            .map(|runtime| runtime.app_facade.clone())
-            .ok_or_else(|| Error::new(Status::GenericFailure, "space node has not been started"))?
-    };
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(space_error)?
@@ -1809,10 +2166,7 @@ async fn send_space_text_with_filter(
     // Presence is intentionally cached by the core dispatch path. Refresh it
     // for an explicit user send so a peer that came online after app startup
     // is dialed before the online-only fan-out selects its targets.
-    app_facade
-        .refresh_presence()
-        .await
-        .map_err(space_error)?;
+    app_facade.refresh_presence().await.map_err(space_error)?;
     let snapshot = SystemClipboardSnapshot {
         ts_ms: now_ms,
         representations: vec![ObservedClipboardRepresentation::new(
@@ -1825,14 +2179,24 @@ async fn send_space_text_with_filter(
         file_set_v1_component: None,
     };
     let outcome = app_facade
-        .dispatch_clipboard_snapshot(
-            snapshot,
-            ClipboardChangeOrigin::LocalCapture,
-            target_filter,
-        )
+        .dispatch_clipboard_snapshot(snapshot, ClipboardChangeOrigin::LocalCapture, target_filter)
         .await
         .map_err(space_error)?;
     Ok(outcome.total_accepted.min(u32::MAX as usize) as u32)
+}
+
+async fn send_space_text_with_filter(
+    text: String,
+    target_filter: Option<Vec<DeviceId>>,
+) -> Result<u32> {
+    let app_facade = {
+        let guard = space_runtime().lock().await;
+        guard
+            .as_ref()
+            .map(|runtime| runtime.app_facade.clone())
+            .ok_or_else(|| Error::new(Status::GenericFailure, "space node has not been started"))?
+    };
+    dispatch_space_text_with_filter(app_facade, text, target_filter).await
 }
 
 #[napi]
@@ -1844,7 +2208,10 @@ pub async fn send_space_text(text: String) -> Result<u32> {
 pub async fn send_space_text_to_device(text: String, device_id: String) -> Result<u32> {
     let target = device_id.trim();
     if target.is_empty() {
-        return Err(Error::new(Status::InvalidArg, "target device id is required"));
+        return Err(Error::new(
+            Status::InvalidArg,
+            "target device id is required",
+        ));
     }
     send_space_text_with_filter(text, Some(vec![DeviceId::new(target)])).await
 }
@@ -1857,7 +2224,10 @@ async fn send_space_image_with_filter(
     target_filter: Option<Vec<DeviceId>>,
 ) -> Result<u32> {
     if data.is_empty() {
-        return Err(Error::new(Status::InvalidArg, "clipboard image is required"));
+        return Err(Error::new(
+            Status::InvalidArg,
+            "clipboard image is required",
+        ));
     }
     if data.len() > MAX_SPACE_IMAGE_BYTES {
         return Err(Error::new(
@@ -1867,7 +2237,10 @@ async fn send_space_image_with_filter(
     }
     let normalized_mime = mime_type.trim().to_ascii_lowercase();
     if normalized_mime != "image/jpeg" && normalized_mime != "image/png" {
-        return Err(Error::new(Status::InvalidArg, "unsupported clipboard image type"));
+        return Err(Error::new(
+            Status::InvalidArg,
+            "unsupported clipboard image type",
+        ));
     }
     let app_facade = {
         let guard = space_runtime().lock().await;
@@ -1881,10 +2254,7 @@ async fn send_space_image_with_filter(
         .map_err(space_error)?
         .as_millis()
         .min(i64::MAX as u128) as i64;
-    app_facade
-        .refresh_presence()
-        .await
-        .map_err(space_error)?;
+    app_facade.refresh_presence().await.map_err(space_error)?;
     let snapshot = SystemClipboardSnapshot {
         ts_ms: now_ms,
         representations: vec![ObservedClipboardRepresentation::new(
@@ -1897,11 +2267,7 @@ async fn send_space_image_with_filter(
         file_set_v1_component: None,
     };
     let outcome = app_facade
-        .dispatch_clipboard_snapshot(
-            snapshot,
-            ClipboardChangeOrigin::LocalCapture,
-            target_filter,
-        )
+        .dispatch_clipboard_snapshot(snapshot, ClipboardChangeOrigin::LocalCapture, target_filter)
         .await
         .map_err(space_error)?;
     Ok(outcome.total_accepted.min(u32::MAX as usize) as u32)
@@ -1920,7 +2286,10 @@ pub async fn send_space_image_to_device(
 ) -> Result<u32> {
     let target = device_id.trim();
     if target.is_empty() {
-        return Err(Error::new(Status::InvalidArg, "target device id is required"));
+        return Err(Error::new(
+            Status::InvalidArg,
+            "target device id is required",
+        ));
     }
     send_space_image_with_filter(data, mime_type, Some(vec![DeviceId::new(target)])).await
 }
@@ -1944,7 +2313,10 @@ pub async fn send_space_file(data: Uint8Array, file_name: String) -> Result<u32>
     }
     let chunk_count = data.len().div_ceil(SPACE_FILE_CHUNK_BYTES);
     if chunk_count > 128 {
-        return Err(Error::new(Status::InvalidArg, "file requires too many chunks"));
+        return Err(Error::new(
+            Status::InvalidArg,
+            "file requires too many chunks",
+        ));
     }
     let app_facade = {
         let guard = space_runtime().lock().await;
@@ -1966,7 +2338,8 @@ pub async fn send_space_file(data: Uint8Array, file_name: String) -> Result<u32>
         let chunk_start = chunk_index * SPACE_FILE_CHUNK_BYTES;
         let chunk_end = (chunk_start + SPACE_FILE_CHUNK_BYTES).min(data.len());
         let chunk = &data.as_ref()[chunk_start..chunk_end];
-        let mut payload = Vec::with_capacity(SPACE_FILE_HEADER_BYTES + name_bytes.len() + chunk.len());
+        let mut payload =
+            Vec::with_capacity(SPACE_FILE_HEADER_BYTES + name_bytes.len() + chunk.len());
         payload.push(1);
         payload.extend_from_slice(&transfer_id.to_le_bytes());
         payload.extend_from_slice(&(chunk_index as u32).to_le_bytes());
@@ -2009,11 +2382,17 @@ async fn send_space_file_from_fd_with_filter(
     target_filter: Option<Vec<DeviceId>>,
 ) -> Result<NativeSpaceFileSendResult> {
     if fd < 0 || !file_size.is_finite() || file_size <= 0.0 {
-        return Err(Error::new(Status::InvalidArg, "valid non-empty file is required"));
+        return Err(Error::new(
+            Status::InvalidArg,
+            "valid non-empty file is required",
+        ));
     }
     let normalized_name = file_name.trim();
     if normalized_name.is_empty() {
-        return Err(Error::new(Status::InvalidArg, "valid file name is required"));
+        return Err(Error::new(
+            Status::InvalidArg,
+            "valid file name is required",
+        ));
     }
     let app_facade = {
         let guard = space_runtime().lock().await;
@@ -2095,22 +2474,23 @@ pub async fn send_space_file_from_fd_to_device(
 ) -> Result<NativeSpaceFileSendResult> {
     let target = device_id.trim();
     if target.is_empty() {
-        return Err(Error::new(Status::InvalidArg, "target device id is required"));
+        return Err(Error::new(
+            Status::InvalidArg,
+            "target device id is required",
+        ));
     }
-    send_space_file_from_fd_with_filter(
-        fd,
-        file_size,
-        file_name,
-        Some(vec![DeviceId::new(target)]),
-    )
-    .await
+    send_space_file_from_fd_with_filter(fd, file_size, file_name, Some(vec![DeviceId::new(target)]))
+        .await
 }
 
 /// Stream a materialized received file into an open HarmonyOS save target.
 #[napi]
 pub async fn copy_space_file_to_fd(source_path: String, target_fd: i32) -> Result<()> {
     if source_path.trim().is_empty() || target_fd < 0 {
-        return Err(Error::new(Status::InvalidArg, "source path and target fd are required"));
+        return Err(Error::new(
+            Status::InvalidArg,
+            "source path and target fd are required",
+        ));
     }
     tokio::task::spawn_blocking(move || -> std::io::Result<()> {
         let mut source = std::fs::File::open(source_path)?;
@@ -2200,6 +2580,86 @@ pub fn drain_space_file_status_events() -> Vec<NativeSpaceFileStatusEvent> {
         .collect()
 }
 
+fn validated_profile_id(profile_id: &str) -> Result<ProfileId> {
+    let profile_id = profile_id.trim();
+    CliAppRuntimeProfileConfig::namespace_for_profile(profile_id)
+        .map_err(|error| Error::new(Status::InvalidArg, error.to_string()))?;
+    Ok(ProfileId::from(profile_id))
+}
+
+/// Drain text events owned by one supervisor profile slot. This never falls
+/// back to the legacy process-global event queue.
+#[napi]
+pub fn drain_space_text_events_for_profile(
+    profile_id: String,
+) -> Result<Vec<NativeSpaceTextEvent>> {
+    let profile_id = validated_profile_id(&profile_id)?;
+    Ok(profile_space_supervisor()
+        .drain_text_events(&profile_id)
+        .into_iter()
+        .map(|event| NativeSpaceTextEvent {
+            text: event.text,
+            from_device_id: event.from_device_id,
+            snapshot_hash: event.snapshot_hash,
+        })
+        .collect())
+}
+
+/// Drain image events owned by one supervisor profile slot.
+#[napi]
+pub fn drain_space_image_events_for_profile(
+    profile_id: String,
+) -> Result<Vec<NativeSpaceImageEvent>> {
+    let profile_id = validated_profile_id(&profile_id)?;
+    Ok(profile_space_supervisor()
+        .drain_image_events(&profile_id)
+        .into_iter()
+        .map(|event| NativeSpaceImageEvent {
+            data: event.data.into(),
+            mime_type: event.mime_type,
+            from_device_id: event.from_device_id,
+            snapshot_hash: event.snapshot_hash,
+        })
+        .collect())
+}
+
+/// Drain file events owned by one supervisor profile slot.
+#[napi]
+pub fn drain_space_file_events_for_profile(
+    profile_id: String,
+) -> Result<Vec<NativeSpaceFileEvent>> {
+    let profile_id = validated_profile_id(&profile_id)?;
+    Ok(profile_space_supervisor()
+        .drain_file_events(&profile_id)
+        .into_iter()
+        .map(|event| NativeSpaceFileEvent {
+            data: event.data.into(),
+            file_name: event.file_name,
+            from_device_id: event.from_device_id,
+            snapshot_hash: event.snapshot_hash,
+            local_path: event.local_path,
+            file_size: event.file_size as f64,
+        })
+        .collect())
+}
+
+/// Drain sender-side file status events owned by one supervisor profile slot.
+#[napi]
+pub fn drain_space_file_status_events_for_profile(
+    profile_id: String,
+) -> Result<Vec<NativeSpaceFileStatusEvent>> {
+    let profile_id = validated_profile_id(&profile_id)?;
+    Ok(profile_space_supervisor()
+        .drain_file_status_events(&profile_id)
+        .into_iter()
+        .map(|event| NativeSpaceFileStatusEvent {
+            transfer_id: event.transfer_id,
+            status: event.status,
+            reason: event.reason,
+        })
+        .collect())
+}
+
 #[napi]
 pub async fn stop_space_node() {
     mobile_sync_server::stop();
@@ -2287,7 +2747,9 @@ pub async fn get_mobile_sync_server_status() -> Result<NativeMobileSyncStatus> {
         .ok_or_else(|| Error::new(Status::GenericFailure, "mobile sync is unavailable"))?;
     let settings = facade.get_settings().await.map_err(mobile_sync_error)?;
     let port = settings.lan_port.unwrap_or(42720);
-    let urls = mobile_sync_urls(&facade, port).await.unwrap_or_else(|_| Vec::new());
+    let urls = mobile_sync_urls(&facade, port)
+        .await
+        .unwrap_or_else(|_| Vec::new());
     Ok(NativeMobileSyncStatus {
         enabled: settings.enabled,
         lan_listen_enabled: settings.lan_listen_enabled,
@@ -2299,7 +2761,10 @@ pub async fn get_mobile_sync_server_status() -> Result<NativeMobileSyncStatus> {
 
 /// Enable/disable the embedded SyncClipboard-compatible LAN HTTP server.
 #[napi]
-pub async fn set_mobile_sync_server_enabled(enabled: bool, port: u32) -> Result<NativeMobileSyncStatus> {
+pub async fn set_mobile_sync_server_enabled(
+    enabled: bool,
+    port: u32,
+) -> Result<NativeMobileSyncStatus> {
     if port == 0 || port > u32::from(u16::MAX) {
         return Err(Error::new(Status::InvalidArg, "port must be in 1..=65535"));
     }
@@ -2327,7 +2792,9 @@ pub async fn set_mobile_sync_server_enabled(enabled: bool, port: u32) -> Result<
     } else {
         mobile_sync_server::stop();
     }
-    let urls = mobile_sync_urls(&facade, port).await.unwrap_or_else(|_| Vec::new());
+    let urls = mobile_sync_urls(&facade, port)
+        .await
+        .unwrap_or_else(|_| Vec::new());
     Ok(NativeMobileSyncStatus {
         enabled,
         lan_listen_enabled: enabled,
@@ -2445,7 +2912,10 @@ pub async fn revoke_mobile_sync_device(device_id: String) -> Result<()> {
 #[napi]
 pub fn publish_mobile_sync_text(text: String) -> Result<String> {
     if mobile_sync_server::running_port() == 0 {
-        return Err(Error::new(Status::GenericFailure, "mobile sync server is not running"));
+        return Err(Error::new(
+            Status::GenericFailure,
+            "mobile sync server is not running",
+        ));
     }
     Ok(mobile_sync_server::publish_text(text))
 }
@@ -2453,7 +2923,10 @@ pub fn publish_mobile_sync_text(text: String) -> Result<String> {
 #[napi]
 pub fn publish_mobile_sync_image(data: Uint8Array, mime_type: String) -> Result<String> {
     if mobile_sync_server::running_port() == 0 {
-        return Err(Error::new(Status::GenericFailure, "mobile sync server is not running"));
+        return Err(Error::new(
+            Status::GenericFailure,
+            "mobile sync server is not running",
+        ));
     }
     Ok(mobile_sync_server::publish_data(
         "image",
@@ -2472,19 +2945,27 @@ pub fn publish_mobile_sync_file_from_fd(
     mime_type: String,
 ) -> Result<String> {
     if mobile_sync_server::running_port() == 0 {
-        return Err(Error::new(Status::GenericFailure, "mobile sync server is not running"));
+        return Err(Error::new(
+            Status::GenericFailure,
+            "mobile sync server is not running",
+        ));
     }
     if file_size <= 0.0 || file_size > (64 * 1024 * 1024) as f64 {
-        return Err(Error::new(Status::InvalidArg, "file must be between 1 byte and 64 MiB"));
+        return Err(Error::new(
+            Status::InvalidArg,
+            "file must be between 1 byte and 64 MiB",
+        ));
     }
-    let mut file = std::fs::File::open(format!("/proc/self/fd/{fd}"))
-        .map_err(mobile_sync_error)?;
+    let mut file = std::fs::File::open(format!("/proc/self/fd/{fd}")).map_err(mobile_sync_error)?;
     let mut data = Vec::with_capacity(file_size as usize);
     file.take(file_size as u64)
         .read_to_end(&mut data)
         .map_err(mobile_sync_error)?;
     if data.len() != file_size as usize {
-        return Err(Error::new(Status::GenericFailure, "selected file changed while reading"));
+        return Err(Error::new(
+            Status::GenericFailure,
+            "selected file changed while reading",
+        ));
     }
     Ok(mobile_sync_server::publish_data(
         "file",
@@ -2635,7 +3116,10 @@ pub async fn put_file_from_fd(
     file_name: String,
 ) -> Result<Option<String>> {
     if fd < 0 || !file_size.is_finite() || file_size <= 0.0 {
-        return Err(Error::new(Status::InvalidArg, "valid non-empty file is required"));
+        return Err(Error::new(
+            Status::InvalidArg,
+            "valid non-empty file is required",
+        ));
     }
     if file_size > MAX_SPACE_FILE_BYTES as f64 {
         return Err(Error::new(
@@ -2645,7 +3129,10 @@ pub async fn put_file_from_fd(
     }
     let normalized_name = file_name.trim();
     if normalized_name.is_empty() {
-        return Err(Error::new(Status::InvalidArg, "valid file name is required"));
+        return Err(Error::new(
+            Status::InvalidArg,
+            "valid file name is required",
+        ));
     }
 
     let fd_path = std::path::PathBuf::from(format!("/proc/self/fd/{fd}"));
@@ -2929,6 +3416,51 @@ pub async fn delete_history(
         },
     )
     .await
+}
+
+#[cfg(test)]
+mod profile_api_contract_tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    #[test]
+    fn profile_scoped_start_stop_status_exports_exist() {
+        let _ = start_space_node_for_profile;
+        let _ = stop_space_node_for_profile;
+        let _ = get_space_status_for_profile;
+        let _ = issue_space_invitation_for_profile;
+        let _ = join_space_for_profile;
+        let _ = send_space_text_for_profile;
+        let _ = get_space_devices_for_profile;
+        let _ = drain_space_text_events_for_profile;
+        let _ = drain_space_image_events_for_profile;
+        let _ = drain_space_file_events_for_profile;
+        let _ = drain_space_file_status_events_for_profile;
+    }
+
+    #[test]
+    fn production_factory_config_is_explicit_and_canonical() {
+        let root = std::env::temp_dir().join("uc-native-profile-factory");
+        let data_root = root.join("data");
+        let cache_root = root.join("cache");
+        let config = build_profile_runtime_config(
+            "profile-a",
+            data_root.to_string_lossy().as_ref(),
+            cache_root.to_string_lossy().as_ref(),
+            "phone",
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.profile_id,
+            uc_core::ids::ProfileId::from("profile-a")
+        );
+        assert_eq!(config.data_root, PathBuf::from(data_root));
+        assert_eq!(config.cache_root, PathBuf::from(cache_root));
+        assert_eq!(config.namespace, "harmony-profile-a");
+        assert_eq!(config.device_type, "phone");
+    }
 }
 
 async fn patch_history(

@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use uc_application::facade::AppFacade;
 use uc_core::ids::ProfileId;
 
 use crate::{
@@ -12,6 +13,8 @@ use crate::{
 };
 
 pub(crate) type SpaceRuntimeFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
+pub(crate) type SpaceRuntimeFailureCallback =
+    Arc<dyn Fn(SpaceRuntimeFailureCategory) -> SpaceRuntimeFuture<bool> + Send + Sync>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SpaceRuntimeProfileConfig {
@@ -19,6 +22,7 @@ pub(crate) struct SpaceRuntimeProfileConfig {
     pub(crate) data_root: PathBuf,
     pub(crate) cache_root: PathBuf,
     pub(crate) namespace: String,
+    pub(crate) device_type: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,10 +31,19 @@ pub(crate) enum SpaceRuntimeFailureCategory {
     Runtime,
     Storage,
     Network,
+    ProfileConflict,
     Superseded,
 }
 
 pub(crate) trait SupervisedSpaceRuntime: Send {
+    fn app_facade(&self) -> Option<Arc<AppFacade>> {
+        None
+    }
+
+    fn device_type(&self) -> Option<String> {
+        None
+    }
+
     fn shutdown(self: Box<Self>) -> SpaceRuntimeFuture<()>;
 }
 
@@ -38,6 +51,8 @@ pub(crate) trait SpaceRuntimeFactory: Send + Sync {
     fn create(
         &self,
         config: SpaceRuntimeProfileConfig,
+        generation: u64,
+        report_failure: SpaceRuntimeFailureCallback,
     ) -> SpaceRuntimeFuture<Result<Box<dyn SupervisedSpaceRuntime>, SpaceRuntimeFailureCategory>>;
 }
 
@@ -78,6 +93,7 @@ pub(crate) struct SpaceRuntimeStartError {
 }
 
 pub(crate) struct SpaceRuntimeSlot {
+    profile_config: SpaceRuntimeProfileConfig,
     generation: u64,
     lifecycle: SpaceRuntimeLifecycle,
     last_failure: Option<SpaceRuntimeFailureCategory>,
@@ -102,8 +118,9 @@ pub(crate) struct SpaceRuntimeSlot {
 }
 
 impl SpaceRuntimeSlot {
-    fn starting(generation: u64) -> Self {
+    fn starting(profile_config: SpaceRuntimeProfileConfig, generation: u64) -> Self {
         Self {
+            profile_config,
             generation,
             lifecycle: SpaceRuntimeLifecycle::Starting,
             last_failure: None,
@@ -202,21 +219,38 @@ enum SpaceRuntimeStopAction {
 }
 
 impl SpaceRuntimeSupervisor {
-    pub(crate) fn new(factory: Arc<dyn SpaceRuntimeFactory>) -> Self {
-        Self {
+    pub(crate) fn new(factory: Arc<dyn SpaceRuntimeFactory>) -> Arc<Self> {
+        Arc::new(Self {
             factory,
             slots: Mutex::new(HashMap::new()),
-        }
+        })
     }
 
     pub(crate) async fn start(
-        &self,
+        self: &Arc<Self>,
         config: SpaceRuntimeProfileConfig,
     ) -> Result<SpaceRuntimeStart, SpaceRuntimeStartError> {
         let profile_id = config.profile_id.clone();
         let generation = {
             let mut slots = self.lock_slots();
+            if slots.iter().any(|(registered_profile_id, slot)| {
+                registered_profile_id != &profile_id
+                    && profile_configs_overlap(&config, &slot.profile_config)
+            }) {
+                return Err(SpaceRuntimeStartError {
+                    profile_id,
+                    generation: 0,
+                    category: SpaceRuntimeFailureCategory::ProfileConflict,
+                });
+            }
             match slots.get_mut(&profile_id) {
+                Some(slot) if slot.profile_config != config => {
+                    return Err(SpaceRuntimeStartError {
+                        profile_id,
+                        generation: slot.generation,
+                        category: SpaceRuntimeFailureCategory::ProfileConflict,
+                    });
+                }
                 Some(slot)
                     if matches!(
                         slot.lifecycle,
@@ -233,13 +267,37 @@ impl SpaceRuntimeSupervisor {
                 Some(slot) => slot.begin_start(),
                 None => {
                     let generation = 1;
-                    slots.insert(profile_id.clone(), SpaceRuntimeSlot::starting(generation));
+                    slots.insert(
+                        profile_id.clone(),
+                        SpaceRuntimeSlot::starting(config.clone(), generation),
+                    );
                     generation
                 }
             }
         };
 
-        match self.factory.create(config).await {
+        let weak_supervisor = Arc::downgrade(self);
+        let callback_profile_id = profile_id.clone();
+        let report_failure: SpaceRuntimeFailureCallback = Arc::new(move |category| {
+            let weak_supervisor = weak_supervisor.clone();
+            let profile_id = callback_profile_id.clone();
+            Box::pin(async move {
+                match weak_supervisor.upgrade() {
+                    Some(supervisor) => {
+                        supervisor
+                            .report_failure(&profile_id, generation, category)
+                            .await
+                    }
+                    None => false,
+                }
+            })
+        });
+
+        match self
+            .factory
+            .create(config, generation, report_failure)
+            .await
+        {
             Ok(runtime) => {
                 let mut runtime = Some(runtime);
                 let committed = {
@@ -427,6 +485,76 @@ impl SpaceRuntimeSupervisor {
             .map(|slot| slot.status(profile_id.clone()))
     }
 
+    pub(crate) fn app_facade(&self, profile_id: &ProfileId) -> Option<Arc<AppFacade>> {
+        let slots = self.lock_slots();
+        let slot = slots.get(profile_id)?;
+        if slot.lifecycle != SpaceRuntimeLifecycle::Running {
+            return None;
+        }
+        slot.runtime.as_ref()?.app_facade()
+    }
+
+    pub(crate) fn device_type(&self, profile_id: &ProfileId) -> Option<String> {
+        let slots = self.lock_slots();
+        let slot = slots.get(profile_id)?;
+        if slot.lifecycle != SpaceRuntimeLifecycle::Running {
+            return None;
+        }
+        slot.runtime.as_ref()?.device_type()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn enqueue_text_event(
+        &self,
+        profile_id: &ProfileId,
+        generation: u64,
+        event: SpaceTextEventData,
+    ) -> bool {
+        let mut slots = self.lock_slots();
+        let Some(slot) = slots.get_mut(profile_id) else {
+            return false;
+        };
+        if slot.generation != generation || slot.lifecycle != SpaceRuntimeLifecycle::Running {
+            return false;
+        }
+        if slot.text_events.len() >= crate::MAX_PENDING_SPACE_EVENTS {
+            slot.text_events.pop_front();
+        }
+        slot.text_events.push_back(event);
+        true
+    }
+
+    pub(crate) fn drain_text_events(&self, profile_id: &ProfileId) -> Vec<SpaceTextEventData> {
+        self.lock_slots()
+            .get_mut(profile_id)
+            .map(|slot| slot.text_events.drain(..).collect())
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn drain_image_events(&self, profile_id: &ProfileId) -> Vec<SpaceImageEventData> {
+        self.lock_slots()
+            .get_mut(profile_id)
+            .map(|slot| slot.image_events.drain(..).collect())
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn drain_file_events(&self, profile_id: &ProfileId) -> Vec<SpaceFileEventData> {
+        self.lock_slots()
+            .get_mut(profile_id)
+            .map(|slot| slot.file_events.drain(..).collect())
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn drain_file_status_events(
+        &self,
+        profile_id: &ProfileId,
+    ) -> Vec<SpaceFileStatusEventData> {
+        self.lock_slots()
+            .get_mut(profile_id)
+            .map(|slot| slot.file_status_events.drain(..).collect())
+            .unwrap_or_default()
+    }
+
     fn finish_pending_start(&self, profile_id: &ProfileId, generation: u64) {
         let notify = {
             let mut slots = self.lock_slots();
@@ -528,6 +656,39 @@ impl SpaceRuntimeSupervisor {
     }
 }
 
+fn profile_configs_overlap(
+    candidate: &SpaceRuntimeProfileConfig,
+    registered: &SpaceRuntimeProfileConfig,
+) -> bool {
+    if candidate.namespace == registered.namespace {
+        return true;
+    }
+    let candidate_roots = [&candidate.data_root, &candidate.cache_root];
+    let registered_roots = [&registered.data_root, &registered.cache_root];
+    candidate_roots.iter().any(|candidate_root| {
+        registered_roots
+            .iter()
+            .any(|registered_root| roots_overlap(candidate_root, registered_root))
+    })
+}
+
+#[cfg(windows)]
+fn roots_overlap(left: &std::path::Path, right: &std::path::Path) -> bool {
+    let normalized = |path: &std::path::Path| {
+        path.components()
+            .map(|component| component.as_os_str().to_string_lossy().to_ascii_lowercase())
+            .collect::<Vec<_>>()
+    };
+    let left = normalized(left);
+    let right = normalized(right);
+    left.starts_with(&right) || right.starts_with(&left)
+}
+
+#[cfg(not(windows))]
+fn roots_overlap(left: &std::path::Path, right: &std::path::Path) -> bool {
+    left.starts_with(right) || right.starts_with(left)
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -537,10 +698,12 @@ mod tests {
 
     use uc_core::ids::ProfileId;
 
+    use crate::SpaceTextEventData;
+
     use super::{
-        SpaceRuntimeFactory, SpaceRuntimeFailureCategory, SpaceRuntimeFuture,
-        SpaceRuntimeLifecycle, SpaceRuntimeProfileConfig, SpaceRuntimeStartDisposition,
-        SpaceRuntimeSupervisor, SupervisedSpaceRuntime,
+        SpaceRuntimeFactory, SpaceRuntimeFailureCallback, SpaceRuntimeFailureCategory,
+        SpaceRuntimeFuture, SpaceRuntimeLifecycle, SpaceRuntimeProfileConfig,
+        SpaceRuntimeStartDisposition, SpaceRuntimeSupervisor, SupervisedSpaceRuntime,
     };
 
     #[derive(Default)]
@@ -589,6 +752,8 @@ mod tests {
         fn create(
             &self,
             config: SpaceRuntimeProfileConfig,
+            _generation: u64,
+            _report_failure: SpaceRuntimeFailureCallback,
         ) -> SpaceRuntimeFuture<Result<Box<dyn SupervisedSpaceRuntime>, SpaceRuntimeFailureCategory>>
         {
             self.created.lock().unwrap().push(config.clone());
@@ -612,12 +777,38 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct CallbackCapturingFactory {
+        callbacks: Mutex<Vec<SpaceRuntimeFailureCallback>>,
+        stopped: Arc<Mutex<Vec<ProfileId>>>,
+    }
+
+    impl SpaceRuntimeFactory for CallbackCapturingFactory {
+        fn create(
+            &self,
+            config: SpaceRuntimeProfileConfig,
+            _generation: u64,
+            report_failure: SpaceRuntimeFailureCallback,
+        ) -> SpaceRuntimeFuture<Result<Box<dyn SupervisedSpaceRuntime>, SpaceRuntimeFailureCategory>>
+        {
+            self.callbacks.lock().unwrap().push(report_failure);
+            let stopped = Arc::clone(&self.stopped);
+            Box::pin(async move {
+                Ok(Box::new(FakeRuntime {
+                    profile_id: config.profile_id,
+                    stopped,
+                }) as Box<dyn SupervisedSpaceRuntime>)
+            })
+        }
+    }
+
     fn config(value: &str) -> SpaceRuntimeProfileConfig {
         SpaceRuntimeProfileConfig {
             profile_id: ProfileId::from(value),
             data_root: PathBuf::from(format!("data/{value}")),
             cache_root: PathBuf::from(format!("cache/{value}")),
             namespace: format!("namespace-{value}"),
+            device_type: "phone".to_string(),
         }
     }
 
@@ -632,7 +823,7 @@ mod tests {
     #[test]
     fn two_profiles_can_start_simultaneously() {
         let factory = Arc::new(FakeRuntimeFactory::default());
-        let supervisor = Arc::new(SpaceRuntimeSupervisor::new(factory));
+        let supervisor = SpaceRuntimeSupervisor::new(factory);
         let config_a = config("profile-a");
         let config_b = config("profile-b");
         let profile_a = config_a.profile_id.clone();
@@ -718,6 +909,109 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_profile_with_different_explicit_roots_is_rejected() {
+        let factory = Arc::new(FakeRuntimeFactory::default());
+        let supervisor = SpaceRuntimeSupervisor::new(factory.clone());
+        let first = config("profile-a");
+        let profile_id = first.profile_id.clone();
+        let mut conflicting = first.clone();
+        conflicting.data_root = PathBuf::from("data/other-profile-a");
+
+        let error = run(async {
+            supervisor.start(first).await.unwrap();
+            supervisor.start(conflicting).await.unwrap_err()
+        });
+
+        assert_eq!(error.profile_id, profile_id);
+        assert_eq!(error.category, SpaceRuntimeFailureCategory::ProfileConflict);
+        assert_eq!(factory.created_count(&profile_id), 1);
+    }
+
+    #[test]
+    fn different_profiles_cannot_share_or_nest_storage_roots() {
+        let factory = Arc::new(FakeRuntimeFactory::default());
+        let supervisor = SpaceRuntimeSupervisor::new(factory.clone());
+        let first = config("profile-a");
+        let first_profile_id = first.profile_id.clone();
+        let mut conflicting = config("profile-b");
+        let conflicting_profile_id = conflicting.profile_id.clone();
+        conflicting.data_root = first.data_root.join("nested");
+
+        let error = run(async {
+            supervisor.start(first).await.unwrap();
+            supervisor.start(conflicting).await.unwrap_err()
+        });
+
+        assert_eq!(error.profile_id, conflicting_profile_id.clone());
+        assert_eq!(error.category, SpaceRuntimeFailureCategory::ProfileConflict);
+        assert_eq!(factory.created_count(&first_profile_id), 1);
+        assert_eq!(factory.created_count(&conflicting_profile_id), 0);
+    }
+
+    #[test]
+    fn factory_failure_callback_is_bound_to_its_runtime_generation() {
+        let factory = Arc::new(CallbackCapturingFactory::default());
+        let supervisor = SpaceRuntimeSupervisor::new(factory.clone());
+        let profile_config = config("profile-a");
+        let profile_id = profile_config.profile_id.clone();
+
+        run(async {
+            let first = supervisor.start(profile_config.clone()).await.unwrap();
+            assert_eq!(first.status.generation, 1);
+            let first_callback = factory.callbacks.lock().unwrap()[0].clone();
+
+            supervisor.stop(&profile_id).await.unwrap();
+            let restarted = supervisor.start(profile_config).await.unwrap();
+            assert_eq!(restarted.status.generation, 3);
+
+            assert!(!(first_callback)(SpaceRuntimeFailureCategory::Runtime).await);
+            let status = supervisor.status(&profile_id).unwrap();
+            assert_eq!(status.lifecycle, SpaceRuntimeLifecycle::Running);
+            assert_eq!(status.generation, 3);
+            assert_eq!(status.last_failure, None);
+        });
+    }
+
+    #[test]
+    fn profile_event_queues_are_generation_bound_and_isolated() {
+        let factory = Arc::new(FakeRuntimeFactory::default());
+        let supervisor = SpaceRuntimeSupervisor::new(factory);
+        let config_a = config("profile-a");
+        let config_b = config("profile-b");
+        let profile_a = config_a.profile_id.clone();
+        let profile_b = config_b.profile_id.clone();
+
+        run(async {
+            let started_a = supervisor.start(config_a).await.unwrap();
+            let started_b = supervisor.start(config_b).await.unwrap();
+            assert!(supervisor.enqueue_text_event(
+                &profile_a,
+                started_a.status.generation,
+                SpaceTextEventData {
+                    text: "from-a".to_string(),
+                    from_device_id: "device-a".to_string(),
+                    snapshot_hash: "hash-a".to_string(),
+                },
+            ));
+            assert!(!supervisor.enqueue_text_event(
+                &profile_b,
+                started_b.status.generation + 1,
+                SpaceTextEventData {
+                    text: "stale-b".to_string(),
+                    from_device_id: "device-b".to_string(),
+                    snapshot_hash: "hash-b".to_string(),
+                },
+            ));
+        });
+
+        let events_a = supervisor.drain_text_events(&profile_a);
+        assert_eq!(events_a.len(), 1);
+        assert_eq!(events_a[0].text, "from-a");
+        assert!(supervisor.drain_text_events(&profile_b).is_empty());
+        assert!(supervisor.drain_text_events(&profile_a).is_empty());
+    }
+
+    #[test]
     fn failed_start_records_error_only_on_its_profile() {
         let config_a = config("profile-a");
         let config_b = config("profile-b");
@@ -759,9 +1053,10 @@ mod review_tests {
     use uc_core::ids::ProfileId;
 
     use super::{
-        SpaceRuntimeFactory, SpaceRuntimeFailureCategory, SpaceRuntimeFuture,
-        SpaceRuntimeLifecycle, SpaceRuntimeProfileConfig, SpaceRuntimeStartDisposition,
-        SpaceRuntimeStatus, SpaceRuntimeSupervisor, SupervisedSpaceRuntime,
+        SpaceRuntimeFactory, SpaceRuntimeFailureCallback, SpaceRuntimeFailureCategory,
+        SpaceRuntimeFuture, SpaceRuntimeLifecycle, SpaceRuntimeProfileConfig,
+        SpaceRuntimeStartDisposition, SpaceRuntimeStatus, SpaceRuntimeSupervisor,
+        SupervisedSpaceRuntime,
     };
 
     #[derive(Clone)]
@@ -917,6 +1212,8 @@ mod review_tests {
         fn create(
             &self,
             config: SpaceRuntimeProfileConfig,
+            _generation: u64,
+            _report_failure: SpaceRuntimeFailureCallback,
         ) -> SpaceRuntimeFuture<Result<Box<dyn SupervisedSpaceRuntime>, SpaceRuntimeFailureCategory>>
         {
             self.created_configs.lock().unwrap().push(config.clone());
@@ -952,6 +1249,7 @@ mod review_tests {
             data_root: PathBuf::from(format!("data/{value}")),
             cache_root: PathBuf::from(format!("cache/{value}")),
             namespace: format!("namespace-{value}"),
+            device_type: "phone".to_string(),
         }
     }
 
@@ -988,7 +1286,7 @@ mod review_tests {
             StartScript::pending_success(profile_config.clone(), first_start_gate.clone()),
             StartScript::success(profile_config.clone()),
         ]));
-        let supervisor = Arc::new(SpaceRuntimeSupervisor::new(factory.clone()));
+        let supervisor = SpaceRuntimeSupervisor::new(factory.clone());
 
         run(async {
             let first_start = tokio::spawn({
@@ -1052,7 +1350,7 @@ mod review_tests {
             ),
             StartScript::success(profile_config.clone()),
         ]));
-        let supervisor = Arc::new(SpaceRuntimeSupervisor::new(factory));
+        let supervisor = SpaceRuntimeSupervisor::new(factory);
 
         run(async {
             let first_start = tokio::spawn({
@@ -1097,7 +1395,7 @@ mod review_tests {
             StartScript::success(profile_config.clone()).with_shutdown_gate(shutdown_gate.clone()),
             StartScript::success(profile_config.clone()),
         ]));
-        let supervisor = Arc::new(SpaceRuntimeSupervisor::new(factory.clone()));
+        let supervisor = SpaceRuntimeSupervisor::new(factory.clone());
 
         run(async {
             let first = supervisor.start(profile_config.clone()).await.unwrap();
@@ -1190,5 +1488,69 @@ mod review_tests {
         run(supervisor.start(profile_config.clone())).unwrap();
 
         assert_eq!(factory.created_configs(), vec![profile_config]);
+    }
+
+    struct ParallelCreateFactory {
+        entered: Arc<Barrier>,
+        release: Arc<Barrier>,
+    }
+
+    struct ParallelRuntime;
+
+    impl SupervisedSpaceRuntime for ParallelRuntime {
+        fn shutdown(self: Box<Self>) -> SpaceRuntimeFuture<()> {
+            Box::pin(async {})
+        }
+    }
+
+    impl SpaceRuntimeFactory for ParallelCreateFactory {
+        fn create(
+            &self,
+            _config: SpaceRuntimeProfileConfig,
+            generation: u64,
+            _report_failure: SpaceRuntimeFailureCallback,
+        ) -> SpaceRuntimeFuture<Result<Box<dyn SupervisedSpaceRuntime>, SpaceRuntimeFailureCategory>>
+        {
+            assert_eq!(generation, 1);
+            let entered = Arc::clone(&self.entered);
+            let release = Arc::clone(&self.release);
+            Box::pin(async move {
+                entered.wait().await;
+                release.wait().await;
+                Ok(Box::new(ParallelRuntime) as Box<dyn SupervisedSpaceRuntime>)
+            })
+        }
+    }
+
+    #[test]
+    fn two_profile_factory_creates_overlap_before_release() {
+        let entered = Arc::new(Barrier::new(3));
+        let release = Arc::new(Barrier::new(3));
+        let supervisor = SpaceRuntimeSupervisor::new(Arc::new(ParallelCreateFactory {
+            entered: Arc::clone(&entered),
+            release: Arc::clone(&release),
+        }));
+
+        run(async {
+            let start_a = tokio::spawn({
+                let supervisor = Arc::clone(&supervisor);
+                async move { supervisor.start(config("profile-a")).await }
+            });
+            let start_b = tokio::spawn({
+                let supervisor = Arc::clone(&supervisor);
+                async move { supervisor.start(config("profile-b")).await }
+            });
+
+            entered.wait().await;
+            release.wait().await;
+            assert_eq!(
+                start_a.await.unwrap().unwrap().disposition,
+                SpaceRuntimeStartDisposition::Started
+            );
+            assert_eq!(
+                start_b.await.unwrap().unwrap().disposition,
+                SpaceRuntimeStartDisposition::Started
+            );
+        });
     }
 }
