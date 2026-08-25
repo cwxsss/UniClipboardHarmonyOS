@@ -40,6 +40,7 @@ use crate::usecases::clipboard_sync::{
     encode_snapshot_to_v3_bytes, DispatchClipboardEntryInput, DispatchClipboardEntryUseCase,
     DispatchOutcome, DispatchPerTarget, DispatchSyncError, InboundAction as UcInboundAction,
     InboundClipboardNotice as UcInboundNotice, IngestInboundClipboardUseCase, IngestSpawnHandle,
+    InternalIngestWorkerExit, InternalIngestWorkerExitSubscription,
 };
 use uc_core::clipboard::ClipboardContentCategorySet;
 use uc_core::ports::clipboard::GetClipboardEntryPort;
@@ -181,6 +182,37 @@ pub struct IngestHandle {
 impl IngestHandle {
     pub fn abort(&self) {
         self.inner.abort();
+    }
+
+    pub fn subscribe_exit(&self) -> IngestWorkerExitSubscription {
+        IngestWorkerExitSubscription {
+            inner: self.inner.subscribe_exit(),
+        }
+    }
+
+    pub async fn shutdown(self) {
+        self.inner.shutdown().await;
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IngestWorkerExit {
+    Completed,
+    Cancelled,
+    Panicked,
+}
+
+pub struct IngestWorkerExitSubscription {
+    inner: InternalIngestWorkerExitSubscription,
+}
+
+impl IngestWorkerExitSubscription {
+    pub async fn recv(&mut self) -> Option<IngestWorkerExit> {
+        self.inner.recv().await.map(|exit| match exit {
+            InternalIngestWorkerExit::Completed => IngestWorkerExit::Completed,
+            InternalIngestWorkerExit::Cancelled => IngestWorkerExit::Cancelled,
+            InternalIngestWorkerExit::Panicked => IngestWorkerExit::Panicked,
+        })
     }
 }
 

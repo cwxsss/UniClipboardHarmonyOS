@@ -779,52 +779,24 @@ struct HarmonyRuntimeMonitor {
     task: tokio::task::JoinHandle<()>,
 }
 
-fn harmony_inbound_event_source(
-    mut subscription: uc_application::facade::InboundNoticeSubscription,
-) -> SpaceRuntimeFuture<SpaceRuntimeFailureCategory> {
-    Box::pin(async move {
-        loop {
-            match subscription.recv().await {
-                Ok(_) => {}
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                    return SpaceRuntimeFailureCategory::Runtime;
-                }
-            }
-        }
-    })
-}
-
-#[cfg(test)]
-fn controlled_harmony_event_source<T>(
-    mut receiver: tokio::sync::broadcast::Receiver<T>,
-) -> SpaceRuntimeFuture<SpaceRuntimeFailureCategory>
-where
-    T: Clone + Send + 'static,
-{
-    Box::pin(async move {
-        loop {
-            match receiver.recv().await {
-                Ok(_) => {}
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                    return SpaceRuntimeFailureCategory::Runtime;
-                }
-            }
-        }
-    })
-}
-
 impl HarmonyRuntimeMonitor {
-    fn spawn(
-        failure_source: SpaceRuntimeFuture<SpaceRuntimeFailureCategory>,
+    fn spawn_worker(
+        mut worker: tokio::task::JoinHandle<std::result::Result<(), SpaceRuntimeFailureCategory>>,
         report_failure: SpaceRuntimeFailureCallback,
     ) -> Self {
         let (cancel, cancelled) = tokio::sync::oneshot::channel();
         let task = tokio::spawn(async move {
             tokio::select! {
-                _ = cancelled => {}
-                category = failure_source => {
+                biased;
+                _ = cancelled => {
+                    worker.abort();
+                    let _ = worker.await;
+                }
+                outcome = &mut worker => {
+                    let category = match outcome {
+                        Ok(Err(category)) => category,
+                        Ok(Ok(())) | Err(_) => SpaceRuntimeFailureCategory::Runtime,
+                    };
                     // Run the callback outside this monitor task. The supervisor
                     // shuts down the runtime (and joins this task) while handling
                     // the report, so awaiting inline would self-join.
@@ -851,11 +823,26 @@ impl HarmonyRuntimeMonitor {
 struct HarmonyProfileRuntime {
     runtime: CliAppRuntime,
     _generation: u64,
-    monitor: HarmonyRuntimeMonitor,
+    monitor: Option<HarmonyRuntimeMonitor>,
+    monitor_worker:
+        Option<tokio::task::JoinHandle<std::result::Result<(), SpaceRuntimeFailureCategory>>>,
+    report_failure: Option<SpaceRuntimeFailureCallback>,
     device_type: String,
 }
 
 impl SupervisedSpaceRuntime for HarmonyProfileRuntime {
+    fn on_running(&mut self) {
+        let worker = self
+            .monitor_worker
+            .take()
+            .expect("Harmony runtime monitor worker activates exactly once");
+        let report_failure = self
+            .report_failure
+            .take()
+            .expect("Harmony runtime failure callback activates exactly once");
+        self.monitor = Some(HarmonyRuntimeMonitor::spawn_worker(worker, report_failure));
+    }
+
     fn app_facade(&self) -> Option<Arc<uc_application::facade::AppFacade>> {
         Some(Arc::clone(&self.runtime.app_facade))
     }
@@ -867,9 +854,17 @@ impl SupervisedSpaceRuntime for HarmonyProfileRuntime {
     fn shutdown(self: Box<Self>) -> SpaceRuntimeFuture<()> {
         Box::pin(async move {
             let Self {
-                runtime, monitor, ..
+                runtime,
+                monitor,
+                monitor_worker,
+                ..
             } = *self;
-            monitor.shutdown().await;
+            if let Some(monitor) = monitor {
+                monitor.shutdown().await;
+            } else if let Some(worker) = monitor_worker {
+                worker.abort();
+                let _ = worker.await;
+            }
             runtime.shutdown().await;
         })
     }
@@ -899,16 +894,19 @@ impl SpaceRuntimeFactory for HarmonyProfileRuntimeFactory {
                 .try_resume_session()
                 .await
                 .map_err(|_| SpaceRuntimeFailureCategory::Runtime)?;
-            let inbound_health = runtime
-                .app_facade
-                .subscribe_inbound_clipboard_notices()
-                .map_err(|_| SpaceRuntimeFailureCategory::Runtime)?;
-            let failure_source = harmony_inbound_event_source(inbound_health);
-            let monitor = HarmonyRuntimeMonitor::spawn(failure_source, report_failure);
+            let mut ingest_worker_exit = runtime
+                .subscribe_ingest_worker_exit()
+                .ok_or(SpaceRuntimeFailureCategory::Runtime)?;
+            let worker = tokio::spawn(async move {
+                let _ = ingest_worker_exit.recv().await;
+                Err(SpaceRuntimeFailureCategory::Runtime)
+            });
             Ok(Box::new(HarmonyProfileRuntime {
                 runtime,
                 _generation: generation,
-                monitor,
+                monitor: None,
+                monitor_worker: Some(worker),
+                report_failure: Some(report_failure),
                 device_type: config.device_type,
             }) as Box<dyn SupervisedSpaceRuntime>)
         })
@@ -3505,13 +3503,18 @@ mod profile_api_contract_tests {
 
     #[derive(Default)]
     struct ProductionMonitorTestFactory {
-        failure_senders: Mutex<Vec<tokio::sync::broadcast::Sender<()>>>,
+        worker_releases: Mutex<Vec<tokio::sync::oneshot::Sender<()>>>,
         callbacks: Mutex<Vec<SpaceRuntimeFailureCallback>>,
     }
 
     impl ProductionMonitorTestFactory {
-        fn close_event_source(&self, index: usize) {
-            drop(self.failure_senders.lock().unwrap().remove(index));
+        fn crash_worker(&self, index: usize) {
+            self.worker_releases
+                .lock()
+                .unwrap()
+                .remove(index)
+                .send(())
+                .unwrap();
         }
     }
 
@@ -3536,18 +3539,23 @@ mod profile_api_contract_tests {
         ) -> SpaceRuntimeFuture<
             std::result::Result<Box<dyn SupervisedSpaceRuntime>, SpaceRuntimeFailureCategory>,
         > {
-            let (failure_tx, failure_rx) = tokio::sync::broadcast::channel(1);
-            self.failure_senders.lock().unwrap().push(failure_tx);
+            let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+            self.worker_releases.lock().unwrap().push(release_tx);
             self.callbacks
                 .lock()
                 .unwrap()
                 .push(Arc::clone(&report_failure));
             Box::pin(async move {
+                let worker = tokio::spawn(async move {
+                    release_rx
+                        .await
+                        .expect("worker release sender must stay alive");
+                    panic!("simulated production worker panic");
+                    #[allow(unreachable_code)]
+                    Ok(())
+                });
                 Ok(Box::new(ProductionMonitoredTestRuntime {
-                    monitor: HarmonyRuntimeMonitor::spawn(
-                        controlled_harmony_event_source(failure_rx),
-                        report_failure,
-                    ),
+                    monitor: HarmonyRuntimeMonitor::spawn_worker(worker, report_failure),
                 }) as Box<dyn SupervisedSpaceRuntime>)
             })
         }
@@ -3638,7 +3646,7 @@ mod profile_api_contract_tests {
             .unwrap()
             .block_on(async {
                 supervisor.start(config).await.unwrap();
-                factory.close_event_source(0);
+                factory.crash_worker(0);
                 wait_for_lifecycle(&supervisor, &profile_id, SpaceRuntimeLifecycle::Failed).await;
                 assert_eq!(
                     supervisor.status(&profile_id).unwrap().last_failure,

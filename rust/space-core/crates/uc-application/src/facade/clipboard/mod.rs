@@ -12,7 +12,7 @@ mod facade;
 pub use facade::{
     ClipboardSyncDeps, ClipboardSyncError, ClipboardSyncFacade, DispatchEntryInput,
     DispatchEntryOutcome, DispatchEntryPerTarget, InboundAction, InboundNotice,
-    InboundNoticeSubscription, IngestHandle,
+    InboundNoticeSubscription, IngestHandle, IngestWorkerExit, IngestWorkerExitSubscription,
 };
 
 // 投递状态视图相关类型——外部 crate 通过 `ClipboardSyncFacade::get_entry_delivery_view`

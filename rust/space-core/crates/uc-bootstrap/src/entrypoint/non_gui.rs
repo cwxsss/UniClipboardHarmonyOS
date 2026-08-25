@@ -530,6 +530,14 @@ impl CliAppRuntime {
         &self.app_facade
     }
 
+    pub fn subscribe_ingest_worker_exit(
+        &self,
+    ) -> Option<uc_application::facade::IngestWorkerExitSubscription> {
+        self.sync_engine_assembly
+            .as_ref()
+            .map(|assembly| assembly.subscribe_ingest_worker_exit())
+    }
+
     pub async fn shutdown(mut self) {
         if let Some(assembly) = self.sync_engine_assembly.take() {
             assembly.shutdown().await;

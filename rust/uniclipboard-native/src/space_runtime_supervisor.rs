@@ -36,6 +36,8 @@ pub(crate) enum SpaceRuntimeFailureCategory {
 }
 
 pub(crate) trait SupervisedSpaceRuntime: Send {
+    fn on_running(&mut self) {}
+
     fn app_facade(&self) -> Option<Arc<AppFacade>> {
         None
     }
@@ -218,6 +220,17 @@ enum SpaceRuntimeStopAction {
     },
 }
 
+enum SpaceRuntimeStartAction {
+    Create {
+        generation: u64,
+    },
+    Wait {
+        generation: u64,
+        notify: Arc<tokio::sync::Notify>,
+    },
+    Existing(SpaceRuntimeStatus),
+}
+
 impl SpaceRuntimeSupervisor {
     pub(crate) fn new(factory: Arc<dyn SpaceRuntimeFactory>) -> Arc<Self> {
         Arc::new(Self {
@@ -231,7 +244,7 @@ impl SpaceRuntimeSupervisor {
         config: SpaceRuntimeProfileConfig,
     ) -> Result<SpaceRuntimeStart, SpaceRuntimeStartError> {
         let profile_id = config.profile_id.clone();
-        let generation = {
+        let action = {
             let mut slots = self.lock_slots();
             if slots.iter().any(|(registered_profile_id, slot)| {
                 registered_profile_id != &profile_id
@@ -251,28 +264,46 @@ impl SpaceRuntimeSupervisor {
                         category: SpaceRuntimeFailureCategory::ProfileConflict,
                     });
                 }
+                Some(slot) if slot.lifecycle == SpaceRuntimeLifecycle::Starting => {
+                    SpaceRuntimeStartAction::Wait {
+                        generation: slot.generation,
+                        notify: Arc::clone(&slot.lifecycle_notify),
+                    }
+                }
                 Some(slot)
                     if matches!(
                         slot.lifecycle,
-                        SpaceRuntimeLifecycle::Starting
-                            | SpaceRuntimeLifecycle::Running
-                            | SpaceRuntimeLifecycle::Stopping
+                        SpaceRuntimeLifecycle::Running | SpaceRuntimeLifecycle::Stopping
                     ) =>
                 {
-                    return Ok(SpaceRuntimeStart {
-                        disposition: SpaceRuntimeStartDisposition::Existing,
-                        status: slot.status(profile_id),
-                    });
+                    SpaceRuntimeStartAction::Existing(slot.status(profile_id.clone()))
                 }
-                Some(slot) => slot.begin_start(),
+                Some(slot) => SpaceRuntimeStartAction::Create {
+                    generation: slot.begin_start(),
+                },
                 None => {
                     let generation = 1;
                     slots.insert(
                         profile_id.clone(),
                         SpaceRuntimeSlot::starting(config.clone(), generation),
                     );
-                    generation
+                    SpaceRuntimeStartAction::Create { generation }
                 }
+            }
+        };
+
+        let generation = match action {
+            SpaceRuntimeStartAction::Create { generation } => generation,
+            SpaceRuntimeStartAction::Wait { generation, notify } => {
+                return self
+                    .wait_for_start_result(&profile_id, generation, &notify)
+                    .await;
+            }
+            SpaceRuntimeStartAction::Existing(status) => {
+                return Ok(SpaceRuntimeStart {
+                    disposition: SpaceRuntimeStartDisposition::Existing,
+                    status,
+                });
             }
         };
 
@@ -315,6 +346,10 @@ impl SpaceRuntimeSupervisor {
                         slot.pending_start_generation = None;
                         slot.lifecycle = SpaceRuntimeLifecycle::Running;
                         slot.last_failure = None;
+                        slot.runtime
+                            .as_mut()
+                            .expect("committed runtime must be present")
+                            .on_running();
                         Some((
                             slot.status(profile_id.clone()),
                             Arc::clone(&slot.lifecycle_notify),
@@ -570,6 +605,58 @@ impl SpaceRuntimeSupervisor {
         };
         if let Some(notify) = notify {
             notify.notify_waiters();
+        }
+    }
+
+    async fn wait_for_start_result(
+        &self,
+        profile_id: &ProfileId,
+        generation: u64,
+        notify: &Arc<tokio::sync::Notify>,
+    ) -> Result<SpaceRuntimeStart, SpaceRuntimeStartError> {
+        loop {
+            let notified = notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            let outcome = {
+                let slots = self.lock_slots();
+                let slot = slots
+                    .get(profile_id)
+                    .expect("waiting start slot must remain registered");
+                if slot.generation != generation {
+                    Some(Err(SpaceRuntimeStartError {
+                        profile_id: profile_id.clone(),
+                        generation,
+                        category: SpaceRuntimeFailureCategory::Superseded,
+                    }))
+                } else {
+                    match slot.lifecycle {
+                        SpaceRuntimeLifecycle::Starting => None,
+                        SpaceRuntimeLifecycle::Running => Some(Ok(SpaceRuntimeStart {
+                            disposition: SpaceRuntimeStartDisposition::Existing,
+                            status: slot.status(profile_id.clone()),
+                        })),
+                        SpaceRuntimeLifecycle::Failed => Some(Err(SpaceRuntimeStartError {
+                            profile_id: profile_id.clone(),
+                            generation,
+                            category: slot
+                                .last_failure
+                                .unwrap_or(SpaceRuntimeFailureCategory::Runtime),
+                        })),
+                        SpaceRuntimeLifecycle::Stopping | SpaceRuntimeLifecycle::Stopped => {
+                            Some(Err(SpaceRuntimeStartError {
+                                profile_id: profile_id.clone(),
+                                generation,
+                                category: SpaceRuntimeFailureCategory::Superseded,
+                            }))
+                        }
+                    }
+                }
+            };
+            if let Some(outcome) = outcome {
+                return outcome;
+            }
+            notified.await;
         }
     }
 
@@ -1401,6 +1488,91 @@ mod review_tests {
     }
 
     #[test]
+    fn concurrent_same_profile_start_waits_for_shared_success() {
+        let profile_config = config("profile-concurrent-success");
+        let profile_id = profile_config.profile_id.clone();
+        let start_gate = TestGate::new();
+        let factory = Arc::new(ScriptedRuntimeFactory::new(vec![
+            StartScript::pending_success(profile_config.clone(), start_gate.clone()),
+        ]));
+        let supervisor = SpaceRuntimeSupervisor::new(factory.clone());
+
+        run(async {
+            let first = tokio::spawn({
+                let supervisor = Arc::clone(&supervisor);
+                let config = profile_config.clone();
+                async move { supervisor.start(config).await }
+            });
+            start_gate.wait_until_entered().await;
+            let mut second = tokio::spawn({
+                let supervisor = Arc::clone(&supervisor);
+                let config = profile_config.clone();
+                async move { supervisor.start(config).await }
+            });
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_millis(50), &mut second)
+                    .await
+                    .is_err(),
+                "second start must await generation 1"
+            );
+
+            start_gate.release().await;
+            let first = first.await.unwrap().unwrap();
+            let second = second.await.unwrap().unwrap();
+            assert_eq!(first.disposition, SpaceRuntimeStartDisposition::Started);
+            assert_eq!(second.disposition, SpaceRuntimeStartDisposition::Existing);
+            assert_eq!(first.status.generation, 1);
+            assert_eq!(second.status.generation, 1);
+            assert_eq!(second.status.lifecycle, SpaceRuntimeLifecycle::Running);
+        });
+        assert_eq!(factory.created_count(&profile_id), 1);
+    }
+
+    #[test]
+    fn concurrent_same_profile_start_waits_for_shared_failure() {
+        let profile_config = config("profile-concurrent-failure");
+        let profile_id = profile_config.profile_id.clone();
+        let start_gate = TestGate::new();
+        let factory = Arc::new(ScriptedRuntimeFactory::new(vec![
+            StartScript::pending_failure(
+                profile_config.clone(),
+                start_gate.clone(),
+                SpaceRuntimeFailureCategory::Bootstrap,
+            ),
+        ]));
+        let supervisor = SpaceRuntimeSupervisor::new(factory.clone());
+
+        run(async {
+            let first = tokio::spawn({
+                let supervisor = Arc::clone(&supervisor);
+                let config = profile_config.clone();
+                async move { supervisor.start(config).await }
+            });
+            start_gate.wait_until_entered().await;
+            let mut second = tokio::spawn({
+                let supervisor = Arc::clone(&supervisor);
+                let config = profile_config.clone();
+                async move { supervisor.start(config).await }
+            });
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_millis(50), &mut second)
+                    .await
+                    .is_err(),
+                "second start must await generation 1"
+            );
+
+            start_gate.release().await;
+            let first = first.await.unwrap().unwrap_err();
+            let second = second.await.unwrap().unwrap_err();
+            assert_eq!(first.generation, 1);
+            assert_eq!(second.generation, 1);
+            assert_eq!(first.category, SpaceRuntimeFailureCategory::Bootstrap);
+            assert_eq!(second.category, SpaceRuntimeFailureCategory::Bootstrap);
+        });
+        assert_eq!(factory.created_count(&profile_id), 1);
+    }
+
+    #[test]
     fn stale_success_cannot_resurrect_after_stop_and_restart_attempt() {
         let profile_config = config("profile-a");
         let profile_id = profile_config.profile_id.clone();
@@ -1624,6 +1796,57 @@ mod review_tests {
         fn shutdown(self: Box<Self>) -> SpaceRuntimeFuture<()> {
             Box::pin(async {})
         }
+    }
+
+    struct ActivationFailureFactory;
+
+    struct ActivationFailureRuntime {
+        report_failure: SpaceRuntimeFailureCallback,
+    }
+
+    impl SupervisedSpaceRuntime for ActivationFailureRuntime {
+        fn on_running(&mut self) {
+            let report_failure = Arc::clone(&self.report_failure);
+            tokio::spawn(async move {
+                let _ = report_failure(SpaceRuntimeFailureCategory::Runtime).await;
+            });
+        }
+
+        fn shutdown(self: Box<Self>) -> SpaceRuntimeFuture<()> {
+            Box::pin(async {})
+        }
+    }
+
+    impl SpaceRuntimeFactory for ActivationFailureFactory {
+        fn create(
+            &self,
+            _config: SpaceRuntimeProfileConfig,
+            _generation: u64,
+            report_failure: SpaceRuntimeFailureCallback,
+        ) -> SpaceRuntimeFuture<Result<Box<dyn SupervisedSpaceRuntime>, SpaceRuntimeFailureCategory>>
+        {
+            Box::pin(async move {
+                Ok(Box::new(ActivationFailureRuntime { report_failure })
+                    as Box<dyn SupervisedSpaceRuntime>)
+            })
+        }
+    }
+
+    #[test]
+    fn runtime_failure_monitor_activates_after_running_commit() {
+        let profile_config = config("profile-activation-failure");
+        let profile_id = profile_config.profile_id.clone();
+        let supervisor = SpaceRuntimeSupervisor::new(Arc::new(ActivationFailureFactory));
+
+        run(async {
+            supervisor.start(profile_config).await.unwrap();
+            let failed =
+                wait_for_lifecycle(&supervisor, &profile_id, SpaceRuntimeLifecycle::Failed).await;
+            assert_eq!(
+                failed.last_failure,
+                Some(SpaceRuntimeFailureCategory::Runtime)
+            );
+        });
     }
 
     impl SpaceRuntimeFactory for ParallelCreateFactory {
