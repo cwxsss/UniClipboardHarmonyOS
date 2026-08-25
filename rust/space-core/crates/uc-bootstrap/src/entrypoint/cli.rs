@@ -9,9 +9,9 @@
 
 use uc_core::config::AppConfig;
 
-use crate::layer::paths::get_storage_paths;
+use crate::layer::paths::{get_storage_paths, CliAppRuntimeProfileConfig};
 use crate::wiring::deps::BackgroundRuntimeDeps;
-use crate::wiring::wire::wire_dependencies;
+use crate::wiring::wire::{wire_dependencies, wire_dependencies_for_profile};
 
 /// Shared core wiring for the CLI composition-root entry.
 /// Initializes tracing, resolves config, wires dependencies, and registers the
@@ -29,10 +29,12 @@ use crate::wiring::wire::wire_dependencies;
 /// `.await` 更不容易遗漏（例如未来再加一个 entry，自动也覆盖）。
 async fn build_core(
     log_profile_override: Option<uc_observability::LogProfile>,
+    runtime_profile: Option<&CliAppRuntimeProfileConfig>,
 ) -> anyhow::Result<(
     AppConfig,
     crate::wiring::deps::WiredDependencies,
     BackgroundRuntimeDeps,
+    uc_application::facade::AppPaths,
 )> {
     // Apply log profile override before tracing init
     if let Some(profile) = log_profile_override {
@@ -49,14 +51,25 @@ async fn build_core(
 
     let config = AppConfig::empty();
 
-    let (wired, background) = wire_dependencies(&config)
-        .map_err(|e| anyhow::anyhow!("Dependency wiring failed: {}", e))?;
+    let (wired, background, storage_paths) = match runtime_profile {
+        Some(profile) => {
+            let storage_paths = profile.resolve_layout().paths;
+            let (wired, background) = wire_dependencies_for_profile(profile)
+                .map_err(|e| anyhow::anyhow!("Dependency wiring failed: {}", e))?;
+            (wired, background, storage_paths)
+        }
+        None => {
+            let (wired, background) = wire_dependencies(&config)
+                .map_err(|e| anyhow::anyhow!("Dependency wiring failed: {}", e))?;
+            let storage_paths = get_storage_paths(&config)?;
+            (wired, background, storage_paths)
+        }
+    };
 
     // 注册进程级 product analytics `EventContext`。失败不阻断启动 —— analytics
     // 是辅助通道，错误已在 compose 内 warn-log（见 `subsystem/analytics.rs` 模块
-    // 文档"失败语义"）。`get_storage_paths` 重新解析了一次目录布局；它内部纯
-    // 计算无 IO，开销可忽略。
-    let storage_paths = get_storage_paths(&config)?;
+    // 文档"失败语义"）。显式 profile 路径必须沿用上面同一份布局，不能退回
+    // `get_storage_paths` 的 process-env 解析。
     // 旧 CLI 进程内路径不是临时 daemon residency → 永不抑制设备级 presence 事件
     // （ADR-008 D20），保持 pre-P5 行为；P5-1/P5-2 会整体退役这条路径。
     if let Err(err) =
@@ -68,7 +81,7 @@ async fn build_core(
         );
     }
 
-    Ok((config, wired, background))
+    Ok((config, wired, background, storage_paths))
 }
 
 /// CLI composition-root entry returning the full
@@ -79,6 +92,19 @@ async fn build_core(
 pub(crate) async fn build_cli_wiring_context(
     log_profile: Option<uc_observability::LogProfile>,
 ) -> anyhow::Result<(AppConfig, crate::wiring::deps::WiredDependencies)> {
-    let (config, wired, _background) = build_core(log_profile).await?;
+    let (config, wired, _background, _storage_paths) = build_core(log_profile, None).await?;
     Ok((config, wired))
+}
+
+pub(crate) async fn build_cli_wiring_context_for_profile(
+    profile: &CliAppRuntimeProfileConfig,
+    log_profile: Option<uc_observability::LogProfile>,
+) -> anyhow::Result<(
+    AppConfig,
+    crate::wiring::deps::WiredDependencies,
+    uc_application::facade::AppPaths,
+)> {
+    let (config, wired, _background, storage_paths) =
+        build_core(log_profile, Some(profile)).await?;
+    Ok((config, wired, storage_paths))
 }
