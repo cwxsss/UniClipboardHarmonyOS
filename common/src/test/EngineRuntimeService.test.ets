@@ -114,6 +114,7 @@ class TestRuntimeHandle implements EngineRuntimeHandle {
   sendTextCount: number = 0;
   lastSentText: string = '';
   lastSendTargets: string[] = [];
+  deviceTrustSnapshot: string = '{}';
   private eventResolver: ((event: EngineRuntimeEvent | null) => void) | null = null;
   private eventRejecter: ((reason: Object) => void) | null = null;
   private recoveryResolver: ((recovery: EngineSessionRecovery) => void) | null = null;
@@ -246,7 +247,7 @@ class TestRuntimeHandle implements EngineRuntimeHandle {
   }
 
   async queryDeviceTrust(): Promise<string> {
-    return '{}';
+    return this.deviceTrustSnapshot;
   }
 
   async decideDeviceTrustChange(changeId: string, choice: string,
@@ -366,6 +367,59 @@ export default function engineRuntimeServiceTest(): void {
       expect(preferences.image).assertTrue();
       expect(updated.image).assertFalse();
       expect(backend.handle.recoverNetworkCount).assertEqual(1);
+      await service.shutdown();
+    });
+
+    it('projects only unique actionable device trust rows', 0, async (): Promise<void> => {
+      let backend: TestRuntimeBackend = new TestRuntimeBackend();
+      backend.handle.deviceTrustSnapshot = '{"local_device_id":"local-device","devices":[' +
+        '{"device_id":"local-device","display_name":"This Harmony device","is_local":true,' +
+        '"reachability":"online","membership":"unknown","sync_relationship":"removed_local_device"},' +
+        '{"device_id":"online-remote","display_name":"Stale online device","is_local":false,' +
+        '"reachability":"offline","membership":"removed","sync_relationship":"usable"},' +
+        '{"device_id":"online-remote","display_name":"Active online device","is_local":false,' +
+        '"reachability":"online","membership":"active","sync_relationship":"usable"},' +
+        '{"device_id":"offline-remote","display_name":"Active offline device","is_local":false,' +
+        '"reachability":"offline","membership":"active","sync_relationship":"usable"},' +
+        '{"device_id":"removed-membership","display_name":"Removed member","is_local":false,' +
+        '"reachability":"online","membership":"removed","sync_relationship":"usable"},' +
+        '{"device_id":"removed-peer","display_name":"Removed peer","is_local":false,' +
+        '"reachability":"online","membership":"active","sync_relationship":"removed_peer_device"},' +
+        '{"device_id":"history-only","display_name":"Named historic device","address":"wss://history.example",' +
+        '"is_local":false,"reachability":"online","membership":"unknown","sync_relationship":"unknown"}]}';
+      let service: EngineRuntimeService = EngineRuntimeService.createForTesting(backend, new TestRuntimeHost());
+      await service.prepareForTesting(new TestHostCallbacks(), new EngineRuntimeStartConfig('1.0.0', 'test'));
+      await service.start();
+
+      let devices = await service.queryDevices();
+
+      expect(devices.length).assertEqual(3);
+      expect(devices[0].deviceId).assertEqual('local-device');
+      expect(devices[0].isLocal).assertTrue();
+      expect(devices[1].deviceId).assertEqual('online-remote');
+      expect(devices[1].deviceName).assertEqual('Active online device');
+      expect(devices[1].online).assertTrue();
+      expect(devices[2].deviceId).assertEqual('offline-remote');
+      expect(devices[2].isLocal).assertFalse();
+      expect(devices[2].online).assertFalse();
+      await service.shutdown();
+    });
+
+    it('synthesizes the local device when the trust snapshot omits its row', 0, async (): Promise<void> => {
+      let backend: TestRuntimeBackend = new TestRuntimeBackend();
+      backend.handle.deviceTrustSnapshot = '{"local_device_id":"local-device","devices":[' +
+        '{"device_id":"remote-device","display_name":"Current remote","is_local":false,' +
+        '"reachability":"online","membership":"active","sync_relationship":"usable"}]}';
+      let service: EngineRuntimeService = EngineRuntimeService.createForTesting(backend, new TestRuntimeHost());
+      await service.prepareForTesting(new TestHostCallbacks(), new EngineRuntimeStartConfig('1.0.0', 'test'));
+      await service.start();
+
+      let devices = await service.queryDevices();
+
+      expect(devices.length).assertEqual(2);
+      expect(devices[0].deviceId).assertEqual('remote-device');
+      expect(devices[1].deviceId).assertEqual('local-device');
+      expect(devices[1].isLocal).assertTrue();
       await service.shutdown();
     });
 

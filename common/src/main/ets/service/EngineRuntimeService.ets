@@ -189,6 +189,33 @@ class EngineDeviceTrustSnapshotPayload {
   devices: EngineDeviceTrustRelationshipPayload[] = [];
 }
 
+function projectActionableDeviceTrustRows(sources: EngineDeviceTrustRelationshipPayload[],
+  localDeviceId: string): EngineDeviceTrustRelationshipPayload[] {
+  let actionable: EngineDeviceTrustRelationshipPayload[] = [];
+  for (let sourceIndex: number = 0; sourceIndex < sources.length; sourceIndex += 1) {
+    let source: EngineDeviceTrustRelationshipPayload = sources[sourceIndex];
+    let isLocal: boolean = source.is_local || source.device_id === localDeviceId;
+    let isActionableRemote: boolean = source.membership === 'active' &&
+      source.sync_relationship === 'usable';
+    if (!isLocal && !isActionableRemote) {
+      continue;
+    }
+    let existingIndex: number = -1;
+    for (let actionableIndex: number = 0; actionableIndex < actionable.length; actionableIndex += 1) {
+      if (actionable[actionableIndex].device_id === source.device_id) {
+        existingIndex = actionableIndex;
+        break;
+      }
+    }
+    if (existingIndex < 0) {
+      actionable.push(source);
+    } else if (isLocal) {
+      actionable[existingIndex] = source;
+    }
+  }
+  return actionable;
+}
+
 export class EngineRuntimeDevice {
   deviceId: string;
   deviceName: string;
@@ -1041,12 +1068,14 @@ export class EngineRuntimeService implements EngineClipboardObserver {
       return [];
     }
     let snapshot: EngineDeviceTrustSnapshotPayload = JSON.parse(serialized) as EngineDeviceTrustSnapshotPayload;
-    let devices: EngineRuntimeDevice[] = [];
-    let hasLocalDevice: boolean = false;
     let sources: EngineDeviceTrustRelationshipPayload[] = snapshot.devices === undefined ? [] : snapshot.devices;
     let localDeviceId: string = snapshot.local_device_id === undefined ? '' : snapshot.local_device_id;
-    for (let index: number = 0; index < sources.length; index++) {
-      let source: EngineDeviceTrustRelationshipPayload = sources[index];
+    let actionableSources: EngineDeviceTrustRelationshipPayload[] =
+      projectActionableDeviceTrustRows(sources, localDeviceId);
+    let devices: EngineRuntimeDevice[] = [];
+    let hasLocalDevice: boolean = false;
+    for (let index: number = 0; index < actionableSources.length; index++) {
+      let source: EngineDeviceTrustRelationshipPayload = actionableSources[index];
       let isLocal: boolean = source.is_local || source.device_id === localDeviceId;
       let name: string = source.display_name.length > 0 ? source.display_name : source.device_id;
       let online: boolean = source.reachability === 'online';
