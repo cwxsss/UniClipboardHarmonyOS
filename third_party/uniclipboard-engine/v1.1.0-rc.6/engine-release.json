@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "version": "v1.1.0-rc.6",
+  "packageVersion": "1.1.0-rc.6",
+  "sourceCommit": "f449698b6e96e5d99549c3fdd076dcd8e68118ce",
+  "releaseUrl": "https://github.com/cwxsss/Engine/commit/f449698b6e96e5d99549c3fdd076dcd8e68118ce",
+  "assetBaseUrl": "",
+  "minimumHarmonyOsApi": 24,
+  "embeddedLibrary": {
+    "path": "package/libs/arm64-v8a/libuc_ohos_napi.so",
+    "sha256": "cfa3becc89447f407819700cbaa9819303cc14a1a29ebe502aa4775ca2e73438",
+    "size": 90936632
+  },
+  "embeddedDeclaration": {
+    "path": "package/src/main/cpp/types/libuc_ohos_napi/index.d.ts",
+    "sha256": "7f04a1cbe2e43df6e285f78e18d3cd7182a392b4f94c5b331967970edd003b74",
+    "size": 4976
+  },
+  "files": [
+    {
+      "name": "UniClipboardEngine.har",
+      "sha256": "348c426c03282c1a52b7904adbcc3f8cafaa7ff369b5f83a8813fcc1d834166a",
+      "size": 26975148
+    },
+    {
+      "name": "UniClipboardEngine.har.checksum.txt",
+      "sha256": "99fe72cd4a8eac86d938cfad4acda102f86811bff3ca702c5f776a88b251cf53",
+      "size": 89
+    },
+    {
+      "name": "index.d.ts",
+      "sha256": "7f04a1cbe2e43df6e285f78e18d3cd7182a392b4f94c5b331967970edd003b74",
+      "size": 4976
+    },
+    {
+      "name": "release-manifest.json",
+      "sha256": "d4383bf55426343d4f71237fc3e3b85c7b3fd0b266b87f229787b6daaec15498",
+      "size": 2016
+    },
+    {
+      "name": "dependency-licenses.json",
+      "sha256": "405d3115e0eb46894d9589fd91f709259349528a3ee98cf801eb2b7abec48124",
+      "size": 144261
+    },
+    {
+      "name": "LICENSE",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "size": 11358
+    },
+    {
+      "name": "source-commit.txt",
+      "sha256": "27fbcefcdb40a08306e698cbd6133edd73523cbb81caf1326506e632d65e988a",
+      "size": 41
+    },
+    {
+      "name": "uc-ohos-napi.checksum.txt",
+      "sha256": "580811f21b01be96209c310ed4280c477d66b9835d8a30c4c4df974969937063",
+      "size": 65
+    },
+    {
+      "name": "version.txt",
+      "sha256": "90ef30789ced33cf553e87418d25dcbb5a9d8f7ba41bb5a91c6c6278830b2255",
+      "size": 12
+    }
+  ]
+}

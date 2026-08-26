@@ -1,5 +1,5 @@
 param(
-  [string]$ReleaseRoot = (Join-Path $PSScriptRoot '..\third_party\uniclipboard-engine\v1.1.0-rc.5')
+  [string]$ReleaseRoot = (Join-Path $PSScriptRoot '..\third_party\uniclipboard-engine\v1.1.0-rc.6')
 )
 
 $ErrorActionPreference = 'Stop'
