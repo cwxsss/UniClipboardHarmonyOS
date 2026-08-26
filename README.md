@@ -121,6 +121,87 @@ devecocli build
 devecocli run --module entry --product default
 ```
 
+### 真机 HAP 打包与签名排障
+
+下面流程用于在 Windows 上生成可安装到真实 HarmonyOS 设备的 signed HAP。不要把 `*-unsigned.hap` 当作最终交付物；它只能用于中间检查或模拟器场景。
+
+#### 1. 先确认工程和依赖
+
+- 在 DevEco Studio 打开本工程，确认项目包名为 `com.sss.uniclipboard`；不要复用其他应用（例如 ClashBox）的签名配置。
+- 修改 Engine 原生层后，先生成匹配版本的 `UniClipboardEngine.har`，并更新 `third_party/uniclipboard-engine/<version>/` 下的 HAR 与 `index.d.ts`，然后执行 `ohpm install --all`。
+- 构建前检查后台同步模式仍为 `dataTransfer`；根构建脚本会在模式不一致时失败。
+
+#### 2. 连接无线调试设备
+
+DevEco Studio 和其他 HDC 工具可能使用不同的本机 HDC 服务端口。先选一个没有被占用的端口，例如 `18711`，然后重启 DevEco Studio：
+
+```powershell
+$env:OHOS_HDC_SERVER_PORT = '18711'
+```
+
+使用 DevEco 自带的 HDC 将手机接入该服务（把地址替换为手机当前显示的无线调试地址）：
+
+```powershell
+$deveco = 'E:\software\DevEco Studio' # 按本机 DevEco Studio 安装目录修改
+$hdc = Join-Path $deveco 'sdk\default\openharmony\toolchains\hdc.exe'
+& $hdc -s 127.0.0.1:18711 tconn 172.16.0.146:45327
+& $hdc -s 127.0.0.1:18711 list targets -v
+```
+
+必须看到设备状态为 `TCP Connected`，再进行自动签名。若同时运行小白助手或其他 HDC 客户端，不要让两个工具争用同一个服务端口；可分别使用不同端口。
+
+#### 3. 生成正确的自动签名
+
+在 DevEco Studio 选择 `文件 → 项目结构 → 签名配置`：
+
+1. 勾选“自动生成签名文件”，先通过设备 ACL 权限提示；
+2. 将签名配置中的包名校正为 `com.sss.uniclipboard`；
+3. 点击“应用/确定”，确认生成的 `.p12` 和 `.p7b` 路径属于 UniClipboard 当前工程；
+4. 如果界面仍显示 `org.xbgroup.clashboxLTS` 或 `sss-chalsh-harmony-copy`，立即取消，不要构建。那是其他项目的证书，必然导致 bundleName 不匹配。
+
+签名文件和口令只保存在本机，不提交到仓库。切换电脑时需要在新电脑上重新生成或导入与 `com.sss.uniclipboard` 匹配的签名配置。
+
+#### 4. 命令行构建
+
+PowerShell 7 中执行：
+
+```powershell
+$harmony = (Get-Location).Path
+$deveco = 'E:\software\DevEco Studio'
+$env:DEVECO_SDK_HOME = "$deveco\sdk"
+$env:JAVA_HOME = "$deveco\jbr"
+$env:Path = "$env:JAVA_HOME\bin;$deveco\tools\ohpm\bin;$deveco\tools\hvigor\bin;$env:Path"
+Set-Location $harmony
+& "$deveco\tools\ohpm\bin\ohpm.bat" install --all
+& "$deveco\tools\hvigor\bin\hvigorw.bat" assembleHap --mode module -p product=default -p module=entry@default -p buildMode=release --no-daemon
+```
+
+成功标志必须包含 `SignHap` 和 `BUILD SUCCESSFUL`。常见的 ArkTS `WARN` 不等于构建失败，但 `SignHap` 失败或只生成 unsigned HAP 时不能交付。
+
+#### 5. 产物核验与安装
+
+最终文件通常位于：
+
+```text
+products/default/build/default/outputs/default/entry-default-signed.hap
+```
+
+构建后检查文件名、时间、大小和 SHA-256；同时解包检索关键接口，确认新 Engine 已进入 HAP：
+
+```powershell
+$hap = 'products/default/build/default/outputs/default/entry-default-signed.hap'
+Get-FileHash -Algorithm SHA256 $hap
+```
+
+本次修复至少应能在 ArkTS 字节码或 arm64 native 库中找到 `queryMemberSyncPreferences`、`updateMemberSyncPreferences`、`receiveEnabled` 和 `receiveContentTypes`。安装测试时使用 `hdc install -r` 更新现有应用，保留用户数据；不要为了签名问题直接清空手机数据。
+
+#### 本次问题复盘
+
+- “设备-内容类型”不可操作的直接原因是鸿蒙源码调用了成员同步偏好接口，但旧版 Engine `v1.1.0-rc.6` HAR 的公开声明/二进制没有这些接口；只改 ArkTS 或只做 mock 测试都不能解决运行时问题。
+- HAP 曾经生成成功但签名失败，原因是误用了另一个项目的 ClashBox 证书；包名和证书的 bundleName 必须同时是 `com.sss.uniclipboard`。
+- DevEco 启动失败 `UnixDomainSockets.bind` 时，先检查旧的 DevEco 进程和 HDC 端口；本次通过隔离 `idea.system.path` 启动恢复 IDE，未修改项目源码。缓存锁只能在确认无 DevEco 进程后移动到备份目录，不能随意删除用户配置。
+- DevEco 提示 HDC 端口已被占用时，优先设置 `OHOS_HDC_SERVER_PORT` 后重启 IDE，再用同一端口的 `hdc -s` 连接手机；不要反复重置手机应用或重新安装来替代 HDC 连接修复。
+
 ### 后台同步不变量
 
 应用通过 iroh/QUIC 数据通道传输剪贴板内容，因此 HarmonyOS 持续任务必须在入口清单和运行时服务中同时使用 `dataTransfer`。不要改回 `multiDeviceConnection`：该模式虽然能够启动，但应用进入后台约 65 秒后会被系统挂起，表现为电脑复制的内容到达不了手机系统剪贴板。此问题与普通剪贴板授权无关。
