@@ -189,12 +189,23 @@ class EngineDeviceTrustSnapshotPayload {
   devices: EngineDeviceTrustRelationshipPayload[] = [];
 }
 
+function deviceTrustRowPriority(source: EngineDeviceTrustRelationshipPayload, localDeviceId: string): number {
+  if (source.is_local) {
+    return 2;
+  }
+  if (source.device_id === localDeviceId) {
+    return 1;
+  }
+  return 0;
+}
+
 function projectActionableDeviceTrustRows(sources: EngineDeviceTrustRelationshipPayload[],
   localDeviceId: string): EngineDeviceTrustRelationshipPayload[] {
   let actionable: EngineDeviceTrustRelationshipPayload[] = [];
   for (let sourceIndex: number = 0; sourceIndex < sources.length; sourceIndex += 1) {
     let source: EngineDeviceTrustRelationshipPayload = sources[sourceIndex];
-    let isLocal: boolean = source.is_local || source.device_id === localDeviceId;
+    let sourcePriority: number = deviceTrustRowPriority(source, localDeviceId);
+    let isLocal: boolean = sourcePriority > 0;
     let isActionableRemote: boolean = source.membership === 'active' &&
       source.sync_relationship === 'usable';
     if (!isLocal && !isActionableRemote) {
@@ -209,7 +220,7 @@ function projectActionableDeviceTrustRows(sources: EngineDeviceTrustRelationship
     }
     if (existingIndex < 0) {
       actionable.push(source);
-    } else if (isLocal) {
+    } else if (sourcePriority > deviceTrustRowPriority(actionable[existingIndex], localDeviceId)) {
       actionable[existingIndex] = source;
     }
   }

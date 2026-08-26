@@ -405,6 +405,48 @@ export default function engineRuntimeServiceTest(): void {
       await service.shutdown();
     });
 
+    it('keeps an explicit local row ahead of later inferred history', 0, async (): Promise<void> => {
+      let backend: TestRuntimeBackend = new TestRuntimeBackend();
+      backend.handle.deviceTrustSnapshot = '{"local_device_id":"local-device","devices":[' +
+        '{"device_id":"local-device","display_name":"Explicit local device","is_local":true,' +
+        '"reachability":"online","membership":"active","sync_relationship":"usable"},' +
+        '{"device_id":"local-device","display_name":"Historical local device","is_local":false,' +
+        '"reachability":"offline","membership":"removed","sync_relationship":"removed_local_device"}]}';
+      let service: EngineRuntimeService = EngineRuntimeService.createForTesting(backend, new TestRuntimeHost());
+      await service.prepareForTesting(new TestHostCallbacks(), new EngineRuntimeStartConfig('1.0.0', 'test'));
+      await service.start();
+
+      let devices = await service.queryDevices();
+
+      expect(devices.length).assertEqual(1);
+      expect(devices[0].deviceName).assertEqual('Explicit local device');
+      expect(devices[0].online).assertTrue();
+      expect(devices[0].state).assertEqual('usable');
+      expect(devices[0].channel).assertEqual('online');
+      await service.shutdown();
+    });
+
+    it('promotes an explicit local row over earlier inferred history', 0, async (): Promise<void> => {
+      let backend: TestRuntimeBackend = new TestRuntimeBackend();
+      backend.handle.deviceTrustSnapshot = '{"local_device_id":"local-device","devices":[' +
+        '{"device_id":"local-device","display_name":"Historical local device","is_local":false,' +
+        '"reachability":"offline","membership":"removed","sync_relationship":"removed_local_device"},' +
+        '{"device_id":"local-device","display_name":"Explicit local device","is_local":true,' +
+        '"reachability":"online","membership":"active","sync_relationship":"usable"}]}';
+      let service: EngineRuntimeService = EngineRuntimeService.createForTesting(backend, new TestRuntimeHost());
+      await service.prepareForTesting(new TestHostCallbacks(), new EngineRuntimeStartConfig('1.0.0', 'test'));
+      await service.start();
+
+      let devices = await service.queryDevices();
+
+      expect(devices.length).assertEqual(1);
+      expect(devices[0].deviceName).assertEqual('Explicit local device');
+      expect(devices[0].online).assertTrue();
+      expect(devices[0].state).assertEqual('usable');
+      expect(devices[0].channel).assertEqual('online');
+      await service.shutdown();
+    });
+
     it('synthesizes the local device when the trust snapshot omits its row', 0, async (): Promise<void> => {
       let backend: TestRuntimeBackend = new TestRuntimeBackend();
       backend.handle.deviceTrustSnapshot = '{"local_device_id":"local-device","devices":[' +
