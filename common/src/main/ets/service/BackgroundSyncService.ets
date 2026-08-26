@@ -2,12 +2,14 @@ import { bundleManager, common, wantAgent, WantAgent } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
 import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
 import { BusinessError } from '@kit.BasicServicesKit';
+import { notificationManager } from '@kit.NotificationKit';
 import { Logger } from '../util/Logger';
 
 const logger: Logger = new Logger('BackgroundSync');
 const STORE_NAME: string = 'background_sync_preferences';
 const ENABLED_KEY: string = 'background_sync_enabled';
 const ABILITY_NAME: string = 'EntryAbility';
+const BACKGROUND_TASK_MODE: string = 'dataTransfer';
 
 export class BackgroundSyncPreferenceService {
   load(context: common.Context): boolean {
@@ -46,6 +48,11 @@ export class BackgroundSyncTaskService {
     }
     this.starting = true;
     try {
+      let notificationsEnabled: boolean = await notificationManager.isNotificationEnabled();
+      if (!notificationsEnabled) {
+        logger.warn('UniClipboard cannot start background device sync because notifications are disabled.');
+        return;
+      }
       let bundleInfo: bundleManager.BundleInfo = bundleManager.getBundleInfoForSelfSync(
         bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_APPLICATION);
       let wantAgentInfo: wantAgent.WantAgentInfo = {
@@ -61,10 +68,13 @@ export class BackgroundSyncTaskService {
       };
       let notificationWantAgent: WantAgent = await wantAgent.getWantAgent(wantAgentInfo);
       if (this.shouldRun) {
-        let taskModes: string[] = ['multiDeviceConnection'];
-        await backgroundTaskManager.startBackgroundRunning(context, taskModes, notificationWantAgent);
+        let taskModes: string[] = [BACKGROUND_TASK_MODE];
+        let taskNotification: backgroundTaskManager.ContinuousTaskNotification =
+          await backgroundTaskManager.startBackgroundRunning(context, taskModes, notificationWantAgent);
         this.active = true;
-        logger.info('UniClipboard background device sync started.');
+        logger.info('UniClipboard background device sync started. Task ID: ' +
+          (taskNotification.continuousTaskId ?? -1).toString() + ', notification ID: ' +
+          taskNotification.notificationId.toString() + '.');
       }
     } catch (error) {
       let businessError: BusinessError = error as BusinessError;

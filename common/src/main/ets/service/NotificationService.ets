@@ -31,7 +31,7 @@ export class ReceivedNotificationService {
 
   public async notifyReceived(context: common.UIAbilityContext, kind: string, displayName: string,
     preview: image.PixelMap | null = null, fileSize: number = 0, sourceLabel: string = ''): Promise<void> {
-    let ready: boolean = await this.ensureReady(context);
+    let ready: boolean = await this.ensureAvailable(context);
     if (!ready) {
       return;
     }
@@ -189,7 +189,7 @@ export class ReceivedNotificationService {
     }
   }
 
-  private async ensureReady(context: common.UIAbilityContext): Promise<boolean> {
+  public async ensureAvailable(context: common.UIAbilityContext): Promise<boolean> {
     if (!this.slotReady) {
       try {
         await notificationManager.addSlot(notificationManager.SlotType.SOCIAL_COMMUNICATION);

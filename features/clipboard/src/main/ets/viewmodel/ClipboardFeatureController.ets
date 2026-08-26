@@ -623,22 +623,39 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     let storedBackgroundSyncEnabled: boolean = this.backgroundSyncPreferenceService.load(context);
     this.backgroundSyncEnabled = storedBackgroundSyncEnabled;
     AppStorage.setOrCreate('backgroundSyncEnabled', this.backgroundSyncEnabled);
-    if (!storedBackgroundSyncEnabled || this.hasPasteboardReadPermission()) {
+    if (!storedBackgroundSyncEnabled) {
       return;
     }
-    this.requestPasteboardReadPermissionOnce().then((granted: boolean): void => {
+    this.ensureBackgroundSyncPermissions().then((granted: boolean): void => {
       if (granted) {
         this.persistBackgroundSyncPreference(true);
         return;
       }
       this.persistBackgroundSyncPreference(false);
-      this.recordConnectionDiagnosticFailure('pasteboard_permission_denied');
-      logger.warn('UniClipboard background sync remains disabled because clipboard permission was denied.');
+      logger.warn('UniClipboard background sync remains disabled because a required permission was denied.');
     }).catch((): void => {
       this.persistBackgroundSyncPreference(false);
-      this.recordConnectionDiagnosticFailure('pasteboard_permission_denied');
-      logger.warn('UniClipboard background sync permission request did not complete.');
+      this.recordConnectionDiagnosticFailure('background_sync_permission_request_failed');
+      logger.warn('UniClipboard background sync permission checks did not complete.');
     });
+  }
+
+  private async ensureBackgroundSyncPermissions(): Promise<boolean> {
+    let pasteboardGranted: boolean = await this.requestPasteboardReadPermissionOnce();
+    if (!pasteboardGranted) {
+      this.recordConnectionDiagnosticFailure('pasteboard_permission_denied');
+      return false;
+    }
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context === undefined) {
+      return false;
+    }
+    let notificationsEnabled: boolean = await this.receivedNotificationService.ensureAvailable(
+      context as common.UIAbilityContext);
+    if (!notificationsEnabled) {
+      this.recordConnectionDiagnosticFailure('notification_permission_denied');
+    }
+    return notificationsEnabled;
   }
 
   private hasPasteboardReadPermission(): boolean {
@@ -700,11 +717,10 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
 
   public async setBackgroundSyncEnabled(enabled: boolean): Promise<void> {
     if (enabled) {
-      let granted: boolean = await this.requestPasteboardReadPermissionOnce();
+      let granted: boolean = await this.ensureBackgroundSyncPermissions();
       if (!granted) {
         this.persistBackgroundSyncPreference(false);
-        this.recordConnectionDiagnosticFailure('pasteboard_permission_denied');
-        logger.warn('UniClipboard background sync remains disabled because clipboard permission was denied.');
+        logger.warn('UniClipboard background sync remains disabled because a required permission was denied.');
         return;
       }
     }
