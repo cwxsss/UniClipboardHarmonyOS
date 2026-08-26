@@ -54,7 +54,7 @@ Expected: new assertions fail because removed/history rows are currently returne
 Add a small pure helper near the trust payload models. Rules:
 
 1. local row always wins and is visible;
-2. remote row is visible only when effective membership/sync relationship is active/admitted/current;
+2. remote row is visible only when Engine's public JSON says `membership=active` and `sync_relationship=usable`;
 3. `removed`, `removed_peer_device`, revoked, history-only, and unknown remote rows are excluded;
 4. offline reachability never excludes an otherwise active remote;
 5. duplicate rows choose the actionable active row deterministically;
@@ -139,12 +139,12 @@ Stage only files that exist and changed.
 **Depends on:** Engine plan Task 4 handoff with a reviewed 40-character source commit.
 
 **Files:**
-- Replace: `third_party/uniclipboard-engine/v1.1.0-rc.5/UniClipboardEngine.har`
-- Replace: `third_party/uniclipboard-engine/v1.1.0-rc.5/UniClipboardEngine.har.checksum.txt`
-- Replace: `third_party/uniclipboard-engine/v1.1.0-rc.5/index.d.ts` if changed
-- Replace: `third_party/uniclipboard-engine/v1.1.0-rc.5/release-manifest.json`
-- Replace: `third_party/uniclipboard-engine/v1.1.0-rc.5/engine-release.json`
-- Replace: `third_party/uniclipboard-engine/v1.1.0-rc.5/source-commit.txt`
+- Add: `third_party/uniclipboard-engine/v1.1.0-rc.6/UniClipboardEngine.har`
+- Add: `third_party/uniclipboard-engine/v1.1.0-rc.6/UniClipboardEngine.har.checksum.txt`
+- Add: `third_party/uniclipboard-engine/v1.1.0-rc.6/index.d.ts`
+- Add: `third_party/uniclipboard-engine/v1.1.0-rc.6/release-manifest.json`
+- Add: `third_party/uniclipboard-engine/v1.1.0-rc.6/engine-release.json`
+- Add: `third_party/uniclipboard-engine/v1.1.0-rc.6/source-commit.txt`
 - Modify: `rust/space-core/` vendored source to exactly match the reviewed Engine commit
 - Verify/modify: `oh-package.json5`, `oh-package-lock.json5`, `rust/verify-engine-release.ps1`
 
@@ -157,7 +157,7 @@ Run:
 Get-Content .\third_party\uniclipboard-engine\v1.1.0-rc.5\source-commit.txt
 ```
 
-Expected: current bundle verifies internally but reports old source commit `31c149c5bfb8a8edfe80c94944c8255157a3a3af`, so it fails the new requirement to consume the reviewed recovery commit.
+Expected: current bundle verifies internally but reports old source commit `31c149c5bfb8a8edfe80c94944c8255157a3a3af`, so it fails the new requirement to consume the Windows-pinned `v1.1.0-rc.6` commit `f449698b6e96e5d99549c3fdd076dcd8e68118ce` (or a later reviewed descendant containing only the regression/diagnostic work).
 
 Add/extend a repository test or verifier argument that asserts the expected reviewed commit, then observe that assertion fail.
 
@@ -173,7 +173,7 @@ Verify that HAR contains:
 
 **Step 3: Replace the complete immutable artifact set**
 
-Copy the HAR, checksum, declarations, manifests, license inventory, source commit, and version files as one reviewed set. Synchronize `rust/space-core` with the same Engine commit using an auditable archive/copy script that excludes `.git` and build outputs. Do not mix artifacts from different commits.
+Create a new immutable `v1.1.0-rc.6` vendor directory; do not overwrite or relabel the existing `v1.1.0-rc.5` release. Copy the HAR, checksum, declarations, manifests, license inventory, source commit, and version files as one reviewed set. Synchronize `rust/space-core` with the same Engine commit using an auditable archive/copy script that excludes `.git` and build outputs. Update root package references and lockfiles from `rc.5` to `rc.6`. Do not mix artifacts from different commits.
 
 **Step 4: Run GREEN provenance checks**
 
@@ -190,7 +190,7 @@ Expected: all checks pass and every metadata file names the reviewed Engine comm
 **Step 5: Commit**
 
 ```powershell
-git add third_party/uniclipboard-engine/v1.1.0-rc.5 rust/space-core rust/verify-engine-release.ps1 rust/build-native.ps1 oh-package.json5 oh-package-lock.json5
+git add third_party/uniclipboard-engine/v1.1.0-rc.6 rust/space-core rust/verify-engine-release.ps1 rust/build-native.ps1 oh-package.json5 oh-package-lock.json5
 git commit -m "chore: update HarmonyOS to recovered Engine revision"
 ```
 
