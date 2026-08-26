@@ -61,8 +61,10 @@ import {
   EngineSpaceCreated,
   EngineSpaceJoined,
   EngineRuntimeDevice,
+  EngineRuntimeError,
   EngineRuntimeEvent,
   EngineRuntimeEventObserver,
+  EngineRuntimeSnapshot,
   EngineRuntimeState,
   EngineWorkspaceConvergence,
   EngineSessionRecovery,
@@ -167,6 +169,22 @@ class HistoryFilterCache {
 }
 
 const historyFilterCache: HistoryFilterCache = new HistoryFilterCache();
+
+export interface ClipboardFeatureControllerRuntime {
+  getSnapshot(): EngineRuntimeSnapshot;
+  prepare(context: common.UIAbilityContext): Promise<void>;
+  start(): Promise<void>;
+  recoverSession(allowSecureStorageUnlock: boolean): Promise<EngineSessionRecovery>;
+  removeMember(deviceId: string): Promise<EngineWorkspaceConvergence>;
+  queryDevices(): Promise<EngineRuntimeDevice[]>;
+  setClipboardAutoSendTargets(targetDevices: string[]): void;
+  queryMemberSyncPreferences(deviceId: string): Promise<EngineMemberSyncPreferences>;
+}
+
+export interface SpaceDeviceRemovalInteraction {
+  confirmSpaceDeviceRemoval(): Promise<number>;
+  reportSpaceDeviceRemovalSuccess(): void;
+}
 
 
 @Observed
@@ -416,6 +434,14 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   private officialEngineInboundRefreshTimerId: number = -1;
 
   private uiContextRef: UIContext | null = null;
+  private engineRuntime: ClipboardFeatureControllerRuntime;
+  private spaceDeviceRemovalInteraction: SpaceDeviceRemovalInteraction | null;
+
+  constructor(runtime: ClipboardFeatureControllerRuntime = engineRuntimeService,
+    removalInteraction: SpaceDeviceRemovalInteraction | null = null) {
+    this.engineRuntime = runtime;
+    this.spaceDeviceRemovalInteraction = removalInteraction;
+  }
 
   public static getInstance(): ClipboardFeatureController {
     if (ClipboardFeatureController.instance === null) {
@@ -1275,30 +1301,40 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       return;
     }
     try {
-      let result = await this.getUIContext().getPromptAction().showDialog({
-        title: $r('app.string.space_revoke_device_title'),
-        message: $r('app.string.space_revoke_device_message'),
-        buttons: [
-          { text: $r('app.string.cancel_action'), color: $r('app.color.text_secondary') },
-          { text: $r('app.string.space_revoke_device_confirm'), color: $r('app.color.danger') }
-        ]
-      });
-      if (result.index !== 1) {
+      if (!await this.confirmSpaceDeviceRemoval()) {
         return;
       }
       this.desktopDeviceMutationBusy = true;
       logger.info('Space device removal started.');
-      let convergence: EngineWorkspaceConvergence = await engineRuntimeService.removeMember(device.deviceId);
-      this.spaceDevices = this.spaceDevices.filter((item: EngineRuntimeDevice): boolean =>
-        item.deviceId !== device.deviceId);
-      if (this.desktopSelectedSpaceDeviceId === device.deviceId) {
-        this.desktopSelectedSpaceDeviceId = '';
-        engineRuntimeService.setClipboardAutoSendTargets([]);
+      let removingSelected: boolean = this.desktopSelectedSpaceDeviceId === device.deviceId;
+      let convergence: EngineWorkspaceConvergence | null = null;
+      try {
+        convergence = await this.engineRuntime.removeMember(device.deviceId);
+        this.spaceDevices = this.spaceDevices.filter((item: EngineRuntimeDevice): boolean =>
+          item.deviceId !== device.deviceId);
+        if (removingSelected) {
+          this.clearDesktopSelectedSpaceDevice();
+        }
+      } catch (error) {
+        if (!this.isConfirmedRemoveMemberNotFound(error)) {
+          throw new Error(this.errorDetail(error));
+        }
       }
-      await this.refreshSpaceDevices();
+      let refreshed: boolean = await this.refreshSpaceDevices();
+      if (!refreshed || this.hasSpaceDevice(device.deviceId)) {
+        if (convergence === null) {
+          throw new EngineRuntimeError('not_found', 'remove_member',
+            'authoritative refresh did not confirm the peer absent');
+        }
+        throw new Error('space device removal did not converge');
+      }
+      if (removingSelected) {
+        this.clearDesktopSelectedSpaceDevice();
+      }
       this.statusCode = 2;
-      this.showFeedbackToast($r('app.string.space_revoke_device_success'));
-      logger.info('Space device removal finished phase=' + convergence.phase);
+      this.reportSpaceDeviceRemovalSuccess();
+      logger.info('Space device removal finished phase=' +
+        (convergence === null ? 'already_absent' : convergence.phase));
     } catch (error) {
       this.statusCode = 3;
       this.reportError('space', 'remove space device failed: ' + this.errorDetail(error),
@@ -1306,6 +1342,41 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     } finally {
       this.desktopDeviceMutationBusy = false;
     }
+  }
+
+  private async confirmSpaceDeviceRemoval(): Promise<boolean> {
+    if (this.spaceDeviceRemovalInteraction !== null) {
+      return await this.spaceDeviceRemovalInteraction.confirmSpaceDeviceRemoval() === 1;
+    }
+    let result = await this.getUIContext().getPromptAction().showDialog({
+      title: $r('app.string.space_revoke_device_title'),
+      message: $r('app.string.space_revoke_device_message'),
+      buttons: [
+        { text: $r('app.string.cancel_action'), color: $r('app.color.text_secondary') },
+        { text: $r('app.string.space_revoke_device_confirm'), color: $r('app.color.danger') }
+      ]
+    });
+    return result.index === 1;
+  }
+
+  private reportSpaceDeviceRemovalSuccess(): void {
+    if (this.spaceDeviceRemovalInteraction !== null) {
+      this.spaceDeviceRemovalInteraction.reportSpaceDeviceRemovalSuccess();
+      return;
+    }
+    this.showFeedbackToast($r('app.string.space_revoke_device_success'));
+  }
+
+  private isConfirmedRemoveMemberNotFound(error: Object): boolean {
+    if (!(error instanceof EngineRuntimeError)) {
+      return false;
+    }
+    let runtimeError: EngineRuntimeError = error as EngineRuntimeError;
+    return runtimeError.category === 'not_found' && runtimeError.operation === 'remove_member';
+  }
+
+  private hasSpaceDevice(deviceId: string): boolean {
+    return this.spaceDevices.some((device: EngineRuntimeDevice): boolean => device.deviceId === deviceId);
   }
 
   public async consumeMobileSyncEvents(): Promise<number> {
@@ -2190,7 +2261,18 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     this.desktopSelectedSpaceDeviceOnline = device.online;
     this.desktopSelectedSpaceDeviceState = device.state;
     this.desktopSelectedSpaceDeviceIsLocal = device.isLocal;
-    engineRuntimeService.setClipboardAutoSendTargets(device.isLocal ? [] : [device.deviceId]);
+    this.engineRuntime.setClipboardAutoSendTargets(device.isLocal ? [] : [device.deviceId]);
+  }
+
+  private clearDesktopSelectedSpaceDevice(): void {
+    this.desktopSelectedSpaceDeviceId = '';
+    this.desktopSelectedSpaceDeviceName = '';
+    this.desktopSelectedSpaceDeviceType = '';
+    this.desktopSelectedSpaceDeviceOnline = false;
+    this.desktopSelectedSpaceDeviceState = 'unknown';
+    this.desktopSelectedSpaceDeviceIsLocal = true;
+    this.desktopDeviceSyncState = 0;
+    this.engineRuntime.setClipboardAutoSendTargets([]);
   }
 
   public selectDesktopSpaceDevice(device: EngineRuntimeDevice): void {
@@ -2229,14 +2311,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     } else if (devices.length > 0) {
       this.assignDesktopSelectedSpaceDevice(devices[0]);
     } else {
-      this.desktopSelectedSpaceDeviceId = '';
-      this.desktopSelectedSpaceDeviceName = '';
-      this.desktopSelectedSpaceDeviceType = '';
-      this.desktopSelectedSpaceDeviceOnline = false;
-      this.desktopSelectedSpaceDeviceState = 'unknown';
-      this.desktopSelectedSpaceDeviceIsLocal = true;
-      this.desktopDeviceSyncState = 0;
-      engineRuntimeService.setClipboardAutoSendTargets([]);
+      this.clearDesktopSelectedSpaceDevice();
     }
   }
 
@@ -2247,7 +2322,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     this.desktopDeviceSyncState = 1;
     try {
       let preferences: EngineMemberSyncPreferences =
-        await engineRuntimeService.queryMemberSyncPreferences(deviceId);
+        await this.engineRuntime.queryMemberSyncPreferences(deviceId);
       if (this.desktopSelectedSpaceDeviceId !== deviceId || this.desktopSelectedSpaceDeviceIsLocal) {
         return;
       }
@@ -2347,23 +2422,25 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     }
   }
 
-  public async refreshSpaceDevices(): Promise<void> {
+  public async refreshSpaceDevices(): Promise<boolean> {
     if (!this.spaceJoined || this.spaceNodeState !== 2) {
-      return;
+      return false;
     }
     if (this.spaceDeviceRefreshBusy) {
       this.spaceDeviceRefreshQueued = true;
-      return;
+      return false;
     }
     this.spaceDeviceRefreshBusy = true;
+    let refreshed: boolean = false;
     try {
       await this.ensureOfficialEngineRunning();
-      let devices: EngineRuntimeDevice[] = await engineRuntimeService.queryDevices();
+      let devices: EngineRuntimeDevice[] = await this.engineRuntime.queryDevices();
       this.spaceDevices = devices;
       this.synchronizeDesktopSpaceDeviceSelection(devices);
       this.spacePeerConnected = devices.some((device: EngineRuntimeDevice): boolean => {
         return !device.isLocal && device.online;
       });
+      refreshed = true;
     } catch (error) {
       logger.error('UniClipboard refresh space devices failed: ' + this.errorDetail(error));
       this.recordConnectionDiagnosticFailure('space_probe_failed');
@@ -2379,6 +2456,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
         this.spaceDeviceRefreshQueued = false;
       }
     }
+    return refreshed;
   }
 
   public async connectSpaceDevice(device: EngineRuntimeDevice): Promise<void> {
@@ -5662,7 +5740,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   }
 
   private async ensureOfficialEngineRunning(): Promise<void> {
-    let snapshot = engineRuntimeService.getSnapshot();
+    let snapshot: EngineRuntimeSnapshot = this.engineRuntime.getSnapshot();
     if (snapshot.state === EngineRuntimeState.RUNNING) {
       return;
     }
@@ -5670,9 +5748,9 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     if (context === undefined) {
       throw new Error('no application context for official Engine recovery');
     }
-    await engineRuntimeService.prepare(context as common.UIAbilityContext);
-    await engineRuntimeService.start();
-    let recovery: EngineSessionRecovery = await engineRuntimeService.recoverSession(true);
+    await this.engineRuntime.prepare(context as common.UIAbilityContext);
+    await this.engineRuntime.start();
+    let recovery: EngineSessionRecovery = await this.engineRuntime.recoverSession(true);
     if (recovery.resumed) {
       this.setSpaceJoined(true);
     }
