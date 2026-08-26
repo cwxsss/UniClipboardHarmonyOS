@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "release": {
     "version": "v1.1.0-rc.6",
-    "commit": "f449698b6e96e5d99549c3fdd076dcd8e68118ce",
-    "rustToolchain": "1.97.1",
+    "commit": "0ec02ed96a0ee0afe6d72552104ced75a956c270",
+    "rustToolchain": "1.95.0",
     "cargoLockSha256": "cbb5bc830694aa4f9c3d40cae755d46a61ad6cadc385d621a2ce2d0026ec8785"
   },
   "generators": {
@@ -40,8 +40,8 @@
       "architectures": [
         "arm64-v8a"
       ],
-      "sha256": "348c426c03282c1a52b7904adbcc3f8cafaa7ff369b5f83a8813fcc1d834166a",
-      "size": 26975148
+      "sha256": "6acff464c1ef991681b80846cfaaefbad959896fec39c6c16d9a647f5e289409",
+      "size": 27026207
     },
     {
       "name": "index.d.ts",
@@ -61,7 +61,7 @@
       "name": "source-commit.txt",
       "platform": "source",
       "architectures": [],
-      "sha256": "27fbcefcdb40a08306e698cbd6133edd73523cbb81caf1326506e632d65e988a",
+      "sha256": "d98556dff39e882d1592a1e11884f9a6726328b96ad3c46bd18f12d510c9ad9c",
       "size": 41
     },
     {

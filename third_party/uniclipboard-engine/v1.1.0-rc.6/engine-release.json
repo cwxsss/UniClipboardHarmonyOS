@@ -2,39 +2,39 @@
   "schemaVersion": 1,
   "version": "v1.1.0-rc.6",
   "packageVersion": "1.1.0-rc.6",
-  "sourceCommit": "f449698b6e96e5d99549c3fdd076dcd8e68118ce",
-  "releaseUrl": "https://github.com/cwxsss/Engine/commit/f449698b6e96e5d99549c3fdd076dcd8e68118ce",
+  "sourceCommit": "0ec02ed96a0ee0afe6d72552104ced75a956c270",
+  "releaseUrl": "https://github.com/cwxsss/Engine/commit/0ec02ed96a0ee0afe6d72552104ced75a956c270",
   "assetBaseUrl": "",
   "minimumHarmonyOsApi": 24,
   "embeddedLibrary": {
     "path": "package/libs/arm64-v8a/libuc_ohos_napi.so",
-    "sha256": "cfa3becc89447f407819700cbaa9819303cc14a1a29ebe502aa4775ca2e73438",
-    "size": 90936632
+    "sha256": "f107549a66725f73c6dccbcbf2d2c62323d6ad052346eb47f2564c8be8f1aca5",
+    "size": 91233672
   },
   "embeddedDeclaration": {
     "path": "package/src/main/cpp/types/libuc_ohos_napi/index.d.ts",
-    "sha256": "7f04a1cbe2e43df6e285f78e18d3cd7182a392b4f94c5b331967970edd003b74",
-    "size": 4976
+    "sha256": "76dc1ee5f1e29bb3714c2b010f3f6408e2f0ad5751c2879c57e251f0fd974b07",
+    "size": 6182
   },
   "files": [
     {
       "name": "UniClipboardEngine.har",
-      "sha256": "348c426c03282c1a52b7904adbcc3f8cafaa7ff369b5f83a8813fcc1d834166a",
-      "size": 26975148
+      "sha256": "6acff464c1ef991681b80846cfaaefbad959896fec39c6c16d9a647f5e289409",
+      "size": 27026207
     },
     {
       "name": "UniClipboardEngine.har.checksum.txt",
-      "sha256": "99fe72cd4a8eac86d938cfad4acda102f86811bff3ca702c5f776a88b251cf53",
+      "sha256": "4b377efd70ebda84537a0d4fb5de0a49859586a8694ce0a5dd550f598ba6cbed",
       "size": 89
     },
     {
       "name": "index.d.ts",
-      "sha256": "7f04a1cbe2e43df6e285f78e18d3cd7182a392b4f94c5b331967970edd003b74",
-      "size": 4976
+      "sha256": "49cb24fe2f43403550177d5deb6d077be721a8221bc16161c6f51ad03e31b031",
+      "size": 5832
     },
     {
       "name": "release-manifest.json",
-      "sha256": "d4383bf55426343d4f71237fc3e3b85c7b3fd0b266b87f229787b6daaec15498",
+      "sha256": "99f5eb7d25bed90e774b6d05ac0ce0b02474c05ca28907911e546ae3a6249c52",
       "size": 2016
     },
     {
@@ -49,12 +49,12 @@
     },
     {
       "name": "source-commit.txt",
-      "sha256": "27fbcefcdb40a08306e698cbd6133edd73523cbb81caf1326506e632d65e988a",
+      "sha256": "d98556dff39e882d1592a1e11884f9a6726328b96ad3c46bd18f12d510c9ad9c",
       "size": 41
     },
     {
       "name": "uc-ohos-napi.checksum.txt",
-      "sha256": "580811f21b01be96209c310ed4280c477d66b9835d8a30c4c4df974969937063",
+      "sha256": "5a4c0c7fd3274b2d7acba695e1155096912f75249bab23ebd0e548fe887e01c9",
       "size": 65
     },
     {

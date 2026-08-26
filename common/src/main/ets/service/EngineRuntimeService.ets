@@ -461,7 +461,10 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
       },
       async (invitationCode: string, deviceName: string | null, passphrase: string,
         preserveUnreadableHistory: boolean): Promise<EngineSpaceJoined> => {
-        let status: EngineCompatibilityNativeJoinSpaceStatus = await compatibilityHandle.joinSpace(invitationCode, deviceName, passphrase,
+        let normalizedDeviceName: string | null = deviceName === null || deviceName.trim().length === 0 ?
+          null : deviceName.trim();
+        let status: EngineCompatibilityNativeJoinSpaceStatus = await compatibilityHandle.joinSpace(invitationCode,
+          normalizedDeviceName, passphrase,
           preserveUnreadableHistory);
         if (status.status !== 'active' || status.joinedSpace === undefined) {
           let reason: string = status.rejectionReason === undefined ? status.status : status.rejectionReason;

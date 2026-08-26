@@ -1483,7 +1483,9 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       this.spaceInvitationCode.trim().length === 0 || this.spacePassphrase.length === 0) {
       return false;
     }
-    return this.spaceJoinDeviceName.trim().length > 0;
+    // Existing members keep their configured device name and do not need to
+    // re-enter it when adding another space profile.
+    return this.spaceJoined || this.spaceJoinDeviceName.trim().length > 0;
   }
 
   public async joinCurrentSpace(): Promise<void> {
@@ -1496,10 +1498,14 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     let addedProfile: boolean = false;
     try {
       let deviceName: string = this.spaceJoinDeviceName.trim();
+      if (deviceName.length === 0 && this.spaceJoined) {
+        deviceName = this.spaceDeviceName.trim();
+      }
       profileId = await this.prepareSpaceAdmissionProfile();
       addedProfile = this.spaceAdmissionAddedProfile;
       let result: EngineSpaceJoined = await engineRuntimeService.joinSpace(
-        this.spaceInvitationCode.trim(), deviceName, this.spacePassphrase, true);
+        this.spaceInvitationCode.trim(), deviceName.length > 0 ? deviceName : null,
+        this.spacePassphrase, true);
       this.markSpaceProfileJoined(profileId);
       let hasMigratedRecords: boolean = this.hasMigrationRecords(result.migratedRecords);
       let hasPreservedUnreadableRecords: boolean = this.hasMigrationRecords(result.preservedUnreadableRecords);

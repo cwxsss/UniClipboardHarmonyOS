@@ -201,4 +201,32 @@ export default function clipboardFeatureControllerTest(): void {
       expect(interaction.successCount).assertEqual(0);
     });
   });
+
+  describe('ClipboardFeatureController space admission', (): void => {
+    it('allows an existing member to join another space without re-entering the device name', 0,
+      async (): Promise<void> => {
+        let runtime: FakeControllerRuntime = new FakeControllerRuntime();
+        let interaction: FakeRemovalInteraction = new FakeRemovalInteraction();
+        let controller: ClipboardFeatureController = readyController(runtime, interaction);
+        controller.spaceInvitationCode = 'ABCD-1234';
+        controller.spacePassphrase = 'correct horse battery staple';
+        controller.spaceJoinDeviceName = '';
+
+        expect(controller.canJoinSpace()).assertTrue();
+      });
+
+    it('still requires a device name for the first space admission', 0,
+      async (): Promise<void> => {
+        let runtime: FakeControllerRuntime = new FakeControllerRuntime();
+        let interaction: FakeRemovalInteraction = new FakeRemovalInteraction();
+        let controller: ClipboardFeatureController = new ClipboardFeatureController(runtime, interaction);
+        controller.spaceNodeState = 2;
+        controller.spaceInvitationCode = 'ABCD-1234';
+        controller.spacePassphrase = 'correct horse battery staple';
+
+        expect(controller.canJoinSpace()).assertFalse();
+        controller.spaceJoinDeviceName = 'This phone';
+        expect(controller.canJoinSpace()).assertTrue();
+      });
+  });
 }
