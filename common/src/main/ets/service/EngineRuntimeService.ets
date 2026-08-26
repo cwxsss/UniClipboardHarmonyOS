@@ -213,28 +213,43 @@ export class EngineWorkspaceConvergence {
 
 export class EngineMemberSyncPreferences {
   sendEnabled: boolean;
+  receiveEnabled: boolean;
   text: boolean;
   image: boolean;
   file: boolean;
   link: boolean;
   codeSnippet: boolean;
   richText: boolean;
+  receiveText: boolean;
+  receiveImage: boolean;
+  receiveFile: boolean;
+  receiveLink: boolean;
+  receiveCodeSnippet: boolean;
+  receiveRichText: boolean;
 
   constructor(sendEnabled: boolean, text: boolean, imageEnabled: boolean, file: boolean,
-    link: boolean, codeSnippet: boolean, richText: boolean) {
+    link: boolean, codeSnippet: boolean, richText: boolean, receiveEnabled: boolean = true,
+    receiveText: boolean = true, receiveImage: boolean = true, receiveFile: boolean = true,
+    receiveLink: boolean = true, receiveCodeSnippet: boolean = true, receiveRichText: boolean = true) {
     this.sendEnabled = sendEnabled;
+    this.receiveEnabled = receiveEnabled;
     this.text = text;
     this.image = imageEnabled;
     this.file = file;
     this.link = link;
     this.codeSnippet = codeSnippet;
     this.richText = richText;
+    this.receiveText = receiveText;
+    this.receiveImage = receiveImage;
+    this.receiveFile = receiveFile;
+    this.receiveLink = receiveLink;
+    this.receiveCodeSnippet = receiveCodeSnippet;
+    this.receiveRichText = receiveRichText;
   }
 }
 
-// rc.3 exports these methods from libuc_ohos_napi.so, but omits them from
-// OhEngine in Index.d.ets. Keep the compatibility contract private to this
-// adapter so the rest of the product never touches the native object.
+// Keep the formal Engine member preference contract private to this adapter so
+// the rest of the product never touches the native object directly.
 interface EngineCompatibilityNativeInvitation {
   invitationCode: string;
   expiresAtMs: number;
@@ -288,12 +303,22 @@ interface EngineCompatibilityNativeContentTypesPatch {
 
 interface EngineCompatibilityNativeMemberSyncPreferences {
   sendEnabled: boolean;
+  receiveEnabled: boolean;
   sendContentTypes: EngineCompatibilityNativeContentTypes;
+  receiveContentTypes: EngineCompatibilityNativeContentTypes;
 }
 
 interface EngineCompatibilityNativeMemberSyncPreferencesPatch {
   sendEnabled?: boolean;
+  receiveEnabled?: boolean;
   sendContentTypes?: EngineCompatibilityNativeContentTypesPatch;
+  receiveContentTypes?: EngineCompatibilityNativeContentTypesPatch;
+}
+
+interface EngineCompatibilityNativeMemberSyncApi {
+  queryMemberSyncPreferences(deviceId: string): Promise<EngineCompatibilityNativeMemberSyncPreferences>;
+  updateMemberSyncPreferences(deviceId: string, patch: EngineCompatibilityNativeMemberSyncPreferencesPatch):
+    Promise<EngineCompatibilityNativeMemberSyncPreferences>;
 }
 
 interface EngineCompatibilityNativeHandle {
@@ -316,7 +341,7 @@ interface EngineCompatibilityNativeHandle {
     confirmLocalRemoval: boolean): Promise<string>;
 }
 
-function normalizeMemberSyncPreferences(
+export function normalizeMemberSyncPreferences(
   preferences: EngineCompatibilityNativeMemberSyncPreferences): EngineMemberSyncPreferences {
   return new EngineMemberSyncPreferences(
     preferences.sendEnabled,
@@ -325,7 +350,23 @@ function normalizeMemberSyncPreferences(
     preferences.sendContentTypes.file,
     preferences.sendContentTypes.link,
     preferences.sendContentTypes.codeSnippet,
-    preferences.sendContentTypes.richText);
+    preferences.sendContentTypes.richText,
+    preferences.receiveEnabled,
+    preferences.receiveContentTypes.text,
+    preferences.receiveContentTypes.image,
+    preferences.receiveContentTypes.file,
+    preferences.receiveContentTypes.link,
+    preferences.receiveContentTypes.codeSnippet,
+    preferences.receiveContentTypes.richText);
+}
+
+function requireMemberSyncPreferencesApi(nativeObject: Object): EngineCompatibilityNativeMemberSyncApi {
+  let candidate: Record<string, Object> = nativeObject as Record<string, Object>;
+  if (typeof candidate['queryMemberSyncPreferences'] !== 'function' ||
+    typeof candidate['updateMemberSyncPreferences'] !== 'function') {
+    throw new Error('engine_member_sync_preferences_api_unavailable');
+  }
+  return nativeObject as EngineCompatibilityNativeMemberSyncApi;
 }
 
 export interface EngineRuntimeHandle {
@@ -457,8 +498,10 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
         return new EngineActiveClipboard(result.entryId, result.activatedBy);
       },
       async (deviceId: string): Promise<EngineMemberSyncPreferences> => {
+        let memberSyncHandle: EngineCompatibilityNativeMemberSyncApi =
+          requireMemberSyncPreferencesApi(nativeObject);
         let result: EngineCompatibilityNativeMemberSyncPreferences =
-          await compatibilityHandle.queryMemberSyncPreferences(deviceId);
+          await memberSyncHandle.queryMemberSyncPreferences(deviceId);
         return normalizeMemberSyncPreferences(result);
       },
       async (deviceId: string, sendEnabled: boolean, text: boolean, imageEnabled: boolean,
@@ -473,14 +516,25 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
             richText: richText
           }
         };
+        let memberSyncHandle: EngineCompatibilityNativeMemberSyncApi =
+          requireMemberSyncPreferencesApi(nativeObject);
         let result: EngineCompatibilityNativeMemberSyncPreferences =
-          await compatibilityHandle.updateMemberSyncPreferences(deviceId, patch);
+          await memberSyncHandle.updateMemberSyncPreferences(deviceId, patch);
         return normalizeMemberSyncPreferences(result);
       },
       async (deviceId: string): Promise<EngineMemberSyncPreferences> => {
         let patch: EngineCompatibilityNativeMemberSyncPreferencesPatch = {
           sendEnabled: true,
+          receiveEnabled: true,
           sendContentTypes: {
+            text: true,
+            image: true,
+            file: true,
+            link: true,
+            codeSnippet: true,
+            richText: true
+          },
+          receiveContentTypes: {
             text: true,
             image: true,
             file: true,
@@ -489,8 +543,10 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
             richText: true
           }
         };
+        let memberSyncHandle: EngineCompatibilityNativeMemberSyncApi =
+          requireMemberSyncPreferencesApi(nativeObject);
         let result: EngineCompatibilityNativeMemberSyncPreferences =
-          await compatibilityHandle.updateMemberSyncPreferences(deviceId, patch);
+          await memberSyncHandle.updateMemberSyncPreferences(deviceId, patch);
         return normalizeMemberSyncPreferences(result);
       },
       (entryId: string, mode: string): Promise<string> => compatibilityHandle.restoreClipboard(entryId, mode),

@@ -19,7 +19,8 @@ import {
   EngineRuntimeService,
   EngineRuntimeStartConfig,
   EngineRuntimeState,
-  EngineWorkspaceConvergence
+  EngineWorkspaceConvergence,
+  normalizeMemberSyncPreferences
 } from '../main/ets/service/EngineRuntimeService';
 import { EngineClipboardObserver, EngineClipboardSnapshot } from '../main/ets/engine/EngineClipboardHost';
 import { EngineFileMetadata } from '../main/ets/engine/EngineFileHandleRegistry';
@@ -223,12 +224,14 @@ class TestRuntimeHandle implements EngineRuntimeHandle {
   }
 
   async queryMemberSyncPreferences(deviceId: string): Promise<EngineMemberSyncPreferences> {
-    return new EngineMemberSyncPreferences(true, true, true, true, true, true, true);
+    return new EngineMemberSyncPreferences(true, true, true, true, true, true, true,
+      false, true, false, true, false, true, false);
   }
 
   async updateMemberSendPreferences(deviceId: string, sendEnabled: boolean, text: boolean, imageEnabled: boolean,
     file: boolean, link: boolean, richText: boolean): Promise<EngineMemberSyncPreferences> {
-    return new EngineMemberSyncPreferences(sendEnabled, text, imageEnabled, file, link, true, richText);
+    return new EngineMemberSyncPreferences(sendEnabled, text, imageEnabled, file, link, true, richText,
+      false, true, false, true, false, true, false);
   }
 
   async resetMemberSyncPreferences(deviceId: string): Promise<EngineMemberSyncPreferences> {
@@ -365,10 +368,46 @@ export default function engineRuntimeServiceTest(): void {
       expect(invitation.invitationCode).assertEqual('invitation');
       expect(report.totalAccepted).assertEqual(1);
       expect(preferences.image).assertTrue();
+      expect(preferences.receiveEnabled).assertFalse();
+      expect(preferences.receiveImage).assertFalse();
       expect(updated.image).assertFalse();
       expect(backend.handle.recoverNetworkCount).assertEqual(1);
       await service.shutdown();
     });
+
+    it('maps the formal Engine member preference contract including receive fields', 0,
+      async (): Promise<void> => {
+        let nativePreferences = {
+          sendEnabled: false,
+          receiveEnabled: true,
+          sendContentTypes: {
+            text: false,
+            image: true,
+            link: false,
+            file: true,
+            codeSnippet: false,
+            richText: true
+          },
+          receiveContentTypes: {
+            text: true,
+            image: false,
+            link: true,
+            file: false,
+            codeSnippet: true,
+            richText: false
+          }
+        };
+
+        let preferences: EngineMemberSyncPreferences = normalizeMemberSyncPreferences(nativePreferences);
+
+        expect(preferences.sendEnabled).assertFalse();
+        expect(preferences.receiveEnabled).assertTrue();
+        expect(preferences.image).assertTrue();
+        expect(preferences.receiveImage).assertFalse();
+        expect(preferences.receiveLink).assertTrue();
+        expect(preferences.receiveCodeSnippet).assertTrue();
+        expect(preferences.receiveRichText).assertFalse();
+      });
 
     it('projects only unique actionable device trust rows', 0, async (): Promise<void> => {
       let backend: TestRuntimeBackend = new TestRuntimeBackend();

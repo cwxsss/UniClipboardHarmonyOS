@@ -5,8 +5,18 @@ import { Logger } from '../util/Logger';
 
 const PERMISSION_DENIED_CODE: number = 201;
 const TEXT_FORMAT: string = 'text/plain';
-const BACKGROUND_CLIPBOARD_POLL_INTERVAL_MS: number = 1000;
+export const BACKGROUND_CLIPBOARD_POLL_INTERVAL_MS: number = 200;
 const logger: Logger = new Logger('ClipboardHost');
+
+export function shouldStartClipboardPolling(pollingEnabled: boolean, listening: boolean,
+  pollingTimerId: number): boolean {
+  return pollingEnabled && listening && pollingTimerId < 0;
+}
+
+export function shouldNotifyClipboardChange(hasClipboardBaseline: boolean,
+  lastClipboardText: string, currentText: string): boolean {
+  return hasClipboardBaseline && currentText !== lastClipboardText;
+}
 
 export interface EngineClipboardRepresentation {
   kind: string;
@@ -145,11 +155,11 @@ export class EngineClipboardHost {
         this.hasClipboardBaseline = true;
         return;
       }
-      if (currentText === this.lastClipboardText) {
+      if (!shouldNotifyClipboardChange(this.hasClipboardBaseline, this.lastClipboardText, currentText)) {
         return;
       }
       this.lastClipboardText = currentText;
-      logger.info('Clipboard polling observed text change length=' + currentText.length.toString());
+      logger.info('Clipboard observed text change length=' + currentText.length.toString());
       let observer: EngineClipboardObserver | null = this.observer;
       if (observer !== null) {
         observer.onClipboardChanged(this.snapshotFromText(currentText));
@@ -192,7 +202,7 @@ export class EngineClipboardHost {
   }
 
   private startPollingIfNeeded(): void {
-    if (!this.pollingEnabled || !this.listening || this.pollingTimerId >= 0) {
+    if (!shouldStartClipboardPolling(this.pollingEnabled, this.listening, this.pollingTimerId)) {
       return;
     }
     this.pollingTimerId = setInterval((): void => {
