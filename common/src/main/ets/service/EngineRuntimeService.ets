@@ -9,6 +9,11 @@ import {
 import { EngineClipboardObserver, EngineClipboardSnapshot } from '../engine/EngineClipboardHost';
 import { EngineHostError } from '../engine/EngineHostError';
 import { Logger } from '../util/Logger';
+import {
+  EngineDeviceTrustRelationshipPayload,
+  EngineDeviceTrustSnapshotPayload,
+  projectActionableDeviceTrustRows
+} from './DeviceTrustProjection';
 
 const ENGINE_EVENT_TIMEOUT_MS: number = 1000;
 const ENGINE_SHUTDOWN_DEADLINE_MS: number = 3000;
@@ -171,60 +176,6 @@ export class EngineActiveClipboard {
     this.entryId = entryId;
     this.activatedBy = activatedBy;
   }
-}
-
-// The native rc.3 binding serializes device-trust snapshots as JSON. Convert
-// them here so views only see a stable ArkTS model, never native JSON.
-class EngineDeviceTrustRelationshipPayload {
-  device_id: string = '';
-  display_name: string = '';
-  is_local: boolean = false;
-  reachability: string = 'unknown';
-  membership: string = 'unknown';
-  sync_relationship: string = 'unknown';
-}
-
-class EngineDeviceTrustSnapshotPayload {
-  local_device_id: string = '';
-  devices: EngineDeviceTrustRelationshipPayload[] = [];
-}
-
-function deviceTrustRowPriority(source: EngineDeviceTrustRelationshipPayload, localDeviceId: string): number {
-  if (source.is_local) {
-    return 2;
-  }
-  if (source.device_id === localDeviceId) {
-    return 1;
-  }
-  return 0;
-}
-
-function projectActionableDeviceTrustRows(sources: EngineDeviceTrustRelationshipPayload[],
-  localDeviceId: string): EngineDeviceTrustRelationshipPayload[] {
-  let actionable: EngineDeviceTrustRelationshipPayload[] = [];
-  for (let sourceIndex: number = 0; sourceIndex < sources.length; sourceIndex += 1) {
-    let source: EngineDeviceTrustRelationshipPayload = sources[sourceIndex];
-    let sourcePriority: number = deviceTrustRowPriority(source, localDeviceId);
-    let isLocal: boolean = sourcePriority > 0;
-    let isActionableRemote: boolean = source.membership === 'active' &&
-      source.sync_relationship === 'usable';
-    if (!isLocal && !isActionableRemote) {
-      continue;
-    }
-    let existingIndex: number = -1;
-    for (let actionableIndex: number = 0; actionableIndex < actionable.length; actionableIndex += 1) {
-      if (actionable[actionableIndex].device_id === source.device_id) {
-        existingIndex = actionableIndex;
-        break;
-      }
-    }
-    if (existingIndex < 0) {
-      actionable.push(source);
-    } else if (sourcePriority > deviceTrustRowPriority(actionable[existingIndex], localDeviceId)) {
-      actionable[existingIndex] = source;
-    }
-  }
-  return actionable;
 }
 
 export class EngineRuntimeDevice {
