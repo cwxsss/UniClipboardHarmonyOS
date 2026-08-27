@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "release": {
+    "version": "v1.1.0-rc.7",
+    "commit": "ff493cfa8563cdd7fbf8615ed0a95b9058714176",
+    "rustToolchain": "1.95.0",
+    "cargoLockSha256": "cf857f61d2986917ad54717d4241ac13fe505a28a12d4ee150319229966fc2f8"
+  },
+  "generators": {
+    "napi": "2.16.17",
+    "napiBuild": "2.3.2",
+    "napiDerive": "2.16.13",
+    "arkts": "napi-rs 2.16.17"
+  },
+  "compatibility": {
+    "p2pProtocols": [
+      "pairing/1",
+      "presence/0",
+      "clipboard/0",
+      "active-clipboard/0",
+      "active-clipboard-pull/0",
+      "transfer-progress/0",
+      "iroh-blobs"
+    ],
+    "database": "Diesel SQLite embedded migrations",
+    "minimumSystems": {
+      "harmonyosApi": 24
+    }
+  },
+  "deviceMatrix": {
+    "harmonyos": {
+      "status": "built",
+      "architectures": [
+        "arm64-v8a",
+        "x86_64"
+      ],
+      "reason": "Engine network settings bridge packaged for physical devices and the API 24 x86_64 simulator"
+    }
+  },
+  "artifacts": [
+    {
+      "name": "UniClipboardEngine.har",
+      "platform": "harmonyos",
+      "architectures": [
+        "arm64-v8a",
+        "x86_64"
+      ],
+      "sha256": "54966b6867740f6a85ed5049e3642e6f40a48cd3af1eee9746f9c91a42fcf05d",
+      "size": 109143129
+    },
+    {
+      "name": "index.d.ts",
+      "platform": "harmonyos",
+      "architectures": [],
+      "sha256": "7ce3794966896540dbe6b438c3f6f3ddb0abbeed76d6e233836fe47b60c1b922",
+      "size": 6264
+    },
+    {
+      "name": "LICENSE",
+      "platform": "source",
+      "architectures": [],
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "size": 11358
+    },
+    {
+      "name": "source-commit.txt",
+      "platform": "source",
+      "architectures": [],
+      "sha256": "c93651dc65b4cac3ac2d084883ac0a78ca898ea0da41afd71b9df27005fce6a9",
+      "size": 41
+    },
+    {
+      "name": "version.txt",
+      "platform": "source",
+      "architectures": [],
+      "sha256": "a291c3c8e0c062052dd40e08f4a7fc6882de69b1faeaa857d66aefd007a6f27c",
+      "size": 12
+    }
+  ]
+}

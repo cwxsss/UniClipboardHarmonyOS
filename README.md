@@ -1,6 +1,6 @@
 # UniClipboard for HarmonyOS
 
-UniClipboard 的 HarmonyOS 原生社区客户端，使用 ArkTS/ArkUI 构建，并通过 Rust Node-API 桥接复用上游空间核心和移动同步协议。
+UniClipboard 的 HarmonyOS 原生社区客户端，使用 ArkTS/ArkUI 构建，并通过官方 Engine HAR 接入加密空间和跨设备同步能力。
 
 > 本项目是社区维护的 HarmonyOS 客户端，并非 UniClipboard 上游官方发行版。请勿将剪贴板历史作为关键数据的唯一副本；已知限制见下文。
 
@@ -16,14 +16,14 @@ UniClipboard 已正式上架华为应用市场，可直接在 HarmonyOS 手机�
 
 ## 与上游项目的关系
 
-本仓库基于 [UniClipboard/UniClipboard](https://github.com/UniClipboard/UniClipboard) 的 AGPL-3.0 代码进行 HarmonyOS 适配，保留并修改了部分 Rust 空间核心与移动同步协议实现。上游快照来自 `0.19.0-alpha.3` 开发阶段的源码归档；原始归档没有保留精确 Git 提交号。
+本仓库基于 [UniClipboard/UniClipboard](https://github.com/UniClipboard/UniClipboard) 的 AGPL-3.0 代码进行 HarmonyOS 适配，并通过固定版本的官方 Engine HAR 复用上游空间能力。客户端不再复制或编译旧的 Rust 空间核心与移动同步协议。
 
 主要修改包括：
 
 - 新增 HarmonyOS ArkTS/ArkUI 应用、系统剪贴板接入和多设备响应式界面；
-- 新增基于 `ohos-rs` 的 Rust Node-API 桥接与 arm64-v8a 构建脚本；
+- 接入官方 Engine HAR、N-API 类型声明和 arm64-v8a/x86_64 原生库；
 - 适配 HarmonyOS Asset Store、Preferences、Image Kit 与应用沙箱；
-- 对上游空间邀请、P2P 文本同步和旧移动同步协议进行移动端封装。
+- 对上游空间邀请、P2P 文本同步和媒体显式目标发送进行移动端封装。
 
 详细归属与修改说明见 [NOTICE.md](./NOTICE.md)。本仓库整体按 AGPL-3.0-only 发布，完整条款见 [LICENSE](./LICENSE)。
 
@@ -32,12 +32,12 @@ UniClipboard 已正式上架华为应用市场，可直接在 HarmonyOS 手机�
 - 使用 `XXXX-XXXX` 短时邀请码和空间口令加入 UniClipboard 空间；
 - 通过端到端加密 P2P 空间链路收发 UTF-8 文本；
 - 空间身份、成员关系和密钥保存在 HarmonyOS 应用沙箱中；
-- 通过旧移动同步协议拉取/推送文本与 PNG 图片；
+- 通过官方 Engine 加密空间自动同步文本，并按用户选择发送图片和文件；
 - 大文本自动转为文件载荷，支持桌面端历史查询、搜索、收藏、置顶和软删除；
 - SSE 前台通知、中文/英文资源、深色/浅色主题；
 - 手机、平板和二合一设备布局；
 - 首次启动引导，以及按屏幕宽度切换的 Compact/Expanded 产品视图；
-- 支持从系统分享面板接收文本、链接、图片和文件，并发送到全部在线设备或指定设备；
+- 支持从系统分享面板接收文本、链接、图片和文件；文本自动广播，图片和文件必须指定目标设备后发送；
 - 支持按设备设置发送方向及文本、图片、文件、链接和富文本等内容类型；
 - 提供连接诊断，检查网络、权限、空间节点和直连/中继状态，并可导出脱敏诊断日志；
 - 历史库支持按设备、标签和常用片段筛选，自定义标签、批量收藏/删除、保留期限及重复记录合并；
@@ -52,13 +52,13 @@ UniClipboard 已正式上架华为应用市场，可直接在 HarmonyOS 手机�
 ```text
 products/default (Entry HAP)
   ├─> features/clipboard (HAR)
-  └─> common (HAR) ──> rust/uniclipboard-native/package (Native HAR)
+  └─> common (HAR) ──> @uniclipboard/engine (official HAR)
 ```
 
 - 产品定制层负责 Ability、响应式设备视图、应用身份资源和产品配置；
 - 基础特性层负责剪贴板共享状态与业务流程编排；
-- 公共能力层提供数据模型、存储、系统剪贴板、通知和同步服务；
-- 原生实现层复用 Rust 协议核心，并通过 Node-API 向 ArkTS 暴露能力。
+- 公共能力层提供数据模型、存储、系统剪贴板、通知和 Engine 编排；
+- 官方 Engine HAR 提供空间、配对、加密同步、历史和文件传输，并通过固定 N-API 声明向 ArkTS 暴露能力。
 
 模块边界、依赖方向和扩展约定详见 [ARCHITECTURE.md](./ARCHITECTURE.md)。
 
@@ -73,17 +73,13 @@ products/default (Entry HAP)
 
 邀请码是短时凭据，不应截图后长期保存或公开；空间口令不要通过与邀请码相同的渠道发送。
 
-### 兼容模式：旧移动同步协议
-
-只有在需要连接旧版桌面移动服务时，才使用 `uniclipboard://connect` 二维码或手动填写服务地址、用户名和一次性密码。该模式默认使用局域网 HTTP + Basic Auth，只应在可信局域网中使用；跨网络使用时，应由你自己提供 HTTPS 反向代理或可信 VPN。
-
 ## 从源码构建
 
 ### 环境要求
 
-- DevEco Studio 与 HarmonyOS SDK；本工程当前目标和最低兼容 API 均为 24（Engine `v1.1.0-rc.6` 要求 API 24）；
+- DevEco Studio 与 HarmonyOS SDK；本工程当前目标和最低兼容 API 均为 24（Engine `v1.1.0-rc.7` 要求 API 24）；
 - PowerShell 与 `devecocli`；
-- 仅在修改 Rust 原生层时需要 Rust 工具链、`cargo` 和 `ohrs`。
+- 只有在重新生成官方 Engine HAR 时，才需要在 Engine 仓库使用 Rust 工具链；本仓库的普通 HAP 构建直接使用已固定的 HAR 和原生库。
 
 克隆后，仓库中已包含 arm64-v8a 原生库，可直接构建 ArkTS 工程：
 
@@ -100,20 +96,6 @@ devecocli build --modules entry@default
 ```
 
 真机安装需要在 DevEco Studio 中为你自己的应用配置调试或发布签名。仓库不会保存证书、私钥或签名口令。
-
-如果修改了 `rust/` 下的原生代码，先设置 SDK 路径并重建本地包：
-
-```powershell
-$env:DEVECO_SDK_HOME = 'C:\path\to\openharmony'
-.\rust\build-native.ps1
-devecocli build
-```
-
-也可以显式传入 SDK 路径：
-
-```powershell
-.\rust\build-native.ps1 -NativeSdk 'C:\path\to\openharmony'
-```
 
 连接调试设备后运行：
 
@@ -197,7 +179,7 @@ Get-FileHash -Algorithm SHA256 $hap
 
 #### 本次问题复盘
 
-- “设备-内容类型”不可操作的直接原因是鸿蒙源码调用了成员同步偏好接口，但旧版 Engine `v1.1.0-rc.6` HAR 的公开声明/二进制没有这些接口；只改 ArkTS 或只做 mock 测试都不能解决运行时问题。
+- “设备-内容类型”不可操作的直接原因是鸿蒙源码调用了成员同步偏好接口，但旧版 Engine HAR 的公开声明/二进制没有这些接口；当前工程使用包含该接口的 Engine `v1.1.0-rc.7`。
 - HAP 曾经生成成功但签名失败，原因是误用了另一个项目的 ClashBox 证书；包名和证书的 bundleName 必须同时是 `com.sss.uniclipboard`。
 - DevEco 启动失败 `UnixDomainSockets.bind` 时，先检查旧的 DevEco 进程和 HDC 端口；本次通过隔离 `idea.system.path` 启动恢复 IDE，未修改项目源码。缓存锁只能在确认无 DevEco 进程后移动到备份目录，不能随意删除用户配置。
 - DevEco 提示 HDC 端口已被占用时，优先设置 `OHOS_HDC_SERVER_PORT` 后重启 IDE，再用同一端口的 `hdc -s` 连接手机；不要反复重置手机应用或重新安装来替代 HDC 连接修复。
@@ -210,7 +192,7 @@ Get-FileHash -Algorithm SHA256 $hap
 
 ### 产品入口回归约束
 
-当前 HAP 的唯一产品入口是 `products/default/`，共享业务状态和 Engine 编排位于 `features/clipboard/`。根目录 `entry/` 只是重构前的兼容源码快照，不是运行时事实来源。修复同步、设备或媒体接收功能时必须先沿 `products/default -> features/clipboard -> common` 跟踪真实调用链；涉及界面交互时必须同时覆盖 Compact 和 Expanded 视图，不能只修改 `entry/src/main/ets/pages/Index.ets`。
+当前 HAP 的唯一产品入口是 `products/default/`，共享业务状态和 Engine 编排位于 `features/clipboard/`。修复同步、设备或媒体接收功能时必须沿 `products/default -> features/clipboard -> common` 跟踪真实调用链；涉及界面交互时必须同时覆盖 Compact 和 Expanded 视图。
 
 每次生成真机 HAP 前至少验证以下路径：应用退到后台后接收桌面文本、桌面图片显示预览和图片识别入口、桌面文件显示预览和保存入口、远端设备同步类型开关可操作并能重新读取已保存状态。后台任务模式由上面的构建检查自动保证，其余路径需要在连接真实 Engine 设备后验证。
 
@@ -220,20 +202,18 @@ Get-FileHash -Algorithm SHA256 $hap
 - `features/clipboard/`：剪贴板特性 HAR，封装共享状态和业务流程；
 - `common/`：公共能力 HAR，包含模型、存储、通知与同步服务；
 - `AppScope/`：应用级资源与元数据；
-- `rust/uniclipboard-native/`：HarmonyOS Node-API 桥；
-- `rust/uc-mobile/`：移动同步客户端封装；
-- `rust/space-core/`：为本移植版保留的上游 Rust 核心快照；
-- `rust/build-native.ps1`：arm64-v8a 原生库构建与本地包装配脚本。
+- `third_party/uniclipboard-engine/v1.1.0-rc.7/`：固定版本的官方 Engine HAR、声明、原生库和校验清单；
+- `common/src/main/ets/service/EngineRuntimeService.ets`：ArkTS 到官方 Engine 的唯一运行时边界。
 
-根目录的 `entry/` 保留为重构前的兼容源码快照；当前构建入口由根 `build-profile.json5` 指向 `products/default/`。
+当前构建入口由根 `build-profile.json5` 指向 `products/default/`。
 
 ## 当前边界
 
 - 官方 Engine 空间已支持桌面到 HarmonyOS 的文本、图片和单文件传输；收到的图片和文件保存在应用受管缓存中，用户可从同步页写入剪贴板、预览或保存；
 - 当前 HarmonyOS Engine 的 `exportEntry` 接口只导出载荷字节，不返回原始文件名和媒体类型，因此接收文件暂时使用通用显示名；该限制应通过扩展 Engine 公共契约解决，客户端不会根据内容任意猜测原文件名；
-- HTTP 兼容模式仍支持文本和 PNG 图片，但不会替代 P2P 空间传输；
+- 鸿蒙端不再提供旧 LAN/HTTP 兼容同步入口；所有同步均通过官方 Engine 加密空间完成；
 - 空间节点随应用进程运行，并通过 `dataTransfer` 持续任务维持后台文本接收；系统仍可能依据省电策略终止长期闲置进程；
-- 当前仓库只提供 arm64-v8a 原生库；
+- 当前 Engine HAR 同时包含 arm64-v8a 和 x86_64 原生库，分别用于真机和模拟器；
 - 应用市场发布不代表 UniClipboard 上游官方背书；协议兼容性仍可能随上游预览版本变化。
 
 ## 参与贡献与安全问题

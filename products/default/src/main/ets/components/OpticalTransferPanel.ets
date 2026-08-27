@@ -12,7 +12,6 @@ import {
   OpticalFountainEncoder,
   OpticalFrame,
   OpticalTransferEnvelope,
-  SyncContent,
   packOpticalEnvelope,
   parseOpticalFrame,
   unpackOpticalEnvelope
@@ -312,14 +311,12 @@ export struct OpticalTransferPanel {
       if (envelope.kind === 'Text') {
         let textDecoder: util.TextDecoder = util.TextDecoder.create('utf-8', { fatal: false, ignoreBOM: true });
         let text: string = textDecoder.decodeToString(envelope.data);
-        await this.controller.applyLatestContent(
-          new SyncContent('Text', text, contentId, '', new Uint8Array(0)), true);
+        await this.controller.receiveExternalContent('Text', '', envelope.data, contentId);
         this.receivedLabel = this.textPreview(envelope.data);
       } else {
         let fileName: string = envelope.name.length > 0 ? envelope.name :
           envelope.kind === 'Image' ? 'image.png' : 'shared-file';
-        await this.controller.applyLatestContent(
-          new SyncContent(envelope.kind, fileName, contentId, fileName, envelope.data), true);
+        await this.controller.receiveExternalContent(envelope.kind, fileName, envelope.data, contentId);
         this.receivedLabel = fileName;
       }
       this.receiverProgress = 1;

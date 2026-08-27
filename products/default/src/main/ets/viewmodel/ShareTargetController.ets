@@ -244,6 +244,10 @@ export class ShareTargetController {
     if (record === null || (this.state !== SHARE_STATE_READY && this.state !== SHARE_STATE_FAILED) || this.sending) {
       return false;
     }
+    if ((this.kind === SHARE_KIND_IMAGE || this.kind === SHARE_KIND_FILE) && deviceId.trim().length === 0) {
+      this.state = SHARE_STATE_FAILED;
+      return false;
+    }
     this.state = SHARE_STATE_READY;
     this.sending = true;
     this.selectedDeviceId = deviceId;

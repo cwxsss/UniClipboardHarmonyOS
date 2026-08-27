@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@ohos/hypium';
 import {
   EngineMemberSyncPreferences,
+  EngineNetworkSettings,
   EngineRuntimeDevice,
   EngineRuntimeError,
   EngineRuntimeSnapshot,
@@ -61,6 +62,19 @@ class FakeControllerRuntime implements ClipboardFeatureControllerRuntime {
 
   async queryMemberSyncPreferences(deviceId: string): Promise<EngineMemberSyncPreferences> {
     return new EngineMemberSyncPreferences(true, true, true, true, true, true, true);
+  }
+
+  async queryNetworkSettings(): Promise<EngineNetworkSettings> {
+    return new EngineNetworkSettings(true, []);
+  }
+
+  async updateNetworkSettings(allowRelayFallback: boolean, customRelayUrls: string[]):
+    Promise<EngineNetworkSettings> {
+    return new EngineNetworkSettings(allowRelayFallback, customRelayUrls.slice());
+  }
+
+  async probeRelayUrl(url: string): Promise<number> {
+    return 1;
   }
 }
 

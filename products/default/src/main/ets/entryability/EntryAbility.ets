@@ -23,8 +23,7 @@ import {
   BackgroundSyncPreferenceService,
   BackgroundSyncTaskService,
   engineRuntimeService,
-  spaceRuntimeSupervisor,
-  setSpaceBackgroundMode
+  spaceRuntimeSupervisor
 } from 'common';
 
 const DOMAIN = 0x0000;
@@ -109,7 +108,6 @@ export default class EntryAbility extends UIAbility {
   }
 
   onDestroy(): void {
-    setSpaceBackgroundMode(false);
     engineRuntimeService.setClipboardPollingEnabled(false);
     this.backgroundSyncTaskService.stop(this.context).catch((): void => {
       hilog.warn(DOMAIN, 'testTag', 'Background sync task shutdown did not complete cleanly.');
@@ -200,7 +198,6 @@ export default class EntryAbility extends UIAbility {
   }
 
   onForeground(): void {
-    setSpaceBackgroundMode(false);
     this.backgroundSyncTaskService.stop(this.context).catch((): void => {
       hilog.warn(DOMAIN, 'testTag', 'Background sync task cleanup did not complete cleanly.');
     });
@@ -218,7 +215,6 @@ export default class EntryAbility extends UIAbility {
     let spaceJoined: boolean | undefined = AppStorage.get<boolean>('spaceJoined');
     let keepEngineRunning: boolean = backgroundSyncEnabled === true && spaceJoined === true;
     if (keepEngineRunning) {
-      setSpaceBackgroundMode(true);
       engineRuntimeService.setClipboardPollingEnabled(true);
       this.backgroundSyncTaskService.start(this.context).catch((): void => {
         hilog.warn(DOMAIN, 'testTag', 'Background sync task startup did not complete cleanly.');

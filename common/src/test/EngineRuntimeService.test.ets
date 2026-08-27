@@ -9,6 +9,7 @@ import {
   EngineActiveClipboard,
   EngineInvitationIssued,
   EngineMemberSyncPreferences,
+  EngineNetworkSettings,
   EngineRuntimeEvent,
   EngineRuntimeHandle,
   EngineRuntimeHost,
@@ -134,6 +135,19 @@ class TestRuntimeHandle implements EngineRuntimeHandle {
 
   async recoverNetwork(): Promise<void> {
     this.recoverNetworkCount += 1;
+  }
+
+  async queryNetworkSettings(): Promise<EngineNetworkSettings> {
+    return new EngineNetworkSettings(true, []);
+  }
+
+  async updateNetworkSettings(allowRelayFallback: boolean, customRelayUrls: string[]):
+    Promise<EngineNetworkSettings> {
+    return new EngineNetworkSettings(allowRelayFallback, customRelayUrls.slice());
+  }
+
+  async probeRelayUrl(url: string): Promise<number> {
+    return 1;
   }
 
   nextEvent(timeoutMs: number): Promise<EngineRuntimeEvent | null> {
@@ -504,12 +518,11 @@ export default function engineRuntimeServiceTest(): void {
       await service.shutdown();
     });
 
-    it('sends observed clipboard text to the selected desktop', 0, async (): Promise<void> => {
+    it('broadcasts observed clipboard text to every eligible device', 0, async (): Promise<void> => {
       let backend: TestRuntimeBackend = new TestRuntimeBackend();
       let service: EngineRuntimeService = EngineRuntimeService.createForTesting(backend, new TestRuntimeHost());
       await service.prepareForTesting(new TestHostCallbacks(), new EngineRuntimeStartConfig('1.0.0', 'test'));
       await service.start();
-      service.setClipboardAutoSendTargets(['desktop-device']);
       let bytes: Uint8Array = new Uint8Array([104, 101, 108, 108, 111]);
       let snapshot: EngineClipboardSnapshot = {
         observedAtMs: 1,
@@ -525,8 +538,7 @@ export default function engineRuntimeServiceTest(): void {
 
       expect(backend.handle.sendTextCount).assertEqual(1);
       expect(backend.handle.lastSentText).assertEqual('hello');
-      expect(backend.handle.lastSendTargets.length).assertEqual(1);
-      expect(backend.handle.lastSendTargets[0]).assertEqual('desktop-device');
+      expect(backend.handle.lastSendTargets.length).assertEqual(0);
       await service.shutdown();
     });
 

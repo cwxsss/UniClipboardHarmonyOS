@@ -1,0 +1,1 @@
+250daf5e9f04ea34c10ba092c822f875c3c3f28ec7832c61528927e42cc9bb5b  arm64-v8a/libuc_ohos_napi.so

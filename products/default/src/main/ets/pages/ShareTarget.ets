@@ -12,6 +12,7 @@ import {
 import { EngineRuntimeDevice, Logger } from 'common';
 import { ClipboardFeatureController } from 'clipboard_feature';
 import {
+  SHARE_KIND_TEXT,
   SHARE_KIND_FILE,
   SHARE_KIND_IMAGE,
   SHARE_STATE_FAILED,
@@ -380,7 +381,9 @@ struct ShareTarget {
         Column({ space: 16 }) {
           this.ContentCard()
           this.SendFailure()
-          this.SendAllButton()
+          if (this.controller.kind === SHARE_KIND_TEXT) {
+            this.SendAllButton()
+          }
         }
         .width(380)
 
@@ -431,7 +434,9 @@ struct ShareTarget {
         Column({ space: 16 }) {
           this.ContentCard()
           this.SendFailure()
-          this.SendAllButton()
+          if (this.controller.kind === SHARE_KIND_TEXT) {
+            this.SendAllButton()
+          }
           Text($r('app.string.share_target_choose_device'))
             .fontSize($r('sys.float.Title_S'))
             .fontWeight(FontWeight.Bold)

@@ -2,7 +2,7 @@
   "modelVersion": "6.0.0",
   "description": "UniClipboard native HarmonyOS client",
   "dependencies": {
-    "@uniclipboard/engine": "file:./third_party/uniclipboard-engine/v1.1.0-rc.6/UniClipboardEngine.har"
+    "@uniclipboard/engine": "file:./third_party/uniclipboard-engine/v1.1.0-rc.7/UniClipboardEngine.har"
   },
   "devDependencies": {
     "@ohos/hypium": "1.0.25",

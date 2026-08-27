@@ -24,39 +24,11 @@ import {
 } from '@kit.UIDesignKit';
 import {
   ClipboardHistoryItem,
-  ServerConfig,
-  ServerHistoryItem,
-  SyncContent,
-  SyncEvent,
-  ClipboardFileSelection,
-  ClipboardService,
   APPEARANCE_MODE_DARK,
   APPEARANCE_MODE_LIGHT,
   APPEARANCE_MODE_SYSTEM,
   APPEARANCE_THEME_DEFAULT,
-  AppearanceStorageService,
-  ConfigStorageService,
-  BackgroundSyncPreferenceService,
-  HistoryStorageService,
-  MobileSyncClient,
-  MobileSyncServerService,
-  NativeProtocolService,
-  ReceivedNotificationService,
-  SpaceNodeService,
-  NativeCreateSpaceResult,
-  NativeJoinSpaceResult,
   EngineRuntimeDevice,
-  NativeSpaceFileEvent,
-  NativeSpaceFileSendResult,
-  NativeSpaceFileStatusEvent,
-  NativeSpaceImageEvent,
-  NativeSpaceInvitation,
-  NativeSpaceStatus,
-  NativeSpaceTextEvent,
-  NativeMobileSyncCredential,
-  NativeMobileSyncDevice,
-  NativeMobileSyncInboundEvent,
-  NativeMobileSyncStatus,
   SpaceProfileRecord
 } from 'common';
 
@@ -272,7 +244,7 @@ export struct ExpandedClipboardView {
           .borderRadius($r('app.float.corner_radius_level10'))
           .attributeModifier(Api26Material.interactive())
           .onClick((): void => {
-            this.controller.initializeSpaceNode();
+            this.controller.initializeSpaceRuntime();
           })
       } else if (this.controller.spaceJoined) {
         Column({ space: 6 }) {
@@ -606,60 +578,25 @@ export struct ExpandedClipboardView {
 
 
   @Builder
-  private historyServerSendToMenu(item: ServerHistoryItem) {
-    Menu() {
-      MenuItem({
-        symbolStartIcon: this.controller.historyMenuSymbol($r('sys.symbol.link')),
-        content: $r('app.string.history_send_to_all_action')
-      }).onClick((): void => {
-          this.controller.sendServerHistoryItemToTarget(item, 'all');
-      })
-      ForEach(this.controller.spaceDevices, (device: EngineRuntimeDevice) => {
-        MenuItem({
-          content: device.deviceName
-        }).enabled(device.online).onClick((): void => {
-            this.controller.sendServerHistoryItemToTarget(item, device.deviceName);
-        })
-      }, (device: EngineRuntimeDevice): string => 'space-' + device.deviceId)
-      ForEach(this.controller.mobileSyncDevices, (device: NativeMobileSyncDevice) => {
-        MenuItem({
-          content: device.label
-        }).enabled(device.online).onClick((): void => {
-            this.controller.sendServerHistoryItemToTarget(item, device.label);
-        })
-      }, (device: NativeMobileSyncDevice): string => 'mobile-' + device.deviceId)
-    }.menuItemDivider({
-      strokeWidth: LengthMetrics.vp(1),
-      color: $r('app.color.divider'),
-      startMargin: LengthMetrics.vp(12),
-      endMargin: LengthMetrics.vp(12)
-    })
-  }
-
-
-  @Builder
   private historyLocalSendToMenu(item: ClipboardHistoryItem) {
     Menu() {
-      MenuItem({
-        symbolStartIcon: this.controller.historyMenuSymbol($r('sys.symbol.link')),
-        content: $r('app.string.history_send_to_all_action')
-      }).onClick((): void => {
-          this.controller.sendLocalHistoryItemToTarget(item, 'all');
-      })
+      if (item.kind === 'Text') {
+        MenuItem({
+          symbolStartIcon: this.controller.historyMenuSymbol($r('sys.symbol.link')),
+          content: $r('app.string.history_send_to_all_action')
+        }).onClick((): void => {
+            this.controller.sendLocalHistoryItemToTarget(item, 'all');
+        })
+      }
       ForEach(this.controller.spaceDevices, (device: EngineRuntimeDevice) => {
-        MenuItem({
-          content: device.deviceName
-        }).enabled(device.online).onClick((): void => {
-            this.controller.sendLocalHistoryItemToTarget(item, device.deviceName);
-        })
+        if (!device.isLocal) {
+          MenuItem({
+            content: device.deviceName.length > 0 ? device.deviceName : device.deviceId
+          }).enabled(device.online).onClick((): void => {
+              this.controller.sendLocalHistoryItemToTarget(item, device.deviceId);
+          })
+        }
       }, (device: EngineRuntimeDevice): string => 'space-' + device.deviceId)
-      ForEach(this.controller.mobileSyncDevices, (device: NativeMobileSyncDevice) => {
-        MenuItem({
-          content: device.label
-        }).enabled(device.online).onClick((): void => {
-            this.controller.sendLocalHistoryItemToTarget(item, device.label);
-        })
-      }, (device: NativeMobileSyncDevice): string => 'mobile-' + device.deviceId)
     }.menuItemDivider({
       strokeWidth: LengthMetrics.vp(1),
       color: $r('app.color.divider'),
@@ -668,40 +605,35 @@ export struct ExpandedClipboardView {
     })
   }
 
-
   @Builder
-  private historyServerContextMenu(item: ServerHistoryItem) {
-    Menu() {
-      MenuItem({
-        symbolStartIcon: this.controller.historyMenuSymbol($r('sys.symbol.clipboard_sharing')),
-        content: $r('app.string.copy_action')
-      }).onClick((): void => {
-          this.controller.copyServerHistoryItem(item);
-      })
-      MenuItem({
-        symbolStartIcon: this.controller.historyMenuSymbol($r('sys.symbol.star')),
-        content: item.starred ? $r('app.string.history_unstar_action') : $r('app.string.history_star_action')
-      }).onClick((): void => {
-          this.controller.toggleHistoryStarred(item);
-      })
-      MenuItem({
-        symbolStartIcon: this.controller.historyMenuSymbol($r('sys.symbol.link')),
-        content: $r('app.string.history_send_to_action'),
-        symbolEndIcon: this.controller.historyMenuSymbol($r('sys.symbol.chevron_forward')),
-        builder: (): void => this.historyServerSendToMenu(item)
-      })
-      MenuItem({
-        symbolStartIcon: this.controller.historyDeleteMenuSymbol(),
-        content: $r('app.string.history_delete_action')
-      }).onClick((): void => {
-          this.controller.confirmDeleteHistory(item);
-      })
-    }.menuItemDivider({
-      strokeWidth: LengthMetrics.vp(1),
-      color: $r('app.color.divider'),
-      startMargin: LengthMetrics.vp(12),
-      endMargin: LengthMetrics.vp(12)
-    })
+  private mediaTransferTargetSelector() {
+    if (this.controller.spaceJoined) {
+      Column({ space: 6 }) {
+        Text($r('app.string.media_target_label'))
+          .fontSize(12)
+          .fontColor($r('app.color.text_secondary'))
+          .width('100%')
+        if (this.controller.mediaTransferTargetOptions().length === 0) {
+          Text($r('app.string.media_target_required'))
+            .fontSize(12)
+            .fontColor($r('app.color.text_secondary'))
+            .width('100%')
+        } else {
+          Select(this.controller.mediaTransferTargetOptions())
+            .selected(this.controller.mediaTransferTargetIndex())
+            .value(this.controller.manualTransferTargetDeviceName.length > 0 ?
+              this.controller.manualTransferTargetDeviceName : $r('app.string.media_target_placeholder'))
+            .fontColor($r('app.color.text_primary'))
+            .selectedOptionFontColor(this.controller.accentColor())
+            .selectedOptionBgColor(this.controller.accentSoftColor())
+            .onSelect((index: number): void => {
+              this.controller.selectMediaTransferTarget(index);
+            })
+            .width('100%')
+        }
+      }
+      .width('100%')
+    }
   }
 
 
@@ -869,316 +801,6 @@ export struct ExpandedClipboardView {
     }
     .width('100%')
     .height(78)
-  }
-
-
-  @Builder
-  private mobileSyncManagementCard() {
-    Column({ space: 12 }) {
-      Row() {
-        Column({ space: 4 }) {
-          Text($r('app.string.mobile_sync_server_title'))
-            .fontSize(18)
-            .fontWeight(FontWeight.Medium)
-            .fontColor($r('app.color.text_primary'))
-          Text(this.controller.mobileSyncRunning ? $r('app.string.mobile_sync_server_running') :
-            $r('app.string.mobile_sync_server_stopped'))
-            .fontSize(12)
-            .fontColor(this.controller.mobileSyncRunning ? $r('app.color.success') :
-              $r('app.color.text_secondary'))
-        }
-        .layoutWeight(1)
-        Toggle({ type: ToggleType.Switch, isOn: this.controller.mobileSyncEnabled })
-          .selectedColor(this.controller.accentColor())
-          .enabled(!this.controller.mobileSyncBusy)
-          .onChange((enabled: boolean): void => {
-            this.controller.toggleMobileSyncServer(enabled);
-          })
-      }
-      .width('100%')
-      Text($r('app.string.mobile_sync_server_note'))
-        .fontSize(12)
-        .lineHeight(18)
-        .fontColor($r('app.color.text_secondary'))
-        .width('100%')
-      Row({ space: 10 }) {
-        Text($r('app.string.mobile_sync_port'))
-          .fontSize(12)
-          .fontColor($r('app.color.text_secondary'))
-        TextInput({ text: this.controller.mobileSyncPort, placeholder: '42720' })
-          .layoutWeight(1)
-          .height(42)
-          .fontSize(14)
-          .fontColor($r('app.color.text_primary'))
-          .backgroundColor($r('app.color.surface_muted'))
-          .borderRadius($r('app.float.corner_radius_level8'))
-          .attributeModifier(Api26Material.input())
-          .onChange((value: string): void => {
-            this.controller.mobileSyncPort = value;
-          })
-        Button($r('app.string.operation_success'), { type: ButtonType.Normal })
-          .height(42)
-          .fontSize(12)
-          .fontColor($r('app.color.text_primary'))
-          .backgroundColor($r('app.color.surface_muted'))
-          .borderRadius($r('app.float.corner_radius_level8'))
-          .enabled(!this.controller.mobileSyncBusy)
-          .attributeModifier(Api26Material.interactive())
-          .onClick((): void => {
-            this.controller.toggleMobileSyncServer(this.controller.mobileSyncEnabled);
-          })
-      }
-      .width('100%')
-      if (this.controller.mobileSyncUrls.length > 0) {
-        Text($r('app.string.mobile_sync_addresses'))
-          .fontSize(12)
-          .fontColor($r('app.color.text_secondary'))
-          .width('100%')
-        ForEach(this.controller.mobileSyncUrls, (url: string) => {
-          Text(url)
-            .fontSize(14)
-            .fontColor($r('app.color.text_primary'))
-            .copyOption(CopyOptions.LocalDevice)
-            .width('100%')
-            .padding(10)
-            .borderRadius($r('app.float.corner_radius_level4'))
-            .backgroundColor($r('app.color.surface_muted'))
-            .attributeModifier(Api26Material.subtle())
-        }, (url: string): string => url)
-      } else {
-        Text($r('app.string.mobile_sync_no_address'))
-          .fontSize(12)
-          .fontColor($r('app.color.text_secondary'))
-          .width('100%')
-      }
-      Row() {
-        Text($r('app.string.mobile_sync_registered_devices'))
-          .fontSize(14)
-          .fontWeight(FontWeight.Medium)
-          .fontColor($r('app.color.text_primary'))
-        Blank()
-        Button($r('app.string.mobile_sync_add_device'), { type: ButtonType.Normal })
-          .height(36)
-          .fontSize(12)
-          .fontColor(Api26Material.accentTextColor())
-          .backgroundColor(this.controller.accentColor())
-          .borderRadius($r('app.float.corner_radius_level8'))
-          .enabled(this.controller.mobileSyncRunning && !this.controller.mobileSyncBusy)
-          .attributeModifier(Api26Material.accent())
-          .onClick((): void => {
-            this.controller.mobileSyncAddOpen = !this.controller.mobileSyncAddOpen;
-            this.controller.mobileSyncCredential = null;
-            this.controller.mobileSyncDeviceName = '';
-            this.controller.mobileSyncCustomUsername = '';
-            this.controller.mobileSyncCustomPassword = '';
-            this.controller.mobileSyncAdvancedOpen = false;
-            this.controller.mobileSyncState = 0;
-          })
-      }
-      .width('100%')
-      if (this.controller.mobileSyncDevices.length === 0) {
-        Text($r('app.string.mobile_sync_no_devices'))
-          .fontSize(12)
-          .fontColor($r('app.color.text_secondary'))
-          .width('100%')
-      } else {
-        ForEach(this.controller.mobileSyncDevices, (device: NativeMobileSyncDevice) => {
-          Row({ space: 10 }) {
-            Stack({ alignContent: Alignment.BottomEnd }) {
-              Column() {
-                SymbolGlyph($r('sys.symbol.phone'))
-                  .fontSize(22)
-                  .fontColor([this.controller.accentColor()])
-              }
-              .width(40)
-              .height(40)
-              .justifyContent(FlexAlign.Center)
-              .borderRadius($r('app.float.corner_radius_level4'))
-              .backgroundColor(this.controller.accentSoftColor())
-              .attributeModifier(Api26Material.accentSurface())
-              Row()
-                .width(10)
-                .height(10)
-                .borderRadius(5)
-                .backgroundColor(device.online ? $r('app.color.success') :
-                  $r('app.color.text_secondary'))
-                .border({ width: 2, color: $r('app.color.surface_muted') })
-            }
-            .width(40)
-            .height(40)
-            Column({ space: 3 }) {
-              Text(device.label)
-                .fontSize(14)
-                .fontColor($r('app.color.text_primary'))
-                .maxLines(1)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-              Text(device.online ? $r('app.string.device_status_online') :
-                (device.lastSeenAtMs > 0 ? $r('app.string.device_status_offline') :
-                  $r('app.string.mobile_sync_never_seen')))
-                .fontSize(11)
-                .fontColor(device.online ? $r('app.color.success') :
-                  $r('app.color.text_secondary'))
-            }
-            .layoutWeight(1)
-            Button($r('app.string.mobile_sync_revoke'), { type: ButtonType.Normal })
-              .height(32)
-              .fontSize(11)
-              .fontColor($r('app.color.danger'))
-              .backgroundColor($r('app.color.surface_muted'))
-              .borderRadius($r('app.float.corner_radius_level4'))
-              .enabled(!this.controller.desktopDeviceMutationBusy)
-              .attributeModifier(Api26Material.interactive())
-              .onClick((): void => {
-                this.controller.revokeMobileSyncDevice(device);
-              })
-          }
-          .width('100%')
-          .padding(8)
-          .borderRadius($r('app.float.corner_radius_level4'))
-          .backgroundColor($r('app.color.surface_muted'))
-          .attributeModifier(Api26Material.subtle())
-        }, (device: NativeMobileSyncDevice): string => device.deviceId)
-      }
-      if (this.controller.mobileSyncAddOpen && this.controller.mobileSyncCredential === null) {
-        Column({ space: 9 }) {
-          Text($r('app.string.mobile_sync_add_title'))
-            .fontSize(16)
-            .fontWeight(FontWeight.Medium)
-            .fontColor($r('app.color.text_primary'))
-            .width('100%')
-          Text($r('app.string.mobile_sync_add_note'))
-            .fontSize(12)
-            .lineHeight(18)
-            .fontColor($r('app.color.text_secondary'))
-            .width('100%')
-          Text($r('app.string.mobile_sync_device_name'))
-            .fontSize(12)
-            .fontColor($r('app.color.text_secondary'))
-            .width('100%')
-          TextInput({ placeholder: $r('app.string.mobile_sync_device_placeholder'),
-            text: this.controller.mobileSyncDeviceName })
-            .height(44)
-            .fontSize(14)
-            .backgroundColor($r('app.color.surface_muted'))
-            .borderRadius($r('app.float.corner_radius_level8'))
-            .attributeModifier(Api26Material.input())
-            .onChange((value: string): void => {
-              this.controller.mobileSyncDeviceName = value;
-            })
-          Text($r('app.string.mobile_sync_advanced'))
-            .fontSize(12)
-            .fontColor(this.controller.accentColor())
-            .width('100%')
-            .onClick((): void => {
-              this.controller.mobileSyncAdvancedOpen = !this.controller.mobileSyncAdvancedOpen;
-            })
-          if (this.controller.mobileSyncAdvancedOpen) {
-            TextInput({ placeholder: $r('app.string.mobile_sync_custom_username'),
-              text: this.controller.mobileSyncCustomUsername })
-              .height(44)
-              .fontSize(14)
-              .backgroundColor($r('app.color.surface_muted'))
-              .borderRadius($r('app.float.corner_radius_level8'))
-              .attributeModifier(Api26Material.input())
-              .onChange((value: string): void => {
-                this.controller.mobileSyncCustomUsername = value;
-              })
-            TextInput({ placeholder: $r('app.string.mobile_sync_custom_password'),
-              text: this.controller.mobileSyncCustomPassword })
-              .type(InputType.Password)
-              .height(44)
-              .fontSize(14)
-              .backgroundColor($r('app.color.surface_muted'))
-              .borderRadius($r('app.float.corner_radius_level8'))
-              .attributeModifier(Api26Material.input())
-              .onChange((value: string): void => {
-                this.controller.mobileSyncCustomPassword = value;
-              })
-          }
-          Button(this.controller.mobileSyncBusy ? $r('app.string.mobile_sync_creating') :
-            $r('app.string.mobile_sync_create'), { type: ButtonType.Normal })
-            .width('100%')
-            .height(44)
-            .fontColor(Api26Material.accentTextColor())
-            .backgroundColor(this.controller.accentColor())
-            .borderRadius($r('app.float.corner_radius_level8'))
-            .enabled(this.controller.mobileSyncDeviceName.trim().length > 0 && !this.controller.mobileSyncBusy)
-            .attributeModifier(Api26Material.accent())
-            .onClick((): void => {
-              this.controller.createMobileSyncDevice();
-            })
-        }
-        .width('100%')
-        .padding(12)
-        .borderRadius($r('app.float.corner_radius_level8'))
-        .backgroundColor($r('app.color.surface_muted'))
-        .attributeModifier(Api26Material.subtle())
-      }
-      if (this.controller.mobileSyncCredential !== null) {
-        Column({ space: 10 }) {
-          Text($r('app.string.mobile_sync_scan_title'))
-            .fontSize(16)
-            .fontWeight(FontWeight.Medium)
-            .fontColor($r('app.color.text_primary'))
-            .width('100%')
-          Row() {
-            QRCode(this.controller.mobileSyncCredential.connectUri)
-              .width(190)
-              .height(190)
-              .color($r('app.color.qr_foreground'))
-              .backgroundColor($r('app.color.qr_background'))
-          }
-          .width('100%')
-          .justifyContent(FlexAlign.Center)
-          Text($r('app.string.mobile_sync_scan_note'))
-            .fontSize(12)
-            .lineHeight(18)
-            .fontColor($r('app.color.text_secondary'))
-            .width('100%')
-          Text($r('app.string.mobile_sync_username'))
-            .fontSize(12)
-            .fontColor($r('app.color.text_secondary'))
-            .width('100%')
-          Text(this.controller.mobileSyncCredential.username)
-            .fontSize(14)
-            .fontColor($r('app.color.text_primary'))
-            .copyOption(CopyOptions.LocalDevice)
-            .width('100%')
-          Text($r('app.string.mobile_sync_password'))
-            .fontSize(12)
-            .fontColor($r('app.color.text_secondary'))
-            .width('100%')
-          Text(this.controller.mobileSyncPasswordVisible ? this.controller.mobileSyncCredential.password : '••••••••••••')
-            .fontSize(14)
-            .fontColor($r('app.color.text_primary'))
-            .copyOption(CopyOptions.LocalDevice)
-            .width('100%')
-            .onClick((): void => {
-              this.controller.mobileSyncPasswordVisible = !this.controller.mobileSyncPasswordVisible;
-            })
-          Text($r('app.string.mobile_sync_one_time_secret'))
-            .fontSize(12)
-            .fontColor($r('app.color.danger'))
-            .width('100%')
-        }
-        .width('100%')
-        .padding(12)
-        .borderRadius($r('app.float.corner_radius_level8'))
-        .border({ width: 1, color: $r('app.color.danger') })
-      }
-      if (this.controller.mobileSyncState === 3) {
-        Text($r('app.string.mobile_sync_server_failed'))
-          .fontSize(12)
-          .lineHeight(18)
-          .fontColor($r('app.color.danger'))
-          .width('100%')
-      }
-    }
-    .width('100%')
-    .padding($r('app.float.padding_level8'))
-    .borderRadius($r('app.float.corner_radius_level8'))
-    .backgroundColor($r('app.color.surface'))
-    .attributeModifier(Api26Material.panel())
   }
 
 
@@ -1756,54 +1378,6 @@ export struct ExpandedClipboardView {
 
 
   @Builder
-  private desktopServerHistoryRow(item: ServerHistoryItem) {
-    Column({ space: 7 }) {
-      Row() {
-        Row({ space: 7 }) {
-          SymbolGlyph(item.kind === 'Image' ? $r('sys.symbol.ohos_photo') : $r('sys.symbol.doc_text'))
-            .fontSize($r('app.float.font_body_large'))
-            .fontColor([item.kind === 'Image' ? $r('app.color.success') : $r('app.color.text_secondary')])
-          Text(item.kind)
-            .fontSize(12)
-            .fontColor($r('app.color.text_secondary'))
-          if (item.starred) {
-            Text('★')
-              .fontSize(12)
-              .fontColor(this.controller.accentColor())
-          }
-        }
-        Blank()
-        Text(item.time)
-          .fontSize($r('app.float.font_body_small'))
-          .fontColor($r('app.color.text_secondary'))
-      }
-      .width('100%')
-      Text(item.text)
-        .fontSize($r('app.float.font_body_large'))
-        .lineHeight(21)
-        .maxLines(2)
-        .textOverflow({ overflow: TextOverflow.Ellipsis })
-        .fontColor($r('app.color.text_primary'))
-        .width('100%')
-    }
-    .width('100%')
-    .height(94)
-    .justifyContent(FlexAlign.Center)
-    .padding({ left: 18, right: 18 })
-    .borderRadius($r('app.float.corner_radius_level8'))
-    .backgroundColor(this.controller.desktopSelectedId === item.id ? this.controller.accentSoftColor() :
-      $r('app.color.surface'))
-    .border({ width: 1, color: $r('app.color.divider') })
-    .clickEffect({ level: ClickEffectLevel.MIDDLE })
-    .bindContextMenu(this.historyServerContextMenu(item), ResponseType.LongPress)
-    .attributeModifier(Api26Material.interactive())
-    .onClick((): void => {
-      this.controller.selectDesktopServerItem(item);
-    })
-  }
-
-
-  @Builder
   private desktopSessionHistoryRow(item: ClipboardHistoryItem) {
     Row({ space: 12 }) {
       if (this.controller.historySelectionMode) {
@@ -1910,8 +1484,7 @@ export struct ExpandedClipboardView {
             this.controller.submitDesktopHistorySearch();
           })
         Row({ space: 4 }) {
-          Text((this.controller.desktopFilteredServerHistory().length +
-            this.controller.desktopFilteredSessionHistory().length).toString())
+          Text(this.controller.desktopFilteredSessionHistory().length.toString())
             .fontSize(12)
             .fontColor($r('app.color.text_secondary'))
           Text($r('app.string.desktop_items'))
@@ -1980,15 +1553,14 @@ export struct ExpandedClipboardView {
         .padding({ left: 16, right: 16 })
         .border({ width: { bottom: 1 }, color: $r('app.color.divider') })
       }
-      if (this.historyRenderRevision >= 0 && this.controller.desktopFilteredServerHistory().length === 0 &&
-        this.controller.desktopFilteredSessionHistory().length === 0) {
+      if (this.historyRenderRevision >= 0 && this.controller.desktopFilteredSessionHistory().length === 0) {
         Scroll() {
           Column({ space: 12 }) {
             SymbolGlyph($r('sys.symbol.clipboard_sharing'))
               .fontSize(38)
               .fontColor([$r('app.color.text_secondary')])
             Text(this.controller.desktopAllFiltersClear() && this.controller.historySearchText.trim().length === 0 ?
-              $r('app.string.server_history_empty') : $r('app.string.desktop_filtered_empty'))
+              $r('app.string.history_empty') : $r('app.string.desktop_filtered_empty'))
               .fontSize(14)
               .textAlign(TextAlign.Center)
               .fontColor($r('app.color.text_secondary'))
@@ -2009,11 +1581,6 @@ export struct ExpandedClipboardView {
         .scrollBar(BarState.Auto)
       } else {
         List({ space: 8 }) {
-          LazyForEach(this.controller.desktopServerHistoryDataSource(), (item: ServerHistoryItem) => {
-            ListItem() {
-              this.desktopServerHistoryRow(item)
-            }
-          }, (item: ServerHistoryItem) => item.id)
           LazyForEach(this.controller.desktopSessionHistoryDataSource(), (item: ClipboardHistoryItem) => {
             ListItem() {
               this.desktopSessionHistoryRow(item)
@@ -2246,7 +1813,8 @@ export struct ExpandedClipboardView {
         .fontColor(Api26Material.accentTextColor())
         .backgroundColor(this.controller.accentColor())
         .borderRadius($r('app.float.corner_radius_level10'))
-        .enabled(!this.controller.busy && this.controller.composerImage !== null)
+        .enabled(!this.controller.busy && this.controller.composerImage !== null &&
+          this.controller.manualTransferTargetDeviceId.length > 0)
         .attributeModifier(Api26Material.accent())
         .onClick((): void => {
           this.controller.sendImage();
@@ -2308,7 +1876,8 @@ export struct ExpandedClipboardView {
         .fontColor(Api26Material.accentTextColor())
         .backgroundColor(this.controller.accentColor())
         .borderRadius($r('app.float.corner_radius_level10'))
-        .enabled(!this.controller.busy && this.controller.composerFileUri.length > 0 && this.controller.spaceJoined)
+        .enabled(!this.controller.busy && this.controller.composerFileUri.length > 0 && this.controller.spaceJoined &&
+          this.controller.manualTransferTargetDeviceId.length > 0)
         .attributeModifier(Api26Material.accent())
         .onClick((): void => {
           this.controller.sendFile();
@@ -2818,6 +2387,7 @@ export struct ExpandedClipboardView {
       .layoutWeight(1)
       .width('100%')
       Column({ space: 10 }) {
+        this.mediaTransferTargetSelector()
         this.desktopImageComposer()
         this.fileComposer()
         TextArea({ placeholder: $r('app.string.composer_placeholder'), text: this.controller.composerText })
@@ -2854,18 +2424,17 @@ export struct ExpandedClipboardView {
                 })
             }
             .layoutWeight(1)
-            Button(!this.controller.hasConfig() && this.controller.spaceJoined ? $r('app.string.space_refresh_sync_action') :
-              $r('app.string.pull_action'), { type: ButtonType.Normal })
+            Button($r('app.string.pull_action'), { type: ButtonType.Normal })
               .height(40)
               .fontSize(14)
               .fontColor(Api26Material.accentTextColor())
               .backgroundColor(this.controller.accentColor())
               .borderRadius($r('app.float.corner_radius_level10'))
               .layoutWeight(1)
-              .enabled(!this.controller.busy)
+              .enabled(!this.controller.busy && !this.controller.desktopRefreshBusy)
               .attributeModifier(Api26Material.accent())
               .onClick((): void => {
-                this.controller.pullLatest();
+                this.controller.refreshDesktopMessages();
               })
             Button(this.controller.desktopShowsFile() ? $r('app.string.save_file_action') :
               $r('app.string.copy_action'), { type: ButtonType.Normal })
@@ -3381,28 +2950,6 @@ export struct ExpandedClipboardView {
 
 
   @Builder
-  private desktopMobileDeviceContextMenu(device: NativeMobileSyncDevice) {
-    Menu() {
-      MenuItem({
-        symbolStartIcon: this.controller.historyDeleteMenuSymbol(),
-        content: $r('app.string.mobile_sync_revoke_confirm')
-      })
-      .enabled(!this.controller.desktopDeviceMutationBusy)
-      .onClick((): void => {
-        setTimeout((): void => {
-          this.controller.revokeMobileSyncDevice(device);
-        }, 120);
-      })
-    }.menuItemDivider({
-      strokeWidth: LengthMetrics.vp(1),
-      color: $r('app.color.divider'),
-      startMargin: LengthMetrics.vp(12),
-      endMargin: LengthMetrics.vp(12)
-    })
-  }
-
-
-  @Builder
   private desktopPairedDeviceRow(device: EngineRuntimeDevice) {
     Row({ space: 11 }) {
       Stack({ alignContent: Alignment.BottomEnd }) {
@@ -3478,63 +3025,6 @@ export struct ExpandedClipboardView {
       this.controller.selectDesktopSpaceDevice(device);
     })
     .bindContextMenu(this.desktopPairedDeviceContextMenu(device), ResponseType.LongPress)
-  }
-
-
-  @Builder
-  private desktopMobileDeviceRow(device: NativeMobileSyncDevice) {
-    Row({ space: 11 }) {
-      Stack({ alignContent: Alignment.BottomEnd }) {
-        Column() {
-          SymbolGlyph($r('sys.symbol.phone'))
-            .fontSize(24)
-            .fontColor([this.controller.accentColor()])
-        }
-        .width(44)
-        .height(44)
-        .justifyContent(FlexAlign.Center)
-        .borderRadius(13)
-        .backgroundColor(this.controller.accentSoftColor())
-        .attributeModifier(Api26Material.accentSurface())
-        Row()
-          .width(10)
-          .height(10)
-          .borderRadius(5)
-          .backgroundColor(device.online ? $r('app.color.success') : $r('app.color.text_secondary'))
-          .border({ width: 2, color: $r('app.color.surface_muted') })
-      }
-      .width(44)
-      .height(44)
-      Column({ space: 4 }) {
-        Text(device.label)
-          .fontSize(14)
-          .fontWeight(FontWeight.Medium)
-          .fontColor($r('app.color.text_primary'))
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .width('100%')
-        Row({ space: 8 }) {
-          Text(device.username)
-            .fontSize($r('app.float.font_body_small'))
-            .fontColor($r('app.color.text_secondary'))
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-          Text(device.online ? $r('app.string.device_status_online') :
-            (device.lastSeenAtMs > 0 ? $r('app.string.device_status_offline') :
-              $r('app.string.device_status_unknown')))
-            .fontSize($r('app.float.font_body_small'))
-            .fontColor(device.online ? $r('app.color.success') : $r('app.color.text_secondary'))
-        }
-      }
-      .layoutWeight(1)
-    }
-    .width('100%')
-    .height(64)
-    .padding({ left: 10, right: 12 })
-    .borderRadius($r('app.float.corner_radius_level10'))
-    .backgroundColor($r('app.color.surface_muted'))
-    .attributeModifier(Api26Material.subtle())
-    .bindContextMenu(this.desktopMobileDeviceContextMenu(device), ResponseType.LongPress)
   }
 
 
@@ -3935,8 +3425,6 @@ export struct ExpandedClipboardView {
           this.spaceJoinCard()
         } else {
           this.desktopSpaceRelaySettings()
-          this.mobileSyncManagementCard()
-          this.desktopLegacyConnectionSettings()
         }
       }
       .width('100%')
@@ -4031,32 +3519,6 @@ export struct ExpandedClipboardView {
             this.desktopPairedDeviceRow(device)
           }, (device: EngineRuntimeDevice): string => device.deviceId + ':' + device.online.toString() + ':' +
             device.state)
-        }
-        Row() {
-          Text($r('app.string.desktop_mobile_devices'))
-            .fontSize(12)
-            .fontColor($r('app.color.text_secondary'))
-          Blank()
-          Text(this.controller.mobileSyncDevices.length.toString())
-            .fontSize($r('app.float.font_body_small'))
-            .fontColor($r('app.color.text_secondary'))
-            .padding({ left: 8, right: 8, top: 2, bottom: 2 })
-            .borderRadius($r('app.float.corner_radius_level4'))
-            .backgroundColor($r('app.color.surface_muted'))
-            .attributeModifier(Api26Material.subtle())
-        }
-        .width('100%')
-        .margin({ top: 14 })
-        if (this.controller.mobileSyncDevices.length === 0) {
-          Text($r('app.string.mobile_sync_no_devices'))
-            .fontSize($r('app.float.font_body_small'))
-            .fontColor($r('app.color.text_secondary'))
-            .width('100%')
-            .padding({ left: 10, right: 10, top: 8, bottom: 8 })
-        } else {
-          ForEach(this.controller.mobileSyncDevices, (device: NativeMobileSyncDevice) => {
-            this.desktopMobileDeviceRow(device)
-          }, (device: NativeMobileSyncDevice): string => device.deviceId)
         }
         Blank()
         if (this.controller.spaceJoined) {
@@ -4426,172 +3888,6 @@ export struct ExpandedClipboardView {
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)
-    }
-    .width('100%')
-    .padding(22)
-    .borderRadius($r('app.float.corner_radius_level8'))
-    .border({ width: 1, color: $r('app.color.divider') })
-  }
-
-
-  @Builder
-  private desktopLegacyConnectionSettings() {
-    Column({ space: 12 }) {
-      Text($r('app.string.desktop_legacy_connection_title'))
-        .fontSize(16)
-        .fontWeight(FontWeight.Medium)
-        .fontColor($r('app.color.text_primary'))
-        .width('100%')
-      Text($r('app.string.desktop_legacy_connection_note'))
-        .fontSize(12)
-        .lineHeight(18)
-        .fontColor($r('app.color.text_secondary'))
-        .width('100%')
-      Text($r('app.string.connect_uri_label'))
-        .fontSize(12)
-        .fontColor($r('app.color.text_secondary'))
-        .width('100%')
-      TextArea({ placeholder: $r('app.string.connect_uri_placeholder'), text: this.controller.connectUri })
-        .height(80)
-        .backgroundColor($r('app.color.surface_muted'))
-        .borderRadius($r('app.float.corner_radius_level10'))
-        .attributeModifier(Api26Material.input())
-        .onChange((value: string): void => {
-          this.controller.connectUri = value;
-          this.controller.connectUriState = 0;
-        })
-      if (this.controller.connectUriState === 1) {
-        Text($r('app.string.connect_uri_success'))
-          .fontSize(12)
-          .fontColor($r('app.color.success'))
-          .width('100%')
-      } else if (this.controller.connectUriState === 2) {
-        Text($r('app.string.connect_uri_failed'))
-          .fontSize(12)
-          .fontColor($r('app.color.danger'))
-          .width('100%')
-      } else if (this.controller.connectUriState === 3) {
-        Text($r('app.string.connect_uri_scan_failed'))
-          .fontSize(12)
-          .fontColor($r('app.color.danger'))
-          .width('100%')
-      }
-      Row({ space: 10 }) {
-        Button($r('app.string.connect_uri_scan_action'), { type: ButtonType.Normal })
-          .height(42)
-          .fontColor($r('app.color.text_primary'))
-          .backgroundColor($r('app.color.surface_muted'))
-          .borderRadius($r('app.float.corner_radius_level10'))
-          .attributeModifier(Api26Material.interactive())
-          .onClick((): void => {
-            this.controller.scanConnectUri();
-          })
-        Button($r('app.string.connect_uri_action'), { type: ButtonType.Normal })
-          .height(42)
-          .fontColor(Api26Material.accentTextColor())
-          .backgroundColor(this.controller.accentColor())
-          .borderRadius($r('app.float.corner_radius_level10'))
-          .attributeModifier(Api26Material.accent())
-          .onClick((): void => {
-            this.controller.importConnectUri();
-          })
-      }
-    }
-    .width('100%')
-    .padding(22)
-    .borderRadius($r('app.float.corner_radius_level8'))
-    .border({ width: 1, color: $r('app.color.divider') })
-    Column({ space: 12 }) {
-      Row() {
-        Text($r('app.string.legacy_service_form_title'))
-          .fontSize(16)
-          .fontWeight(FontWeight.Medium)
-          .fontColor($r('app.color.text_primary'))
-        Blank()
-        this.statusPill()
-      }
-      .width('100%')
-      Text($r('app.string.legacy_server_url_label'))
-        .fontSize(12)
-        .fontColor($r('app.color.text_secondary'))
-        .width('100%')
-      TextInput({ placeholder: $r('app.string.server_url_placeholder'), text: this.controller.serverUrl })
-        .height(46)
-        .backgroundColor($r('app.color.surface_muted'))
-        .borderRadius($r('app.float.corner_radius_level10'))
-        .attributeModifier(Api26Material.input())
-        .onChange((value: string): void => {
-          this.controller.serverUrl = value;
-          this.controller.connectionChanged();
-        })
-      Row({ space: 12 }) {
-        Column({ space: 7 }) {
-          Text($r('app.string.username_label'))
-            .fontSize(12)
-            .fontColor($r('app.color.text_secondary'))
-            .width('100%')
-          TextInput({ placeholder: $r('app.string.username_placeholder'), text: this.controller.username })
-            .height(46)
-            .backgroundColor($r('app.color.surface_muted'))
-            .borderRadius($r('app.float.corner_radius_level10'))
-            .attributeModifier(Api26Material.input())
-            .onChange((value: string): void => {
-              this.controller.username = value;
-              this.controller.connectionChanged();
-            })
-        }
-        .layoutWeight(1)
-        Column({ space: 7 }) {
-          Text($r('app.string.password_label'))
-            .fontSize(12)
-            .fontColor($r('app.color.text_secondary'))
-            .width('100%')
-          TextInput({ placeholder: $r('app.string.password_placeholder'), text: this.controller.password })
-            .type(InputType.Password)
-            .height(46)
-            .backgroundColor($r('app.color.surface_muted'))
-            .borderRadius($r('app.float.corner_radius_level10'))
-            .attributeModifier(Api26Material.input())
-            .onChange((value: string): void => {
-              this.controller.password = value;
-              this.controller.connectionChanged();
-            })
-        }
-        .layoutWeight(1)
-      }
-      .width('100%')
-      Row({ space: 10 }) {
-        Button($r('app.string.test_connection_action'), { type: ButtonType.Normal })
-          .layoutWeight(1)
-          .height(44)
-          .fontColor(Api26Material.accentTextColor())
-          .backgroundColor(this.controller.accentColor())
-          .borderRadius($r('app.float.corner_radius_level10'))
-          .enabled(this.controller.hasConfig() && !this.controller.busy)
-          .attributeModifier(Api26Material.accent())
-          .onClick((): void => {
-            this.controller.testConnection();
-          })
-        Button(this.controller.realtimeActive ? $r('app.string.realtime_stop_action') :
-          $r('app.string.realtime_start_action'), { type: ButtonType.Normal })
-          .layoutWeight(1)
-          .height(44)
-          .fontColor(this.controller.realtimeActive ? $r('app.color.danger') : $r('app.color.text_primary'))
-          .backgroundColor($r('app.color.surface_muted'))
-          .borderRadius($r('app.float.corner_radius_level10'))
-          .enabled(this.controller.hasConfig())
-          .attributeModifier(Api26Material.interactive())
-          .onClick((): void => {
-            this.controller.toggleRealtime();
-          })
-      }
-      .width('100%')
-      Text(this.controller.realtimeActive ? $r('app.string.realtime_active_note') :
-        $r('app.string.realtime_inactive_note'))
-        .fontSize(12)
-        .lineHeight(18)
-        .fontColor(this.controller.realtimeActive ? $r('app.color.success') : $r('app.color.text_secondary'))
-        .width('100%')
     }
     .width('100%')
     .padding(22)

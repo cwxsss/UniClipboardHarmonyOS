@@ -5,8 +5,6 @@
 /.ohos-sdk/
 /oh_modules/
 **/oh_modules/
-/entry/build/
-/entry/oh_modules/
 /build/
 /output/
 /recovery/
@@ -18,9 +16,6 @@
 local.properties
 
 # Rust and ohos-rs build outputs
-/rust/.ohos-sdk/
-/rust/**/target/
-/rust/uniclipboard-native/dist/
 
 # Local test captures and runtime data
 /artifacts/
@@ -51,8 +46,9 @@ Thumbs.db
 # Packaged outputs belong in GitHub Releases, not source control
 *.app
 *.hap
+# The rc.7 Engine HAR is over GitHub's regular blob limit. Keep it as a
+# Release asset and retain only the checked metadata in the source tree.
 *.har
-!/third_party/uniclipboard-engine/**/*.har
 
 # UniClipboard optical-transfer web companion
 /tools/optical-transfer-web/node_modules/

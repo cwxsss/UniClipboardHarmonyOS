@@ -9,15 +9,7 @@ $checks = @(
         Pattern = '"backgroundModes"\s*:\s*\[\s*"dataTransfer"\s*\]'
     },
     @{
-        Path = 'entry/src/main/module.json5'
-        Pattern = '"backgroundModes"\s*:\s*\[\s*"dataTransfer"\s*\]'
-    },
-    @{
         Path = 'common/src/main/ets/service/BackgroundSyncService.ets'
-        Pattern = "taskModes:\s*string\[\]\s*=\s*\['dataTransfer'\]"
-    },
-    @{
-        Path = 'entry/src/main/ets/service/BackgroundSyncService.ets'
         Pattern = "taskModes:\s*string\[\]\s*=\s*\['dataTransfer'\]"
     }
 )

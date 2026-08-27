@@ -1,9 +1,0 @@
-{
-  "license": "AGPL-3.0-only",
-  "name": "uniclipboard_native",
-  "description": "UniClipboard Rust protocol core for HarmonyOS",
-  "main": "index.ets",
-  "version": "0.1.0",
-  "types": "libs/index.d.ts",
-  "dependencies": {}
-}

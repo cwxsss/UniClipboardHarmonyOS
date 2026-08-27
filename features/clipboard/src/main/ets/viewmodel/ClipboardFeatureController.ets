@@ -33,10 +33,6 @@ import {
 import {
   ClipboardHistoryItem,
   LinkPreview,
-  ServerConfig,
-  ServerHistoryItem,
-  SyncContent,
-  SyncEvent,
   ClipboardFilePayload,
   ClipboardFileSelection,
   ClipboardService,
@@ -46,7 +42,6 @@ import {
   APPEARANCE_THEME_DEFAULT,
   AppearanceVisualSettings,
   AppearanceStorageService,
-  ConfigStorageService,
   BackgroundSyncPreferenceService,
   HistoryStorageService,
   HistoryLibrarySettings,
@@ -56,6 +51,7 @@ import {
   engineRuntimeService,
   EngineInvitationIssued,
   EngineActiveClipboard,
+  EngineNetworkSettings,
   EngineMemberSyncPreferences,
   EngineSendReport,
   EngineSpaceCreated,
@@ -72,14 +68,7 @@ import {
   SpaceProfileRecord,
   SpaceProfileStore,
   spaceRuntimeSupervisor,
-  MobileSyncClient,
-  MobileSyncServerService,
-  NativeProtocolService,
   ReceivedNotificationService,
-  NativeMobileSyncCredential,
-  NativeMobileSyncDevice,
-  NativeMobileSyncInboundEvent,
-  NativeMobileSyncStatus
 } from 'common';
 
 import { HistoryDataSource } from './HistoryDataSource';
@@ -131,6 +120,14 @@ export class ImageSmartAction {
   }
 }
 
+export class MediaTransferTargetOption {
+  value: string = '';
+
+  constructor(value: string) {
+    this.value = value;
+  }
+}
+
 export const APPEARANCE_THEME_OPTIONS: AppearanceThemeOption[] = [
   new AppearanceThemeOption(APPEARANCE_THEME_DEFAULT, '#0A59F7', '#317AF7'),
   new AppearanceThemeOption('sky_cyan', '#3EB4F8', '#5DEAB5'),
@@ -157,9 +154,6 @@ export class AppErrorRecord {
 const MAX_RECENT_ERRORS: number = 20;
 
 class HistoryFilterCache {
-  serverItems: ServerHistoryItem[] = [];
-  serverSource: ServerHistoryItem[] | null = null;
-  serverSignature: string = '';
   sessionItems: ClipboardHistoryItem[] = [];
   sessionSource: ClipboardHistoryItem[] | null = null;
   sessionSignature: string = '';
@@ -177,8 +171,10 @@ export interface ClipboardFeatureControllerRuntime {
   recoverSession(allowSecureStorageUnlock: boolean): Promise<EngineSessionRecovery>;
   removeMember(deviceId: string): Promise<EngineWorkspaceConvergence>;
   queryDevices(): Promise<EngineRuntimeDevice[]>;
-  setClipboardAutoSendTargets(targetDevices: string[]): void;
   queryMemberSyncPreferences(deviceId: string): Promise<EngineMemberSyncPreferences>;
+  queryNetworkSettings(): Promise<EngineNetworkSettings>;
+  updateNetworkSettings(allowRelayFallback: boolean, customRelayUrls: string[]): Promise<EngineNetworkSettings>;
+  probeRelayUrl(url: string): Promise<number>;
 }
 
 export interface SpaceDeviceRemovalInteraction {
@@ -198,17 +194,9 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   public statusCode: number = 0;
   public engineVersion: string = EngineVersionService.getVersion();
   public recentErrors: AppErrorRecord[] = [];
-  private serverHistoryDataSourceInstance: HistoryDataSource<ServerHistoryItem> =
-    new HistoryDataSource<ServerHistoryItem>();
   private sessionHistoryDataSourceInstance: HistoryDataSource<ClipboardHistoryItem> =
     new HistoryDataSource<ClipboardHistoryItem>();
   public busy: boolean = false;
-  public serverUrl: string = '';
-  public username: string = '';
-  public password: string = '';
-  public connectUri: string = '';
-  public connectUriState: number = 0;
-  public legacyConnectionExpanded: boolean = false;
   public composerText: string = '';
   public latestText: string = '';
   public latestKind: string = 'Text';
@@ -228,12 +216,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   public history: ClipboardHistoryItem[] = [];
   // Explicit observable revision for ArkUI list/data-source rebuilds.
   public historyRevision: number = 0;
-  public serverHistory: ServerHistoryItem[] = [];
-  public historyPage: number = 1;
-  public historyEnd: boolean = false;
-  public historyLoading: boolean = false;
   public historySearchText: string = '';
-  public historyStarredOnly: boolean = false;
   public historyMutationBusy: boolean = false;
   public historyRetentionDays: number = 30;
   public historyMergeDuplicates: boolean = true;
@@ -242,7 +225,6 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   public historySelectionMode: boolean = false;
   public historySelectedIds: string[] = [];
   public desktopRefreshBusy: boolean = false;
-  public realtimeActive: boolean = false;
   public feedbackText: string = '';
   public aboutMaterialLevel: hdsMaterial.MaterialLevel = hdsMaterial.MaterialLevel.SMOOTH;
   public spaceNodeState: number = 0;
@@ -339,13 +321,6 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   public latestContentPulse: number = 1;
   public historyPulse: number = 1;
   public backgroundSyncEnabled: boolean = false;
-  public mobileSyncEnabled: boolean = false;
-  public mobileSyncRunning: boolean = false;
-  public mobileSyncPort: string = '42720';
-  public mobileSyncUrls: string[] = [];
-  public mobileSyncDevices: NativeMobileSyncDevice[] = [];
-  public mobileSyncBusy: boolean = false;
-  public mobileSyncState: number = 0;
   public desktopDeviceMutationBusy: boolean = false;
   public desktopSelectedSpaceDeviceId: string = '';
   public desktopSelectedSpaceDeviceName: string = '';
@@ -353,6 +328,8 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   public desktopSelectedSpaceDeviceOnline: boolean = false;
   public desktopSelectedSpaceDeviceState: string = 'unknown';
   public desktopSelectedSpaceDeviceIsLocal: boolean = true;
+  public manualTransferTargetDeviceId: string = '';
+  public manualTransferTargetDeviceName: string = '';
   public desktopDeviceSyncState: number = 0;
   public desktopDeviceSyncSaving: boolean = false;
   public desktopDeviceSendEnabled: boolean = true;
@@ -361,26 +338,16 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   public desktopDeviceSyncFile: boolean = true;
   public desktopDeviceSyncLink: boolean = true;
   public desktopDeviceSyncRichText: boolean = true;
-  public mobileSyncAddOpen: boolean = false;
-  public mobileSyncAdvancedOpen: boolean = false;
-  public mobileSyncDeviceName: string = '';
-  public mobileSyncCustomUsername: string = '';
-  public mobileSyncCustomPassword: string = '';
-  public mobileSyncCredential: NativeMobileSyncCredential | null = null;
-  public mobileSyncPasswordVisible: boolean = false;
   private pasteboardPermissionRequestTask: Promise<boolean> | null = null;
 
   public clipboardService: ClipboardService = new ClipboardService();
   public appearanceStorageService: AppearanceStorageService = new AppearanceStorageService();
-  public configStorageService: ConfigStorageService = new ConfigStorageService();
   public backgroundSyncPreferenceService: BackgroundSyncPreferenceService =
     new BackgroundSyncPreferenceService();
   public historyStorageService: HistoryStorageService = new HistoryStorageService();
   public linkPreviewService: LinkPreviewService = new LinkPreviewService();
-  public mobileSyncServerService: MobileSyncServerService = new MobileSyncServerService();
   public receivedNotificationService: ReceivedNotificationService =
     ReceivedNotificationService.getInstance();
-  public nativeProtocolService: NativeProtocolService = new NativeProtocolService();
   private spaceProfileStore: SpaceProfileStore = new SpaceProfileStore();
   private spaceProfileDirectory: SpaceProfileDirectory | null = null;
   private spaceAdmissionAddedProfile: boolean = false;
@@ -391,22 +358,17 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   private pollIdleRounds: number = 0;
   private pagePollingVisible: boolean = true;
   public historySearchTimerId: number = -1;
-  public sseEventBusy: boolean = false;
   public spaceDeviceRefreshBusy: boolean = false;
   private spaceDeviceRefreshQueued: boolean = false;
-  public historyResetPending: boolean = false;
   public historyRestoreStarted: boolean = false;
   public historyRestored: boolean = false;
   public historySaveBusy: boolean = false;
   public historySavePending: boolean = false;
   public realtimeTick: number = 0;
-  public realtimeAutoConnect: boolean = false;
-  public mobileSyncDeviceRefreshBusy: boolean = false;
   public syncScroller: Scroller = new Scroller();
   public devicesScroller: Scroller = new Scroller();
   public settingsScroller: Scroller = new Scroller();
   public aboutScroller: Scroller = new Scroller();
-  public configRestored: boolean = false;
   public composerFileData: Uint8Array | null = null;
   public composerFileUri: string = '';
   public composerFileSize: number = 0;
@@ -489,14 +451,13 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       this.pollIdleRounds = 0;
       this.schedulePollTimer(POLL_INTERVAL_BASE_MS);
     }
-    this.restoreConfig();
     this.restoreBackgroundSyncPreference();
     this.restoreAppearanceMode();
     this.restoreAppearanceTheme();
     this.restoreAppearanceVisualSettings();
     this.restoreLocalHistory();
     engineRuntimeService.addEventObserver(this);
-    this.initializeSpaceNode();
+    this.initializeSpaceRuntime();
   }
 
   public onPageShow(): void {
@@ -535,9 +496,6 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       clearTimeout(this.historySearchTimerId);
       this.historySearchTimerId = -1;
     }
-    let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
-    client.stopRealtime();
-    this.realtimeActive = false;
     this.desktopGestureSharePageVisible = false;
     this.unregisterDesktopGestureShare();
     this.releaseDesktopAudio();
@@ -601,47 +559,6 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     this.resetDesktopVideoAspectRatio();
     this.releaseDesktopAudio();
     this.refreshCurrentLinkPreview();
-  }
-
-  public getConfig(): ServerConfig {
-    let config: ServerConfig = {
-      baseUrl: this.serverUrl,
-      username: this.username,
-      password: this.password
-    };
-    return config;
-  }
-
-  public restoreConfig(): void {
-    if (this.configRestored) {
-      return;
-    }
-    this.configRestored = true;
-    try {
-      let context: common.Context | undefined = this.getUIContext().getHostContext();
-      if (context === undefined) {
-        return;
-      }
-      let config: ServerConfig = this.configStorageService.load(context);
-      this.serverUrl = config.baseUrl;
-      this.username = config.username;
-      this.password = config.password;
-      this.legacyConnectionExpanded = this.hasConfig();
-      if (this.hasConfig() && !this.spaceJoined) {
-        this.realtimeAutoConnect = true;
-        this.startRealtime();
-      }
-    } catch (error) {
-      this.statusCode = 3;
-    }
-  }
-
-  public saveConfig(): void {
-    let context: common.Context | undefined = this.getUIContext().getHostContext();
-    if (context === undefined) {
-      return;
-    }
-    this.configStorageService.save(context, this.getConfig());
   }
 
   public restoreBackgroundSyncPreference(): void {
@@ -1097,7 +1014,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     }
   }
 
-  public async initializeSpaceNode(): Promise<void> {
+  public async initializeSpaceRuntime(): Promise<void> {
     if (this.spaceNodeState === 1 || this.spaceNodeState === 2) {
       return;
     }
@@ -1129,7 +1046,6 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       if (this.spaceJoined) {
         await this.refreshSpaceDevices();
       }
-      await this.initializeMobileSyncServer();
     } catch (error) {
       this.spaceNodeState = 3;
       this.recordConnectionDiagnosticFailure('node_unavailable');
@@ -1138,9 +1054,15 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   }
 
   public async refreshSpaceNetworkSettings(): Promise<void> {
-    this.spaceRelayFallbackEnabled = false;
-    this.spaceRelayUrlsText = '';
-    this.spaceRelaySettingsState = 0;
+    try {
+      let settings: EngineNetworkSettings = await this.engineRuntime.queryNetworkSettings();
+      this.spaceRelayFallbackEnabled = settings.allowRelayFallback;
+      this.spaceRelayUrlsText = settings.customRelayUrls.join('\n');
+      this.spaceRelaySettingsState = 0;
+    } catch (error) {
+      this.reportError('space-relay', 'failed to load relay settings: ' + this.errorDetail(error));
+      this.spaceRelaySettingsState = 2;
+    }
   }
 
   public spaceRelaySettingsChanged(): void {
@@ -1165,133 +1087,24 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     }
     this.spaceRelaySettingsBusy = true;
     this.spaceRelaySettingsState = 0;
-    this.spaceRelayFallbackEnabled = false;
-    this.spaceRelayUrlsText = '';
-    this.spaceRelaySettingsState = 2;
-    this.spaceRelaySettingsBusy = false;
-  }
-
-  public async initializeMobileSyncServer(): Promise<void> {
+    let requestedAllowRelayFallback: boolean = this.spaceRelayFallbackEnabled;
+    let requestedRelayUrls: string[] = this.spaceRelayUrls();
     try {
-      let status: NativeMobileSyncStatus = await this.mobileSyncServerService.status();
-      this.mobileSyncEnabled = status.enabled;
-      this.mobileSyncRunning = status.running;
-      this.mobileSyncPort = status.port.toString();
-      this.mobileSyncUrls = status.urls;
-      await this.refreshMobileSyncDevices();
-      if (status.enabled && !status.running) {
-        let restarted: NativeMobileSyncStatus = await this.mobileSyncServerService.setEnabled(
-          true, this.mobileSyncPortNumber());
-        this.mobileSyncRunning = restarted.running;
-        this.mobileSyncUrls = restarted.urls;
+      if (this.spaceNodeState === 2) {
+        for (let index = 0; index < requestedRelayUrls.length; index += 1) {
+          await this.engineRuntime.probeRelayUrl(requestedRelayUrls[index]);
+        }
       }
+      let settings: EngineNetworkSettings = await this.engineRuntime.updateNetworkSettings(
+        requestedAllowRelayFallback, requestedRelayUrls);
+      this.spaceRelayFallbackEnabled = settings.allowRelayFallback;
+      this.spaceRelayUrlsText = settings.customRelayUrls.join('\n');
+      this.spaceRelaySettingsState = 1;
     } catch (error) {
-      this.mobileSyncState = 3;
-      this.mobileSyncRunning = false;
-    }
-  }
-
-  public mobileSyncPortNumber(): number {
-    let port: number = parseInt(this.mobileSyncPort.trim(), 10);
-    if (isNaN(port) || port < 1 || port > 65535) {
-      return 42720;
-    }
-    return port;
-  }
-
-  public async refreshMobileSyncDevices(): Promise<void> {
-    if (this.mobileSyncDeviceRefreshBusy) {
-      return;
-    }
-    this.mobileSyncDeviceRefreshBusy = true;
-    try {
-      this.mobileSyncDevices = await this.mobileSyncServerService.listDevices();
-    } catch (error) {
-      this.mobileSyncDevices = [];
+      this.reportError('space-relay', 'failed to save relay settings: ' + this.errorDetail(error));
+      this.spaceRelaySettingsState = 2;
     } finally {
-      this.mobileSyncDeviceRefreshBusy = false;
-    }
-  }
-
-  public async toggleMobileSyncServer(enabled: boolean): Promise<void> {
-    if (this.mobileSyncBusy) {
-      return;
-    }
-    this.mobileSyncBusy = true;
-    this.mobileSyncState = 0;
-    try {
-      let status: NativeMobileSyncStatus = await this.mobileSyncServerService.setEnabled(
-        enabled, this.mobileSyncPortNumber());
-      this.mobileSyncEnabled = status.enabled;
-      this.mobileSyncRunning = status.running;
-      this.mobileSyncPort = status.port.toString();
-      this.mobileSyncUrls = status.urls;
-      if (enabled && !status.running) {
-        this.mobileSyncState = 3;
-      }
-      await this.refreshMobileSyncDevices();
-    } catch (error) {
-      this.mobileSyncEnabled = false;
-      this.mobileSyncRunning = false;
-      this.mobileSyncState = 3;
-      this.reportError('mobile-sync', 'failed to toggle the mobile sync server: ' + this.errorDetail(error),
-        $r('app.string.error_toast_sync'));
-    } finally {
-      this.mobileSyncBusy = false;
-    }
-  }
-
-  public async createMobileSyncDevice(): Promise<void> {
-    if (this.mobileSyncBusy || this.mobileSyncDeviceName.trim().length === 0) {
-      return;
-    }
-    this.mobileSyncBusy = true;
-    this.mobileSyncState = 0;
-    this.mobileSyncCredential = null;
-    try {
-      let credential: NativeMobileSyncCredential = await this.mobileSyncServerService.registerDevice(
-        this.mobileSyncDeviceName.trim(), this.mobileSyncCustomUsername.trim(),
-        this.mobileSyncCustomPassword, this.mobileSyncPortNumber());
-      this.mobileSyncCredential = credential;
-      this.mobileSyncEnabled = true;
-      this.mobileSyncRunning = true;
-      this.mobileSyncUrls = credential.urls;
-      await this.refreshMobileSyncDevices();
-      this.mobileSyncState = 2;
-      this.mobileSyncCustomPassword = '';
-    } catch (error) {
-      this.mobileSyncState = 3;
-      this.reportError('mobile-sync', 'failed to issue mobile sync credentials: ' + this.errorDetail(error));
-    } finally {
-      this.mobileSyncBusy = false;
-    }
-  }
-
-  public async revokeMobileSyncDevice(device: NativeMobileSyncDevice): Promise<void> {
-    if (this.desktopDeviceMutationBusy || this.mobileSyncBusy) {
-      return;
-    }
-    try {
-      let result = await this.getUIContext().getPromptAction().showDialog({
-        title: $r('app.string.mobile_sync_revoke_title'),
-        message: $r('app.string.mobile_sync_revoke_message'),
-        buttons: [
-          { text: $r('app.string.cancel_action'), color: $r('app.color.text_secondary') },
-          { text: $r('app.string.mobile_sync_revoke_confirm'), color: $r('app.color.danger') }
-        ]
-      });
-      if (result.index !== 1) {
-        return;
-      }
-      this.desktopDeviceMutationBusy = true;
-      await this.mobileSyncServerService.revokeDevice(device.deviceId);
-      await this.refreshMobileSyncDevices();
-      this.statusCode = 2;
-    } catch (error) {
-      this.mobileSyncState = 3;
-      this.statusCode = 3;
-    } finally {
-      this.desktopDeviceMutationBusy = false;
+      this.spaceRelaySettingsBusy = false;
     }
   }
 
@@ -1377,76 +1190,6 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
 
   private hasSpaceDevice(deviceId: string): boolean {
     return this.spaceDevices.some((device: EngineRuntimeDevice): boolean => device.deviceId === deviceId);
-  }
-
-  public async consumeMobileSyncEvents(): Promise<number> {
-    let events: NativeMobileSyncInboundEvent[] = this.mobileSyncServerService.drainInboundEvents();
-    for (let index: number = 0; index < events.length; index++) {
-      let event: NativeMobileSyncInboundEvent = events[index];
-      this.latestContentId = event.contentId;
-      if (event.kind === 'Text') {
-        this.latestText = event.text;
-        this.latestKind = 'Text';
-        this.latestImage = null;
-        if (this.desktopSelectedId.length === 0) {
-          this.refreshCurrentLinkPreview();
-        }
-        this.addHistory(event.text, 'received', 'Text', null, null, '', event.contentId, event.sourceLabel);
-        try {
-          await this.clipboardService.writeText(event.text);
-          this.notifyReceivedContent('Text', event.text, null, 0, event.sourceLabel);
-        } catch (error) {
-          this.statusCode = 3;
-        }
-      } else if (event.kind === 'Image') {
-        try {
-          let pixelMap: image.PixelMap = await this.clipboardService.decodeImage(event.data);
-          this.latestImage = pixelMap;
-          this.latestImageRevision += 1;
-          this.latestKind = 'Image';
-          this.latestText = event.dataName.length > 0 ? event.dataName : 'image.png';
-          if (this.desktopSelectedId.length === 0) {
-            this.clearLinkPreview();
-          }
-          this.addHistory(this.latestText, 'received', 'Image', pixelMap, null, '', event.contentId,
-            event.sourceLabel);
-          await this.clipboardService.writeImage(pixelMap);
-          this.notifyReceivedContent('Image', this.latestText, pixelMap, event.data.length,
-            event.sourceLabel);
-        } catch (error) {
-          this.statusCode = 3;
-        }
-      } else if (event.kind === 'File') {
-        let fileName: string = event.dataName.length > 0 ? event.dataName : event.text;
-        let filePreview: image.PixelMap | null = null;
-        if (this.isImageFileName(fileName) && event.data.length > 0) {
-          try {
-            filePreview = await this.clipboardService.decodeImage(event.data);
-          } catch (error) {
-            filePreview = null;
-          }
-        }
-        this.latestKind = 'File';
-        this.latestText = fileName;
-        if (this.desktopSelectedId.length === 0) {
-          this.clearLinkPreview();
-        }
-        this.latestFileName = fileName;
-        this.latestFileData = event.data;
-        this.latestFilePath = '';
-        this.latestFileRevision += 1;
-        this.addHistory(fileName, 'received', 'File', null, event.data, '', event.contentId,
-          event.sourceLabel);
-        this.notifyReceivedContent('File', fileName, filePreview, event.data.length,
-          event.sourceLabel);
-      }
-      this.statusCode = 2;
-      this.animateLatestContent();
-    }
-    if (events.length > 0) {
-      await this.refreshMobileSyncDevices();
-    }
-    return events.length;
   }
 
   public async initializeRecommendedSpaceDeviceName(): Promise<void> {
@@ -1846,7 +1589,6 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     this.largeNavStack.clear(false);
     this.largeNavStack.pushPath({ name: destinationName }, false);
     if (index === 1) {
-      this.refreshMobileSyncDevices();
       if (this.spaceJoined) {
         this.refreshSpaceDevices();
       }
@@ -1950,7 +1692,6 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     this.largeNavStack.clear(false);
     this.largeNavStack.pushPath({ name: destinationName }, false);
     if (index === 1) {
-      this.refreshMobileSyncDevices();
       if (this.spaceJoined) {
         this.refreshSpaceDevices();
       }
@@ -2111,18 +1852,6 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     } else if (!this.spaceJoined) {
       failureReason = 'space_not_joined';
     }
-    if (!probeSucceeded && this.hasConfig()) {
-      try {
-        let startedAt: number = Date.now();
-        let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
-        await client.probe();
-        this.connectionDiagnosticLatencyMs = Math.max(0, Date.now() - startedAt);
-        this.connectionDiagnosticRelayCount += 1;
-        probeSucceeded = true;
-      } catch (error) {
-        failureReason = 'relay_probe_failed';
-      }
-    }
     if (probeSucceeded) {
       this.statusCode = 2;
     } else {
@@ -2267,7 +1996,6 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     this.desktopSelectedSpaceDeviceOnline = device.online;
     this.desktopSelectedSpaceDeviceState = device.state;
     this.desktopSelectedSpaceDeviceIsLocal = device.isLocal;
-    this.engineRuntime.setClipboardAutoSendTargets(device.isLocal ? [] : [device.deviceId]);
   }
 
   private clearDesktopSelectedSpaceDevice(): void {
@@ -2278,15 +2006,20 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     this.desktopSelectedSpaceDeviceState = 'unknown';
     this.desktopSelectedSpaceDeviceIsLocal = true;
     this.desktopDeviceSyncState = 0;
-    this.engineRuntime.setClipboardAutoSendTargets([]);
+    this.manualTransferTargetDeviceId = '';
+    this.manualTransferTargetDeviceName = '';
   }
 
   public selectDesktopSpaceDevice(device: EngineRuntimeDevice): void {
     this.assignDesktopSelectedSpaceDevice(device);
     if (device.isLocal) {
+      this.manualTransferTargetDeviceId = '';
+      this.manualTransferTargetDeviceName = '';
       this.desktopDeviceSyncState = 0;
       return;
     }
+    this.manualTransferTargetDeviceId = device.deviceId;
+    this.manualTransferTargetDeviceName = device.deviceName;
     this.loadDesktopDeviceSyncPreferences(device.deviceId);
   }
 
@@ -2538,10 +2271,8 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
         await engineRuntimeService.recoverNetwork();
         await this.connectAllSpaceDevices();
         await this.pollOfficialEngineInbound();
-      }
-      if (this.hasConfig()) {
-        await this.loadServerHistory(true);
-      } else if (!this.spaceJoined) {
+        this.statusCode = 2;
+      } else {
         this.statusCode = 3;
       }
     } finally {
@@ -2566,12 +2297,9 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       clearTimeout(this.historySearchTimerId);
       this.historySearchTimerId = -1;
     }
-    if (!this.hasConfig()) {
-      return;
-    }
     this.historySearchTimerId = setTimeout((): void => {
       this.historySearchTimerId = -1;
-      this.loadServerHistory(true);
+      this.sessionHistoryDataSourceInstance.reload(this.desktopFilteredSessionHistory());
     }, 300);
   }
 
@@ -2580,9 +2308,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       clearTimeout(this.historySearchTimerId);
       this.historySearchTimerId = -1;
     }
-    if (this.hasConfig()) {
-      this.loadServerHistory(true);
-    }
+    this.sessionHistoryDataSourceInstance.reload(this.desktopFilteredSessionHistory());
   }
 
   public desktopFilterSelected(group: number, value: number): boolean {
@@ -2629,10 +2355,8 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     } else {
       this.desktopTimeFilter = value;
     }
-    let shouldReload: boolean = previousStarredOnly !== this.desktopStarredOnly;
-    this.historyStarredOnly = this.desktopStarredOnly;
-    if (shouldReload && this.hasConfig()) {
-      this.loadServerHistory(true);
+    if (previousStarredOnly !== this.desktopStarredOnly) {
+      this.sessionHistoryDataSourceInstance.reload(this.desktopFilteredSessionHistory());
     }
   }
 
@@ -2973,31 +2697,6 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     return signature;
   }
 
-  public desktopFilteredServerHistory(): ServerHistoryItem[] {
-    let signature: string = this.historyFilterSignature();
-    if (historyFilterCache.serverSource === this.serverHistory &&
-      historyFilterCache.serverSignature === signature) {
-      return historyFilterCache.serverItems;
-    }
-    let items: ServerHistoryItem[] = [];
-    if (this.historyDeviceFilter.length === 0 && this.desktopCustomTagFilter.length === 0 &&
-      !this.historySnippetOnly) {
-      for (let index: number = 0; index < this.serverHistory.length; index++) {
-        let item: ServerHistoryItem = this.serverHistory[index];
-        let starredMatches: boolean = !this.desktopStarredOnly || item.starred;
-        if (starredMatches && this.desktopSearchMatches(item.text) && this.desktopSourceMatchesFilter(true) &&
-          this.desktopTypeMatchesFilter(item.kind, item.text) && this.desktopTagMatchesFilter(item.kind, item.text) &&
-          this.desktopTimeMatchesFilter(item.timestampMs) && this.desktopExtensionMatchesFilter(item.text)) {
-          items.push(item);
-        }
-      }
-    }
-    historyFilterCache.serverItems = items;
-    historyFilterCache.serverSource = this.serverHistory;
-    historyFilterCache.serverSignature = signature;
-    return items;
-  }
-
   public desktopFilteredSessionHistory(): ClipboardHistoryItem[] {
     let signature: string = this.historyFilterSignature();
     if (historyFilterCache.sessionSource === this.history &&
@@ -3053,11 +2752,6 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     return items;
   }
 
-  public desktopServerHistoryDataSource(): HistoryDataSource<ServerHistoryItem> {
-    this.serverHistoryDataSourceInstance.reload(this.desktopFilteredServerHistory());
-    return this.serverHistoryDataSourceInstance;
-  }
-
   public desktopSessionHistoryDataSource(): HistoryDataSource<ClipboardHistoryItem> {
     this.sessionHistoryDataSourceInstance.reload(this.desktopFilteredSessionHistory());
     return this.sessionHistoryDataSourceInstance;
@@ -3095,60 +2789,6 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       }
     }
     return false;
-  }
-
-  public async selectDesktopServerItem(item: ServerHistoryItem): Promise<void> {
-    this.desktopSelectedId = item.id;
-    this.desktopSelectedText = item.text;
-    this.desktopSelectedMeta = item.kind + ' · ' + item.time;
-    this.desktopSelectedDirection = '';
-    this.desktopGestureShareHintDismissed = false;
-    this.desktopSelectedImage = null;
-    this.desktopSelectedImageRevision += 1;
-    this.desktopSelectedFileData = null;
-    this.desktopSelectedFilePath = '';
-    this.desktopFilePreviewState = 0;
-    this.resetDesktopVideoAspectRatio();
-    this.releaseDesktopAudio();
-    this.refreshCurrentLinkPreview();
-    if (!item.hasData || (item.kind !== 'File' && item.kind !== 'Image')) {
-      return;
-    }
-    let context: common.Context | undefined = this.getUIContext().getHostContext();
-    if (context === undefined) {
-      this.desktopFilePreviewState = 2;
-      return;
-    }
-    if (item.kind === 'File') {
-      let cachedPath: string = this.historyStorageService.findServerFile(context, item.id, item.text);
-      if (cachedPath.length > 0) {
-        this.desktopSelectedFilePath = cachedPath;
-        return;
-      }
-    }
-    this.desktopFilePreviewState = 1;
-    try {
-      let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
-      let data: Uint8Array = await client.getHistoryPayload(item);
-      if (this.desktopSelectedId !== item.id || data.length === 0) {
-        return;
-      }
-      if (item.kind === 'Image') {
-        this.desktopSelectedImage = await this.clipboardService.decodeImage(data);
-        this.desktopSelectedImageRevision += 1;
-      } else {
-        let filePath: string = this.historyStorageService.storeServerFile(context, item.id, item.text, data);
-        if (filePath.length === 0) {
-          throw new Error('failed to persist server history file');
-        }
-        this.desktopSelectedFilePath = filePath;
-      }
-      this.desktopFilePreviewState = 0;
-    } catch (error) {
-      if (this.desktopSelectedId === item.id) {
-        this.desktopFilePreviewState = 2;
-      }
-    }
   }
 
   public selectDesktopSessionItem(item: ClipboardHistoryItem): void {
@@ -4407,11 +4047,6 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     }
   }
 
-  public async copyServerHistoryItem(item: ServerHistoryItem): Promise<void> {
-    await this.selectDesktopServerItem(item);
-    await this.copyDesktopSelection();
-  }
-
   public async copyLocalHistoryItem(item: ClipboardHistoryItem): Promise<void> {
     try {
       if (item.kind === 'Image' && item.imagePreview !== null) {
@@ -4670,9 +4305,13 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   }
 
   public async sendLocalHistoryItem(item: ClipboardHistoryItem): Promise<void> {
+    await this.sendLocalHistoryItemToTarget(item, '');
+  }
+
+  public async sendLocalHistoryItemToTarget(item: ClipboardHistoryItem, targetDeviceId: string): Promise<void> {
     if (item.kind === 'Image' && item.imagePreview !== null) {
       this.composerImage = item.imagePreview;
-      await this.sendImage();
+      await this.sendImage(targetDeviceId);
       return;
     }
     if (item.kind === 'File' && item.filePath.length > 0) {
@@ -4683,7 +4322,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
         this.composerFileUri = item.filePath;
         this.composerFileSize = sourceStat.size;
         this.composerFileName = item.text;
-        await this.sendFile();
+        await this.sendFile(targetDeviceId);
       } catch (error) {
         this.statusCode = 3;
       }
@@ -4691,71 +4330,21 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     }
     this.composerText = item.text;
     await this.sendText();
-  }
-
-  public async sendServerHistoryItem(item: ServerHistoryItem): Promise<void> {
-    await this.selectDesktopServerItem(item);
-    if (item.kind === 'Image' && this.desktopSelectedImage !== null) {
-      this.composerImage = this.desktopSelectedImage;
-      await this.sendImage();
-      return;
-    }
-    if (item.kind === 'File' && this.desktopSelectedFilePath.length > 0) {
-      try {
-        let sourceFile: fileIo.File = fileIo.openSync(this.desktopSelectedFilePath, fileIo.OpenMode.READ_ONLY);
-        let sourceStat: fileIo.Stat = fileIo.statSync(sourceFile.fd);
-        fileIo.closeSync(sourceFile.fd);
-        this.composerFileUri = this.desktopSelectedFilePath;
-        this.composerFileSize = sourceStat.size;
-        this.composerFileName = item.text;
-        await this.sendFile();
-      } catch (error) {
-        this.statusCode = 3;
-      }
-      return;
-    }
-    this.composerText = item.text;
-    await this.sendText();
-  }
-
-  public async sendServerHistoryItemToTarget(item: ServerHistoryItem, target: string): Promise<void> {
-    logger.info('UniClipboard history send target: ' + target);
-    await this.sendServerHistoryItem(item);
-  }
-
-  public async sendLocalHistoryItemToTarget(item: ClipboardHistoryItem, target: string): Promise<void> {
-    logger.info('UniClipboard history send target: ' + target);
-    await this.sendLocalHistoryItem(item);
   }
 
   public toggleDesktopSelectedStar(): void {
-    for (let index: number = 0; index < this.serverHistory.length; index++) {
-      let item: ServerHistoryItem = this.serverHistory[index];
-      if (item.id === this.desktopSelectedId) {
-        this.toggleHistoryStarred(item);
-        return;
-      }
-    }
-    let items: ClipboardHistoryItem[] = [];
     for (let index: number = 0; index < this.history.length; index++) {
       let item: ClipboardHistoryItem = this.history[index];
       if (item.id === this.desktopSelectedId) {
         item.starred = !item.starred;
       }
-      items.push(item);
     }
-    this.history = items;
+    this.historyRevision += 1;
     this.animateHistoryUpdate();
     this.scheduleHistorySave();
   }
 
   public desktopSelectionStarred(): boolean {
-    for (let index: number = 0; index < this.serverHistory.length; index++) {
-      let item: ServerHistoryItem = this.serverHistory[index];
-      if (item.id === this.desktopSelectedId) {
-        return item.starred;
-      }
-    }
     for (let index: number = 0; index < this.history.length; index++) {
       let item: ClipboardHistoryItem = this.history[index];
       if (item.id === this.desktopSelectedId) {
@@ -4766,13 +4355,6 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   }
 
   public deleteDesktopSelection(): void {
-    for (let index: number = 0; index < this.serverHistory.length; index++) {
-      let item: ServerHistoryItem = this.serverHistory[index];
-      if (item.id === this.desktopSelectedId) {
-        this.confirmDeleteHistory(item);
-        return;
-      }
-    }
     for (let index: number = 0; index < this.history.length; index++) {
       let item: ClipboardHistoryItem = this.history[index];
       if (item.id === this.desktopSelectedId) {
@@ -4781,7 +4363,6 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       }
     }
   }
-
   public async confirmDeleteLocalHistory(item: ClipboardHistoryItem): Promise<void> {
     let confirmed: boolean = false;
     try {
@@ -4827,12 +4408,6 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     } finally {
       this.historyMutationBusy = false;
     }
-  }
-
-  public hasConfig(): boolean {
-    return this.serverUrl.trim().length > 0 &&
-      this.username.trim().length > 0 &&
-      this.password.length > 0;
   }
 
   public currentTime(): string {
@@ -4895,175 +4470,8 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     this.scheduleHistorySave();
   }
 
-  public connectionChanged(): void {
-    this.realtimeAutoConnect = false;
-    if (this.realtimeActive) {
-      this.stopRealtime();
-    }
-    this.statusCode = 0;
-  }
-
   public isConnectionAvailable(): boolean {
-    if (this.spaceJoined && !this.hasConfig()) {
-      return this.spacePeerConnected;
-    }
-    return this.spacePeerConnected || this.statusCode === 2 || this.realtimeActive;
-  }
-
-  public async testConnection(): Promise<void> {
-    if (!this.hasConfig()) {
-      this.statusCode = 3;
-      this.recordConnectionDiagnosticFailure('not_configured');
-      return;
-    }
-    this.busy = true;
-    this.statusCode = 1;
-    try {
-      let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
-      await client.probe();
-      this.saveConfig();
-      this.startRealtime();
-      this.statusCode = 2;
-    } catch (error) {
-      this.statusCode = 3;
-      this.recordConnectionDiagnosticFailure('relay_probe_failed');
-    } finally {
-      this.busy = false;
-    }
-  }
-
-  public importConnectUri(): void {
-    if (this.connectUri.trim().length === 0) {
-      this.connectUriState = 2;
-      return;
-    }
-    try {
-      let config: ServerConfig = this.nativeProtocolService.parseServerConfig(this.connectUri);
-      this.connectionChanged();
-      this.serverUrl = config.baseUrl;
-      this.username = config.username;
-      this.password = config.password;
-      this.connectUri = '';
-      this.connectUriState = 1;
-      this.statusCode = 0;
-      this.saveConfig();
-      this.startRealtime();
-      this.pullLatest();
-    } catch (error) {
-      this.connectUriState = 2;
-    }
-  }
-
-  public scanConnectUri(): void {
-    let options: scanBarcode.ScanOptions = {
-      scanTypes: [scanCore.ScanType.QR_CODE],
-      enableMultiMode: false,
-      enableAlbum: true
-    };
-    this.connectUriState = 0;
-    if (canIUse('SystemCapability.Multimedia.Scan.ScanBarcode')) {
-      try {
-        scanBarcode.startScanForResult(this.getUIContext().getHostContext(), options,
-          (error: BusinessError, result: scanBarcode.ScanResult): void => {
-            if (error) {
-              this.connectUriState = 3;
-              return;
-            }
-            this.connectUri = result.originalValue;
-            this.importConnectUri();
-          });
-      } catch (error) {
-        this.connectUriState = 3;
-      }
-    } else {
-      this.connectUriState = 3;
-    }
-  }
-
-  public async pullLatest(): Promise<void> {
-    if (!this.hasConfig()) {
-      if (this.spaceJoined) {
-        await this.connectAllSpaceDevices();
-        return;
-      }
-      this.statusCode = 3;
-      this.openConnectionSettings();
-      return;
-    }
-    this.busy = true;
-    this.statusCode = 1;
-    try {
-      let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
-      let result: SyncContent = await client.getLatestContent();
-      await this.applyLatestContent(result, true);
-      this.desktopSelectedId = '';
-      this.desktopSelectedText = '';
-      this.desktopSelectedMeta = '';
-      this.desktopSelectedDirection = '';
-      this.desktopSelectedImage = null;
-      this.desktopSelectedFileData = null;
-      this.desktopSelectedFilePath = '';
-      this.desktopFilePreviewState = 0;
-      this.resetDesktopVideoAspectRatio();
-      this.releaseDesktopAudio();
-      this.refreshCurrentLinkPreview();
-      this.statusCode = 2;
-    } catch (error) {
-      this.statusCode = 3;
-    } finally {
-      this.busy = false;
-    }
-  }
-
-  public async applyLatestContent(result: SyncContent, recordHistory: boolean): Promise<void> {
-    if (this.latestContentId !== result.contentId) {
-      this.desktopGestureShareHintDismissed = false;
-    }
-    let pixelMap: image.PixelMap | null = null;
-    let displayText: string = this.contentDisplayText(result);
-    if (this.desktopSelectedId.length === 0) {
-      await this.releaseDesktopAudio();
-      this.resetDesktopVideoAspectRatio();
-    }
-    if (result.kind === 'Image') {
-      if (result.data.length === 0) {
-        throw new Error('image payload is empty');
-      }
-      pixelMap = await this.clipboardService.decodeImage(result.data);
-    }
-    let fileData: Uint8Array | null = null;
-    let filePath: string = '';
-    let fileName: string = '';
-    if (result.kind === 'File') {
-      fileName = result.dataName.length > 0 ? result.dataName : displayText;
-      if (result.data.length > 0) {
-        fileData = result.data;
-        filePath = this.cacheLatestFile(result.data);
-      }
-    } else {
-      this.removeLatestCachedFile();
-    }
-    this.latestKind = result.kind;
-    this.latestText = displayText;
-    if (this.desktopSelectedId.length === 0) {
-      this.refreshCurrentLinkPreview();
-    }
-    this.latestImage = pixelMap;
-    if (pixelMap !== null) {
-      this.latestImageRevision += 1;
-    }
-    this.latestFileName = fileName;
-    this.latestFileData = fileData;
-    this.latestFilePath = filePath;
-    if (result.kind === 'File') {
-      this.latestFileRevision += 1;
-      this.desktopFilePreviewState = 0;
-    }
-    this.latestContentId = result.contentId;
-    this.animateLatestContent();
-    if (recordHistory) {
-      this.addHistory(displayText, 'received', result.kind, pixelMap, fileData, filePath, result.contentId);
-    }
+    return this.spaceJoined && (this.spacePeerConnected || this.statusCode === 2);
   }
 
   public cacheLatestFile(data: Uint8Array): string {
@@ -5102,16 +4510,6 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       fileIo.unlinkSync(cachedPath);
     } catch (error) {
     }
-  }
-
-  public contentDisplayText(result: SyncContent): string {
-    if (result.dataName.length > 0 && (result.kind === 'Image' || result.text.length === 0)) {
-      return result.dataName;
-    }
-    if (result.kind === 'Image' && result.text.length === 0) {
-      return 'image.png';
-    }
-    return result.text;
   }
 
   public latestCopyable(): boolean {
@@ -5194,12 +4592,72 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     }
   }
 
+  private mediaTargetDeviceId(requestedTargetDeviceId: string): string {
+    let targetDeviceId: string = requestedTargetDeviceId.trim();
+    if (targetDeviceId.length === 0) {
+      targetDeviceId = this.manualTransferTargetDeviceId;
+    }
+    if (targetDeviceId.length === 0 || targetDeviceId === 'all') {
+      return '';
+    }
+    for (let index: number = 0; index < this.spaceDevices.length; index += 1) {
+      let device: EngineRuntimeDevice = this.spaceDevices[index];
+      if (device.deviceId === targetDeviceId && !device.isLocal) {
+        return targetDeviceId;
+      }
+    }
+    return '';
+  }
+
+  public mediaTransferTargetOptions(): MediaTransferTargetOption[] {
+    let options: MediaTransferTargetOption[] = [];
+    for (let index: number = 0; index < this.spaceDevices.length; index += 1) {
+      let device: EngineRuntimeDevice = this.spaceDevices[index];
+      if (!device.isLocal) {
+        options.push(new MediaTransferTargetOption(device.deviceName));
+      }
+    }
+    return options;
+  }
+
+  public mediaTransferTargetIndex(): number {
+    let targetIndex: number = 0;
+    let remoteIndex: number = 0;
+    for (let index: number = 0; index < this.spaceDevices.length; index += 1) {
+      let device: EngineRuntimeDevice = this.spaceDevices[index];
+      if (device.isLocal) {
+        continue;
+      }
+      if (device.deviceId === this.manualTransferTargetDeviceId) {
+        return remoteIndex;
+      }
+      remoteIndex += 1;
+    }
+    return targetIndex;
+  }
+
+  public selectMediaTransferTarget(index: number): void {
+    let remoteIndex: number = 0;
+    for (let deviceIndex: number = 0; deviceIndex < this.spaceDevices.length; deviceIndex += 1) {
+      let device: EngineRuntimeDevice = this.spaceDevices[deviceIndex];
+      if (device.isLocal) {
+        continue;
+      }
+      if (remoteIndex === index) {
+        this.manualTransferTargetDeviceId = device.deviceId;
+        this.manualTransferTargetDeviceName = device.deviceName;
+        return;
+      }
+      remoteIndex += 1;
+    }
+  }
+
   public async sendText(): Promise<void> {
     let text: string = this.composerText.trim();
     if (text.length === 0) {
       return;
     }
-    if (!this.spaceJoined && !this.hasConfig() && !this.mobileSyncRunning) {
+    if (!this.spaceJoined) {
       this.statusCode = 3;
       this.openConnectionSettings();
       return;
@@ -5207,43 +4665,13 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     this.busy = true;
     this.statusCode = 1;
     try {
-      let delivered: boolean = false;
-      let mobilePublished: boolean = false;
-      if (this.mobileSyncRunning) {
-        try {
-          this.latestContentId = this.mobileSyncServerService.publishText(text);
-          mobilePublished = true;
-        } catch (error) {
-          mobilePublished = false;
-        }
+      let report: EngineSendReport = await engineRuntimeService.sendText(text, []);
+      logger.info('UniClipboard official Engine accepted peer count: ' + report.totalAccepted.toString());
+      if (report.totalAccepted <= 0 && report.totalPending <= 0) {
+        throw new Error('no official Engine peer accepted the clipboard');
       }
-      if (this.spaceJoined) {
-        let report: EngineSendReport = await engineRuntimeService.sendText(text, []);
-        logger.info('UniClipboard official Engine accepted peer count: ' + report.totalAccepted.toString());
-        this.latestContentId = report.entryId;
-        if (report.totalAccepted > 0 || report.totalPending > 0) {
-          this.spacePeerConnected = true;
-          delivered = true;
-        } else if (!mobilePublished) {
-          throw new Error('no official Engine peer accepted the clipboard');
-        }
-      }
-      if (!delivered && !this.spaceJoined && this.hasConfig()) {
-        try {
-          let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
-          this.latestContentId = await client.putText(text);
-          delivered = true;
-          logger.info('UniClipboard text sent through desktop relay');
-        } catch (error) {
-          logger.warn('UniClipboard desktop relay unavailable, trying P2P');
-        }
-      }
-      if (!delivered && mobilePublished) {
-        delivered = true;
-      }
-      if (!delivered) {
-        throw new Error('no desktop or space peer accepted the clipboard');
-      }
+      this.spacePeerConnected = true;
+      this.latestContentId = report.entryId;
       this.latestText = text;
       this.latestKind = 'Text';
       this.latestImage = null;
@@ -5255,19 +4683,20 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       this.composerText = '';
       this.statusCode = 2;
     } catch (error) {
-      if (this.spaceJoined) {
-        this.spacePeerConnected = false;
-      }
+      this.spacePeerConnected = false;
       this.statusCode = 3;
+      this.reportError('text', 'text send failed: ' + this.errorDetail(error));
     } finally {
       this.busy = false;
     }
   }
 
-  public async sendImage(): Promise<void> {
-    if (!this.spaceJoined && !this.hasConfig() && !this.mobileSyncRunning) {
+  public async sendImage(requestedTargetDeviceId: string = ''): Promise<void> {
+    let targetDeviceId: string = this.mediaTargetDeviceId(requestedTargetDeviceId);
+    if (!this.spaceJoined || targetDeviceId.length === 0) {
       this.statusCode = 3;
-      this.openConnectionSettings();
+      this.imageSendState = 3;
+      this.reportError('image', 'image send requires one selected remote device');
       return;
     }
     let pixelMap: image.PixelMap | null = this.composerImage;
@@ -5278,56 +4707,16 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     this.statusCode = 1;
     this.imageSendState = 1;
     try {
-      let delivered: boolean = false;
-      let mobilePublished: boolean = false;
-      if (this.mobileSyncRunning) {
-        try {
-          let mobileData: Uint8Array = await this.clipboardService.encodePng(pixelMap);
-          this.latestContentId = this.mobileSyncServerService.publishImage(mobileData);
-          mobilePublished = true;
-        } catch (error) {
-          mobilePublished = false;
-        }
+      let data: Uint8Array = await this.clipboardService.encodeSpaceImage(pixelMap);
+      let report: EngineSendReport = await engineRuntimeService.sendImage(data, 'image/jpeg', [targetDeviceId]);
+      logger.info('UniClipboard official Engine image target=' + targetDeviceId + ' accepted peer count: ' +
+        report.totalAccepted.toString());
+      if (report.totalAccepted <= 0 && report.totalPending <= 0) {
+        throw new Error('selected remote device did not accept the clipboard image');
       }
-      if (this.hasConfig()) {
-        try {
-          let data: Uint8Array = await this.clipboardService.encodePng(pixelMap);
-          let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
-          this.latestContentId = await client.putImage(data);
-          this.latestText = 'image.png';
-          delivered = true;
-          logger.info('UniClipboard image sent through desktop relay');
-        } catch (error) {
-          logger.warn('UniClipboard desktop image relay unavailable, trying P2P');
-        }
-      }
-      if (!delivered && this.spaceJoined) {
-        try {
-          let data: Uint8Array = await this.clipboardService.encodeSpaceImage(pixelMap);
-          let report: EngineSendReport = await engineRuntimeService.sendImage(data, 'image/jpeg', []);
-          logger.info('UniClipboard official Engine image accepted peer count: ' +
-            report.totalAccepted.toString());
-          if (report.totalAccepted > 0 || report.totalPending > 0) {
-            this.spacePeerConnected = true;
-            this.latestContentId = report.entryId;
-            this.latestText = 'image.jpg';
-            delivered = true;
-          } else if (!mobilePublished) {
-            throw new Error('no online space peer accepted the clipboard image');
-          }
-        } catch (error) {
-          logger.error('UniClipboard official Engine image send failed: ' + this.errorDetail(error));
-          if (!mobilePublished) {
-            throw new Error('space image delivery failed: ' + this.errorDetail(error));
-          }
-        }
-      }
-      if (!delivered && mobilePublished) {
-        delivered = true;
-      }
-      if (!delivered) {
-        throw new Error('no desktop or space peer accepted the clipboard image');
-      }
+      this.spacePeerConnected = true;
+      this.latestContentId = report.entryId;
+      this.latestText = 'image.jpg';
       this.latestKind = 'Image';
       this.latestImage = pixelMap;
       if (this.desktopSelectedId.length === 0) {
@@ -5340,9 +4729,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       this.statusCode = 2;
       this.imageSendState = 2;
     } catch (error) {
-      if (this.spaceJoined) {
-        this.spacePeerConnected = false;
-      }
+      this.spacePeerConnected = false;
       this.statusCode = 3;
       this.imageSendState = 3;
       this.reportError('image', 'image send failed: ' + this.errorDetail(error));
@@ -5410,64 +4797,28 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     }
   }
 
-  public async sendFile(): Promise<void> {
+  public async sendFile(requestedTargetDeviceId: string = ''): Promise<void> {
     let sourceUri: string = this.composerFileUri;
     let sourceSize: number = this.composerFileSize;
-    if ((!this.spaceJoined && !this.hasConfig() && !this.mobileSyncRunning) || sourceUri.length === 0 ||
+    let targetDeviceId: string = this.mediaTargetDeviceId(requestedTargetDeviceId);
+    if (!this.spaceJoined || targetDeviceId.length === 0 || sourceUri.length === 0 ||
       sourceSize <= 0 || this.composerFileName.length === 0) {
       this.fileTransferState = 4;
+      this.statusCode = 3;
+      this.reportError('file', 'file send requires one selected remote device');
       return;
     }
     this.busy = true;
     this.statusCode = 1;
     this.fileTransferState = 3;
     try {
-      let delivered: boolean = false;
-      let mobilePublished: boolean = false;
-      if (this.mobileSyncRunning) {
-        try {
-          this.latestContentId = this.mobileSyncServerService.publishFile(
-            sourceUri, sourceSize, this.composerFileName);
-          mobilePublished = true;
-        } catch (error) {
-          mobilePublished = false;
-        }
+      let report: EngineSendReport = await engineRuntimeService.sendFileFromUri(sourceUri, '', [targetDeviceId]);
+      if (report.totalAccepted <= 0 && report.totalPending <= 0) {
+        throw new Error('selected remote device did not accept the file');
       }
-      if (this.hasConfig() && !this.spaceJoined) {
-        try {
-          let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
-          this.latestContentId = await client.putFileFromUri(
-            sourceUri, sourceSize, this.composerFileName);
-          this.pendingFileTransferId = '';
-          delivered = true;
-          logger.info('UniClipboard file sent through desktop relay');
-        } catch (error) {
-          logger.warn('UniClipboard desktop file relay unavailable, trying P2P');
-        }
-      }
-      if (!delivered && this.spaceJoined) {
-        try {
-          let report: EngineSendReport = await engineRuntimeService.sendFileFromUri(sourceUri, '', []);
-          if (report.totalAccepted > 0 || report.totalPending > 0) {
-            this.pendingFileTransferId = report.entryId;
-            this.latestContentId = report.entryId;
-            this.spacePeerConnected = true;
-            delivered = true;
-          } else if (!mobilePublished) {
-            throw new Error('no online space peer accepted the file');
-          }
-        } catch (error) {
-          if (!mobilePublished) {
-            throw new Error('space file delivery failed');
-          }
-        }
-      }
-      if (!delivered && mobilePublished) {
-        delivered = true;
-      }
-      if (!delivered) {
-        throw new Error('no desktop or space peer accepted the file');
-      }
+      this.pendingFileTransferId = report.entryId;
+      this.latestContentId = report.entryId;
+      this.spacePeerConnected = true;
       this.latestKind = 'File';
       this.latestText = this.composerFileName;
       this.latestFileName = this.composerFileName;
@@ -5526,99 +4877,18 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     }
   }
 
-  public startRealtime(): void {
-    if (!this.hasConfig()) {
-      this.statusCode = 3;
-      this.openConnectionSettings();
-      return;
-    }
-    try {
-      this.saveConfig();
-      let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
-      client.startRealtime();
-      this.realtimeAutoConnect = true;
-      this.realtimeActive = true;
-      this.statusCode = 1;
-    } catch (error) {
-      this.realtimeActive = false;
-      this.statusCode = 3;
-      this.reportError('sync', 'failed to start the realtime connection: ' + this.errorDetail(error),
-        $r('app.string.error_toast_sync'));
-    }
-  }
-
-  public stopRealtime(): void {
-    let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
-    client.stopRealtime();
-    this.realtimeAutoConnect = false;
-    this.realtimeActive = false;
-    this.statusCode = 0;
-  }
-
-  public toggleRealtime(): void {
-    if (this.realtimeActive) {
-      this.stopRealtime();
-    } else {
-      this.startRealtime();
-    }
-  }
-
   public async consumeRealtimeEvents(): Promise<number> {
-    let activityCount: number = 0;
-    activityCount += await this.consumeMobileSyncEvents();
     this.realtimeTick += 1;
+    let activityCount: number = 0;
     if (this.spaceJoined) {
       activityCount += await this.pollOfficialEngineInbound();
+      if (this.realtimeTick % 4 === 0) {
+        this.refreshSpaceDevices();
+      }
     }
     if (this.spaceInvitationExpiresAtMs > 0 && Date.now() >= this.spaceInvitationExpiresAtMs) {
       this.spaceIssuedInvitationCode = '';
       this.spaceInvitationExpiresAtMs = 0;
-    }
-    if (this.spaceJoined && this.realtimeTick % 4 === 0) {
-      this.refreshSpaceDevices();
-    }
-    if (this.mobileSyncEnabled && this.realtimeTick % 4 === 0) {
-      await this.refreshMobileSyncDevices();
-    }
-    if (this.realtimeAutoConnect && this.hasConfig() && !this.realtimeActive &&
-      this.realtimeTick % 5 === 0) {
-      this.startRealtime();
-    }
-    if (!this.realtimeActive || this.sseEventBusy) {
-      return activityCount;
-    }
-    this.sseEventBusy = true;
-    try {
-      let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
-      let events: SyncEvent[] = client.drainRealtimeEvents();
-      activityCount += events.length;
-      let shouldPull: boolean = false;
-      let disconnected: boolean = false;
-      for (let index: number = 0; index < events.length; index++) {
-        let event: SyncEvent = events[index];
-        if (event.eventType === 'hello' || event.eventType === 'resync') {
-          shouldPull = true;
-        } else if (event.eventType === 'update' && event.detail !== this.latestContentId) {
-          shouldPull = true;
-        } else if (event.eventType === 'disconnected') {
-          disconnected = true;
-        }
-      }
-      if (disconnected) {
-        this.realtimeActive = false;
-        this.statusCode = 3;
-        this.reportError('sync', 'realtime connection was disconnected by the server.');
-        return activityCount;
-      }
-      if (shouldPull) {
-        await this.pullLatestFromRealtime(client);
-      }
-    } catch (error) {
-      this.realtimeActive = false;
-      this.statusCode = 3;
-      this.reportError('sync', 'failed to consume realtime events: ' + this.errorDetail(error));
-    } finally {
-      this.sseEventBusy = false;
     }
     return activityCount;
   }
@@ -5870,8 +5140,6 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     }
     this.addHistory(this.latestText, 'received', 'Image', pixelMap, null, path, active.entryId,
       active.activatedBy);
-    this.clipboardService.writeImage(pixelMap).catch((): void => {
-    });
     this.notifyReceivedContent('Image', this.latestText, pixelMap, payload.data.length, active.activatedBy);
   }
 
@@ -5894,6 +5162,50 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     this.notifyReceivedContent('File', fileName, null, payload.data.length, active.activatedBy);
   }
 
+  public async receiveExternalContent(kind: string, displayName: string, data: Uint8Array,
+    contentId: string): Promise<void> {
+    if (data.length === 0 || contentId.length === 0) {
+      throw new Error('external content payload is empty');
+    }
+    this.removeLatestCachedFile();
+    this.latestContentId = contentId;
+    this.latestFileData = null;
+    this.latestFilePath = '';
+    this.latestFileName = '';
+    this.latestImage = null;
+    if (kind === 'Text') {
+      let decoder: util.TextDecoder = util.TextDecoder.create('utf-8', { fatal: false, ignoreBOM: true });
+      let text: string = decoder.decodeToString(data);
+      this.latestKind = 'Text';
+      this.latestText = text;
+      this.addHistory(text, 'received', 'Text', null, null, '', contentId);
+      this.notifyReceivedContent('Text', text);
+    } else if (kind === 'Image') {
+      let pixelMap: image.PixelMap = await this.clipboardService.decodeImage(data);
+      this.latestKind = 'Image';
+      this.latestText = displayName.length > 0 ? displayName : 'image.png';
+      this.latestImage = pixelMap;
+      this.latestImageRevision += 1;
+      this.addHistory(this.latestText, 'received', 'Image', pixelMap, null, '', contentId);
+      this.notifyReceivedContent('Image', this.latestText, pixelMap, data.length);
+    } else {
+      let fileName: string = displayName.length > 0 ? displayName : 'shared-file';
+      let path: string = this.cacheLatestFile(data);
+      if (path.length === 0) {
+        throw new Error('failed to persist external file');
+      }
+      this.latestKind = 'File';
+      this.latestText = fileName;
+      this.latestFileName = fileName;
+      this.latestFilePath = path;
+      this.latestFileRevision += 1;
+      this.addHistory(fileName, 'received', 'File', null, null, path, contentId);
+      this.notifyReceivedContent('File', fileName, null, data.length);
+    }
+    this.latestContentPulse += 1;
+    this.animateLatestContent();
+  }
+
   private fileNameForOfficialEnginePayload(data: Uint8Array): string {
     if (data.length >= 5 && data[0] === 37 && data[1] === 80 && data[2] === 68 && data[3] === 70 &&
       data[4] === 45) {
@@ -5912,30 +5224,6 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     } finally {
       fileIo.closeSync(source.fd);
     }
-  }
-
-  public async pullLatestFromRealtime(client: MobileSyncClient): Promise<void> {
-    let result: SyncContent = await client.getLatestContent();
-    let sameContentId: boolean = result.contentId.length > 0 && result.contentId === this.latestContentId;
-    let incomingDisplayText: string = this.contentDisplayText(result);
-    let sameLegacyContent: boolean = result.contentId.length === 0 && result.kind === 'Text' &&
-      result.kind === this.latestKind &&
-      incomingDisplayText === this.latestText;
-    if (!sameContentId && !sameLegacyContent) {
-      await this.applyLatestContent(result, true);
-      let notificationPreview: image.PixelMap | null = result.kind === 'Image' ? this.latestImage : null;
-      if (result.kind === 'File' && this.isImageFileName(result.dataName) && result.data.length > 0) {
-        try {
-          notificationPreview = await this.clipboardService.decodeImage(result.data);
-        } catch (error) {
-          notificationPreview = null;
-        }
-      }
-      let notificationName: string = result.kind === 'File' && result.dataName.length > 0 ?
-        result.dataName : this.contentDisplayText(result);
-      this.notifyReceivedContent(result.kind, notificationName, notificationPreview, result.data.length);
-    }
-    this.statusCode = 2;
   }
 
   public notifyReceivedContent(kind: string, displayName: string, preview: image.PixelMap | null = null,
@@ -5996,133 +5284,6 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     let extension: string = name.substring(dot + 1).toLowerCase();
     return extension === 'jpg' || extension === 'jpeg' || extension === 'png' || extension === 'gif' ||
       extension === 'webp' || extension === 'bmp';
-  }
-
-  public async loadServerHistory(reset: boolean): Promise<void> {
-    if (!this.hasConfig()) {
-      this.statusCode = 3;
-      this.openConnectionSettings();
-      return;
-    }
-    if (this.historyLoading) {
-      if (reset) {
-        this.historyResetPending = true;
-      }
-      return;
-    }
-    if (!reset && this.historyEnd) {
-      return;
-    }
-    let page: number = reset ? 1 : this.historyPage;
-    this.historyLoading = true;
-    this.statusCode = 1;
-    try {
-      let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
-      let items: ServerHistoryItem[] = await client.queryHistory(
-        page, this.historySearchText, this.historyStarredOnly);
-      if (reset) {
-        this.serverHistory = items;
-      } else {
-        this.serverHistory = [...this.serverHistory, ...items];
-      }
-      if (items.length === 0) {
-        this.historyEnd = true;
-      } else {
-        this.historyPage = page + 1;
-        this.historyEnd = false;
-      }
-      this.statusCode = 2;
-    } catch (error) {
-      this.statusCode = 3;
-    } finally {
-      this.historyLoading = false;
-      if (this.historyResetPending) {
-        this.historyResetPending = false;
-        this.loadServerHistory(true);
-      }
-    }
-  }
-
-  public replaceServerHistoryItem(updated: ServerHistoryItem): void {
-    let items: ServerHistoryItem[] = [];
-    for (let index: number = 0; index < this.serverHistory.length; index++) {
-      let item: ServerHistoryItem = this.serverHistory[index];
-      items.push(item.id === updated.id ? updated : item);
-    }
-    this.serverHistory = items;
-  }
-
-  public async toggleHistoryStarred(item: ServerHistoryItem): Promise<void> {
-    if (this.historyMutationBusy) {
-      return;
-    }
-    this.historyMutationBusy = true;
-    try {
-      let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
-      let updated: ServerHistoryItem = await client.setHistoryStarred(item, !item.starred);
-      this.replaceServerHistoryItem(updated);
-      this.statusCode = 2;
-    } catch (error) {
-      this.statusCode = 3;
-    } finally {
-      this.historyMutationBusy = false;
-    }
-  }
-
-  public async toggleHistoryPinned(item: ServerHistoryItem): Promise<void> {
-    if (this.historyMutationBusy) {
-      return;
-    }
-    this.historyMutationBusy = true;
-    try {
-      let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
-      let updated: ServerHistoryItem = await client.setHistoryPinned(item, !item.pinned);
-      this.replaceServerHistoryItem(updated);
-      this.statusCode = 2;
-    } catch (error) {
-      this.statusCode = 3;
-    } finally {
-      this.historyMutationBusy = false;
-    }
-  }
-
-  public async confirmDeleteHistory(item: ServerHistoryItem): Promise<void> {
-    let confirmed: boolean = false;
-    try {
-      let result = await this.getUIContext().getPromptAction().showDialog({
-        title: $r('app.string.history_delete_title'),
-        message: $r('app.string.history_delete_message'),
-        buttons: [
-          { text: $r('app.string.cancel_action'), color: $r('app.color.text_secondary') },
-          { text: $r('app.string.history_delete_action'), color: $r('app.color.danger') }
-        ]
-      });
-      confirmed = result.index === 1;
-    } catch (error) {
-      this.statusCode = 3;
-      return;
-    }
-    if (!confirmed || this.historyMutationBusy) {
-      return;
-    }
-    this.historyMutationBusy = true;
-    try {
-      let client: MobileSyncClient = new MobileSyncClient(this.getConfig());
-      await client.deleteHistory(item);
-      let items: ServerHistoryItem[] = [];
-      for (let index: number = 0; index < this.serverHistory.length; index++) {
-        let current: ServerHistoryItem = this.serverHistory[index];
-        if (current.id !== item.id) {
-          items.push(current);
-        }
-      }
-      this.serverHistory = items;
-      this.statusCode = 2;
-    } catch (error) {
-      this.statusCode = 3;
-    } finally {
-      this.historyMutationBusy = false;
-    }
   }
 
 }

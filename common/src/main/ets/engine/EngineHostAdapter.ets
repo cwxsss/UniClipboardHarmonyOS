@@ -15,8 +15,7 @@ export interface EngineHostResult<T> {
   errorCategory?: string;
 }
 
-// Mirrors the public OhHost declaration. The HAR's Index.d.ets currently does
-// not re-export these types, so ArkTS cannot import them without a private patch.
+// Mirrors the public OhHost declaration re-exported by the official HAR.
 export interface EngineHostCallbacks {
   privateDataDirectory: string;
   cacheDirectory: string;

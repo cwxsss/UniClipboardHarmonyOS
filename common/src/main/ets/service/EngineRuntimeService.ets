@@ -1,7 +1,16 @@
 import { bundleManager, common } from '@kit.AbilityKit';
 import { util } from '@kit.ArkTS';
-import engine from '@uniclipboard/engine';
-import { createNapiBuffer } from 'uniclipboard_native';
+import engine, {
+  OhEngine,
+  OhInvitationIssued,
+  OhJoinSpaceStatus,
+  OhJoinedSpace,
+  OhMemberSyncPreferences,
+  OhMemberSyncPreferencesPatch,
+  OhNetworkSettings,
+  OhSendReport,
+  PreparedHost
+} from '@uniclipboard/engine';
 import {
   EngineHostAdapter,
   EngineHostCallbacks
@@ -90,7 +99,7 @@ export class EngineRuntimeStartConfig {
   }
 }
 
-// These result classes isolate the rc.3 native surface from pages and view models.
+// These result classes isolate the Engine binding surface from pages and view models.
 export class EngineSpaceCreated {
   spaceId: string;
   selfDeviceId: string;
@@ -110,6 +119,16 @@ export class EngineSessionRecovery {
   constructor(unlocked: boolean, resumed: boolean) {
     this.unlocked = unlocked;
     this.resumed = resumed;
+  }
+}
+
+export class EngineNetworkSettings {
+  allowRelayFallback: boolean;
+  customRelayUrls: string[];
+
+  constructor(allowRelayFallback: boolean, customRelayUrls: string[]) {
+    this.allowRelayFallback = allowRelayFallback;
+    this.customRelayUrls = customRelayUrls;
   }
 }
 
@@ -248,101 +267,8 @@ export class EngineMemberSyncPreferences {
   }
 }
 
-// Keep the formal Engine member preference contract private to this adapter so
-// the rest of the product never touches the native object directly.
-interface EngineCompatibilityNativeInvitation {
-  invitationCode: string;
-  expiresAtMs: number;
-  availability: string;
-}
-
-interface EngineCompatibilityNativeSpaceJoined {
-  sponsorDeviceId: string;
-  sponsorIdentityFingerprint: string;
-  spaceId: string;
-  selfDeviceId: string;
-  selfIdentityFingerprint: string;
-  migratedRecords: string | undefined;
-  preservedUnreadableRecords: string | undefined;
-}
-
-interface EngineCompatibilityNativeJoinSpaceStatus {
-  status: string;
-  joinId: string;
-  joinedSpace: EngineCompatibilityNativeSpaceJoined | undefined;
-  rejectionReason: string | undefined;
-}
-
-interface EngineCompatibilityNativeSendReport {
-  entryId: string;
-  atMs: number;
-  totalAccepted: number;
-  totalDuplicate: number;
-  totalOffline: number;
-  totalErrored: number;
-  totalPending: number;
-}
-
-interface EngineCompatibilityNativeContentTypes {
-  text: boolean;
-  image: boolean;
-  link: boolean;
-  file: boolean;
-  codeSnippet: boolean;
-  richText: boolean;
-}
-
-interface EngineCompatibilityNativeContentTypesPatch {
-  text?: boolean;
-  image?: boolean;
-  link?: boolean;
-  file?: boolean;
-  codeSnippet?: boolean;
-  richText?: boolean;
-}
-
-interface EngineCompatibilityNativeMemberSyncPreferences {
-  sendEnabled: boolean;
-  receiveEnabled: boolean;
-  sendContentTypes: EngineCompatibilityNativeContentTypes;
-  receiveContentTypes: EngineCompatibilityNativeContentTypes;
-}
-
-interface EngineCompatibilityNativeMemberSyncPreferencesPatch {
-  sendEnabled?: boolean;
-  receiveEnabled?: boolean;
-  sendContentTypes?: EngineCompatibilityNativeContentTypesPatch;
-  receiveContentTypes?: EngineCompatibilityNativeContentTypesPatch;
-}
-
-interface EngineCompatibilityNativeMemberSyncApi {
-  queryMemberSyncPreferences(deviceId: string): Promise<EngineCompatibilityNativeMemberSyncPreferences>;
-  updateMemberSyncPreferences(deviceId: string, patch: EngineCompatibilityNativeMemberSyncPreferencesPatch):
-    Promise<EngineCompatibilityNativeMemberSyncPreferences>;
-}
-
-interface EngineCompatibilityNativeHandle {
-  issueInvitation(): Promise<EngineCompatibilityNativeInvitation>;
-  joinSpace(invitationCode: string, deviceName: string | null, passphrase: string,
-    preserveUnreadableHistory: boolean): Promise<EngineCompatibilityNativeJoinSpaceStatus>;
-  // The helper returns an actual N-API Buffer even though its ArkTS type is
-  // declared as ArrayBuffer because the generated bridge declaration cannot
-  // express the native Buffer class.
-  sendImage(bytes: ArrayBuffer, mimeType: string, targetDevices: string[]):
-    Promise<EngineCompatibilityNativeSendReport>;
-  sendFiles(fileHandles: string[], targetDevices: string[]): Promise<EngineCompatibilityNativeSendReport>;
-  captureCurrentClipboard(): Promise<string | null>;
-  restoreClipboard(entryId: string, mode: string): Promise<string>;
-  queryDeviceTrust(): Promise<string>;
-  queryMemberSyncPreferences(deviceId: string): Promise<EngineCompatibilityNativeMemberSyncPreferences>;
-  updateMemberSyncPreferences(deviceId: string, patch: EngineCompatibilityNativeMemberSyncPreferencesPatch):
-    Promise<EngineCompatibilityNativeMemberSyncPreferences>;
-  decideDeviceTrustChange(changeId: string, choice: string,
-    confirmLocalRemoval: boolean): Promise<string>;
-}
-
 export function normalizeMemberSyncPreferences(
-  preferences: EngineCompatibilityNativeMemberSyncPreferences): EngineMemberSyncPreferences {
+  preferences: OhMemberSyncPreferences): EngineMemberSyncPreferences {
   return new EngineMemberSyncPreferences(
     preferences.sendEnabled,
     preferences.sendContentTypes.text,
@@ -360,20 +286,14 @@ export function normalizeMemberSyncPreferences(
     preferences.receiveContentTypes.richText);
 }
 
-function requireMemberSyncPreferencesApi(nativeObject: Object): EngineCompatibilityNativeMemberSyncApi {
-  let candidate: Record<string, Object> = nativeObject as Record<string, Object>;
-  if (typeof candidate['queryMemberSyncPreferences'] !== 'function' ||
-    typeof candidate['updateMemberSyncPreferences'] !== 'function') {
-    throw new Error('engine_member_sync_preferences_api_unavailable');
-  }
-  return nativeObject as EngineCompatibilityNativeMemberSyncApi;
-}
-
 export interface EngineRuntimeHandle {
   lifecycleState(): Promise<string>;
   suspend(): Promise<void>;
   resume(): Promise<void>;
   recoverNetwork(): Promise<void>;
+  queryNetworkSettings(): Promise<EngineNetworkSettings>;
+  updateNetworkSettings(allowRelayFallback: boolean, customRelayUrls: string[]): Promise<EngineNetworkSettings>;
+  probeRelayUrl(url: string): Promise<number>;
   nextEvent(timeoutMs: number): Promise<EngineRuntimeEvent | null>;
   shutdown(deadlineMs: number): Promise<void>;
   createSpace(deviceName: string | null, passphrase: string): Promise<EngineSpaceCreated>;
@@ -399,8 +319,8 @@ export interface EngineRuntimeHandle {
 }
 
 export interface EngineRuntimeBackend {
-  prepareHost(host: EngineHostCallbacks): Object;
-  startEngine(config: EngineRuntimeStartConfig, preparedHost: Object): Promise<EngineRuntimeHandle>;
+  prepareHost(host: EngineHostCallbacks): PreparedHost;
+  startEngine(config: EngineRuntimeStartConfig, preparedHost: PreparedHost): Promise<EngineRuntimeHandle>;
 }
 
 export interface EngineRuntimeHost {
@@ -415,19 +335,27 @@ export interface EngineRuntimeHost {
 }
 
 class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
-  prepareHost(host: EngineHostCallbacks): Object {
+  prepareHost(host: EngineHostCallbacks): PreparedHost {
     return engine.prepareHost(host);
   }
 
-  async startEngine(config: EngineRuntimeStartConfig, preparedHost: Object): Promise<EngineRuntimeHandle> {
-    let rawHandle = await engine.startEngine(config, preparedHost);
-    let nativeObject: Object = rawHandle as Object;
-    let compatibilityHandle: EngineCompatibilityNativeHandle = nativeObject as EngineCompatibilityNativeHandle;
+  async startEngine(config: EngineRuntimeStartConfig, preparedHost: PreparedHost): Promise<EngineRuntimeHandle> {
+    let rawHandle: OhEngine = await engine.startEngine(config, preparedHost);
     return new CallbackEngineRuntimeHandle(
       (): Promise<string> => rawHandle.lifecycleState(),
       (): Promise<void> => rawHandle.suspend(),
       (): Promise<void> => rawHandle.resume(),
       (): Promise<void> => rawHandle.recoverNetwork(),
+      async (): Promise<EngineNetworkSettings> => {
+        let result: OhNetworkSettings = await rawHandle.queryNetworkSettings();
+        return new EngineNetworkSettings(result.allowRelayFallback, result.customRelayUrls);
+      },
+      async (allowRelayFallback: boolean, customRelayUrls: string[]): Promise<EngineNetworkSettings> => {
+        let result: OhNetworkSettings = await rawHandle.updateNetworkSettings(
+          allowRelayFallback, customRelayUrls);
+        return new EngineNetworkSettings(result.allowRelayFallback, result.customRelayUrls);
+      },
+      (url: string): Promise<number> => rawHandle.probeRelayUrl(url),
       async (timeoutMs: number): Promise<EngineRuntimeEvent | null> => {
         let rawEvent = await rawHandle.nextEvent(timeoutMs);
         if (rawEvent === null) {
@@ -456,21 +384,21 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
         return new EngineSessionRecovery(result.unlocked, result.resumed);
       },
       async (): Promise<EngineInvitationIssued> => {
-        let result: EngineCompatibilityNativeInvitation = await compatibilityHandle.issueInvitation();
+        let result: OhInvitationIssued = await rawHandle.issueInvitation();
         return new EngineInvitationIssued(result.invitationCode, result.expiresAtMs, result.availability);
       },
       async (invitationCode: string, deviceName: string | null, passphrase: string,
         preserveUnreadableHistory: boolean): Promise<EngineSpaceJoined> => {
         let normalizedDeviceName: string | null = deviceName === null || deviceName.trim().length === 0 ?
           null : deviceName.trim();
-        let status: EngineCompatibilityNativeJoinSpaceStatus = await compatibilityHandle.joinSpace(invitationCode,
+        let status: OhJoinSpaceStatus = await rawHandle.joinSpace(invitationCode,
           normalizedDeviceName, passphrase,
           preserveUnreadableHistory);
         if (status.status !== 'active' || status.joinedSpace === undefined) {
           let reason: string = status.rejectionReason === undefined ? status.status : status.rejectionReason;
           throw new Error('join_space_' + reason);
         }
-        let result: EngineCompatibilityNativeSpaceJoined = status.joinedSpace;
+        let result: OhJoinedSpace = status.joinedSpace;
         return new EngineSpaceJoined(result.sponsorDeviceId, result.sponsorIdentityFingerprint,
           result.spaceId, result.selfDeviceId, result.selfIdentityFingerprint,
           result.migratedRecords, result.preservedUnreadableRecords);
@@ -481,18 +409,16 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
           result.totalDuplicate, result.totalOffline, result.totalErrored, result.totalPending);
       },
       async (bytes: Uint8Array, mimeType: string, targetDevices: string[]): Promise<EngineSendReport> => {
-        let nativeBytes: ArrayBuffer = createNapiBuffer(bytes);
-        let result: EngineCompatibilityNativeSendReport = await compatibilityHandle.sendImage(nativeBytes,
-          mimeType, targetDevices);
+        let result: OhSendReport = await rawHandle.sendImage(bytes, mimeType, targetDevices);
         return new EngineSendReport(result.entryId, result.atMs, result.totalAccepted,
           result.totalDuplicate, result.totalOffline, result.totalErrored, result.totalPending);
       },
       async (fileHandles: string[], targetDevices: string[]): Promise<EngineSendReport> => {
-        let result: EngineCompatibilityNativeSendReport = await compatibilityHandle.sendFiles(fileHandles, targetDevices);
+        let result: OhSendReport = await rawHandle.sendFiles(fileHandles, targetDevices);
         return new EngineSendReport(result.entryId, result.atMs, result.totalAccepted,
           result.totalDuplicate, result.totalOffline, result.totalErrored, result.totalPending);
       },
-      (): Promise<string | null> => compatibilityHandle.captureCurrentClipboard(),
+      (): Promise<string | null> => rawHandle.captureCurrentClipboard(),
       async (): Promise<EngineActiveClipboard | null> => {
         let result = await rawHandle.queryActiveClipboard();
         if (result === null) {
@@ -501,15 +427,12 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
         return new EngineActiveClipboard(result.entryId, result.activatedBy);
       },
       async (deviceId: string): Promise<EngineMemberSyncPreferences> => {
-        let memberSyncHandle: EngineCompatibilityNativeMemberSyncApi =
-          requireMemberSyncPreferencesApi(nativeObject);
-        let result: EngineCompatibilityNativeMemberSyncPreferences =
-          await memberSyncHandle.queryMemberSyncPreferences(deviceId);
+        let result: OhMemberSyncPreferences = await rawHandle.queryMemberSyncPreferences(deviceId);
         return normalizeMemberSyncPreferences(result);
       },
       async (deviceId: string, sendEnabled: boolean, text: boolean, imageEnabled: boolean,
         file: boolean, link: boolean, richText: boolean): Promise<EngineMemberSyncPreferences> => {
-        let patch: EngineCompatibilityNativeMemberSyncPreferencesPatch = {
+        let patch: OhMemberSyncPreferencesPatch = {
           sendEnabled: sendEnabled,
           sendContentTypes: {
             text: text,
@@ -519,14 +442,11 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
             richText: richText
           }
         };
-        let memberSyncHandle: EngineCompatibilityNativeMemberSyncApi =
-          requireMemberSyncPreferencesApi(nativeObject);
-        let result: EngineCompatibilityNativeMemberSyncPreferences =
-          await memberSyncHandle.updateMemberSyncPreferences(deviceId, patch);
+        let result: OhMemberSyncPreferences = await rawHandle.updateMemberSyncPreferences(deviceId, patch);
         return normalizeMemberSyncPreferences(result);
       },
       async (deviceId: string): Promise<EngineMemberSyncPreferences> => {
-        let patch: EngineCompatibilityNativeMemberSyncPreferencesPatch = {
+        let patch: OhMemberSyncPreferencesPatch = {
           sendEnabled: true,
           receiveEnabled: true,
           sendContentTypes: {
@@ -546,13 +466,10 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
             richText: true
           }
         };
-        let memberSyncHandle: EngineCompatibilityNativeMemberSyncApi =
-          requireMemberSyncPreferencesApi(nativeObject);
-        let result: EngineCompatibilityNativeMemberSyncPreferences =
-          await memberSyncHandle.updateMemberSyncPreferences(deviceId, patch);
+        let result: OhMemberSyncPreferences = await rawHandle.updateMemberSyncPreferences(deviceId, patch);
         return normalizeMemberSyncPreferences(result);
       },
-      (entryId: string, mode: string): Promise<string> => compatibilityHandle.restoreClipboard(entryId, mode),
+      (entryId: string, mode: string): Promise<string> => rawHandle.restoreClipboard(entryId, mode),
       (entryId: string, destinationHandle: string): Promise<void> => rawHandle.exportEntry(entryId,
         destinationHandle),
       async (deviceId: string): Promise<EngineWorkspaceConvergence> => {
@@ -560,9 +477,9 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
         return new EngineWorkspaceConvergence(result.phase, result.effectiveMemberCount,
           result.updatedAtMs);
       },
-      (): Promise<string> => compatibilityHandle.queryDeviceTrust(),
+      (): Promise<string> => rawHandle.queryDeviceTrust(),
       (changeId: string, choice: string, confirmLocalRemoval: boolean): Promise<string> =>
-        compatibilityHandle.decideDeviceTrustChange(changeId, choice, confirmLocalRemoval));
+        rawHandle.decideDeviceTrustChange(changeId, choice, confirmLocalRemoval));
   }
 }
 
@@ -571,6 +488,10 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
   private suspendCallback: () => Promise<void>;
   private resumeCallback: () => Promise<void>;
   private recoverNetworkCallback: () => Promise<void>;
+  private queryNetworkSettingsCallback: () => Promise<EngineNetworkSettings>;
+  private updateNetworkSettingsCallback: (allowRelayFallback: boolean, customRelayUrls: string[]) =>
+    Promise<EngineNetworkSettings>;
+  private probeRelayUrlCallback: (url: string) => Promise<number>;
   private nextEventCallback: (timeoutMs: number) => Promise<EngineRuntimeEvent | null>;
   private shutdownCallback: (deadlineMs: number) => Promise<void>;
   private createSpaceCallback: (deviceName: string | null, passphrase: string) => Promise<EngineSpaceCreated>;
@@ -598,6 +519,10 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
   constructor(lifecycleStateCallback: () => Promise<string>, suspendCallback: () => Promise<void>,
     resumeCallback: () => Promise<void>,
     recoverNetworkCallback: () => Promise<void>,
+    queryNetworkSettingsCallback: () => Promise<EngineNetworkSettings>,
+    updateNetworkSettingsCallback: (allowRelayFallback: boolean, customRelayUrls: string[]) =>
+      Promise<EngineNetworkSettings>,
+    probeRelayUrlCallback: (url: string) => Promise<number>,
     nextEventCallback: (timeoutMs: number) => Promise<EngineRuntimeEvent | null>,
     shutdownCallback: (deadlineMs: number) => Promise<void>,
     createSpaceCallback: (deviceName: string | null, passphrase: string) => Promise<EngineSpaceCreated>,
@@ -624,6 +549,9 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
     this.suspendCallback = suspendCallback;
     this.resumeCallback = resumeCallback;
     this.recoverNetworkCallback = recoverNetworkCallback;
+    this.queryNetworkSettingsCallback = queryNetworkSettingsCallback;
+    this.updateNetworkSettingsCallback = updateNetworkSettingsCallback;
+    this.probeRelayUrlCallback = probeRelayUrlCallback;
     this.nextEventCallback = nextEventCallback;
     this.shutdownCallback = shutdownCallback;
     this.createSpaceCallback = createSpaceCallback;
@@ -659,6 +587,19 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
 
   async recoverNetwork(): Promise<void> {
     await this.recoverNetworkCallback();
+  }
+
+  async queryNetworkSettings(): Promise<EngineNetworkSettings> {
+    return await this.queryNetworkSettingsCallback();
+  }
+
+  async updateNetworkSettings(allowRelayFallback: boolean, customRelayUrls: string[]):
+    Promise<EngineNetworkSettings> {
+    return await this.updateNetworkSettingsCallback(allowRelayFallback, customRelayUrls);
+  }
+
+  async probeRelayUrl(url: string): Promise<number> {
+    return await this.probeRelayUrlCallback(url);
   }
 
   async nextEvent(timeoutMs: number): Promise<EngineRuntimeEvent | null> {
@@ -793,7 +734,7 @@ export class EngineRuntimeService implements EngineClipboardObserver {
   private state: EngineRuntimeState = EngineRuntimeState.IDLE;
   private lastErrorCategory: string = '';
   private callbacks: EngineHostCallbacks | null = null;
-  private preparedHost: Object | null = null;
+  private preparedHost: PreparedHost | null = null;
   private startConfig: EngineRuntimeStartConfig | null = null;
   private handle: EngineRuntimeHandle | null = null;
   private prepareTask: Promise<void> | null = null;
@@ -806,7 +747,6 @@ export class EngineRuntimeService implements EngineClipboardObserver {
   private clipboardCaptureTask: Promise<void> | null = null;
   private pendingClipboardSnapshot: EngineClipboardSnapshot | null = null;
   private clipboardWriteSuppression: boolean = false;
-  private clipboardAutoSendTargets: string[] = [];
   private eventPolling: boolean = false;
   private observers: EngineRuntimeObserver[] = [];
   private eventObservers: EngineRuntimeEventObserver[] = [];
@@ -991,6 +931,23 @@ export class EngineRuntimeService implements EngineClipboardObserver {
       (handle: EngineRuntimeHandle): Promise<void> => handle.recoverNetwork());
   }
 
+  async queryNetworkSettings(): Promise<EngineNetworkSettings> {
+    return await this.executeReadOnly('query_network_settings',
+      (handle: EngineRuntimeHandle): Promise<EngineNetworkSettings> => handle.queryNetworkSettings());
+  }
+
+  async updateNetworkSettings(allowRelayFallback: boolean, customRelayUrls: string[]):
+    Promise<EngineNetworkSettings> {
+    return await this.executeFeature('update_network_settings',
+      (handle: EngineRuntimeHandle): Promise<EngineNetworkSettings> =>
+        handle.updateNetworkSettings(allowRelayFallback, customRelayUrls));
+  }
+
+  async probeRelayUrl(url: string): Promise<number> {
+    return await this.executeReadOnly('probe_relay_url',
+      (handle: EngineRuntimeHandle): Promise<number> => handle.probeRelayUrl(url));
+  }
+
   async issueInvitation(): Promise<EngineInvitationIssued> {
     return await this.executeFeature('issue_invitation',
       (handle: EngineRuntimeHandle): Promise<EngineInvitationIssued> => handle.issueInvitation());
@@ -1044,18 +1001,6 @@ export class EngineRuntimeService implements EngineClipboardObserver {
 
   setClipboardPollingEnabled(enabled: boolean): void {
     this.host.setClipboardPollingEnabled(enabled && this.clipboardCaptureEnabled);
-  }
-
-  setClipboardAutoSendTargets(targetDevices: string[]): void {
-    let sanitizedTargets: string[] = [];
-    for (let index: number = 0; index < targetDevices.length; index += 1) {
-      let deviceId: string = targetDevices[index].trim();
-      if (deviceId.length > 0 && sanitizedTargets.indexOf(deviceId) < 0) {
-        sanitizedTargets.push(deviceId);
-      }
-    }
-    this.clipboardAutoSendTargets = sanitizedTargets;
-    logger.info('Clipboard automatic send target count=' + sanitizedTargets.length.toString());
   }
 
   async queryActiveClipboard(): Promise<EngineActiveClipboard | null> {
@@ -1306,7 +1251,10 @@ export class EngineRuntimeService implements EngineClipboardObserver {
     this.setState(EngineRuntimeState.PREPARING);
     try {
       this.preparedHost = this.backend.prepareHost(callbacks);
-      let preparedHost: Object = this.preparedHost;
+      let preparedHost: PreparedHost | null = this.preparedHost;
+      if (preparedHost === null) {
+        throw new EngineRuntimeError('not_prepared', 'start');
+      }
       let startedHandle: EngineRuntimeHandle = await this.backend.startEngine(config, preparedHost);
       this.handle = startedHandle;
       if (this.clipboardCaptureEnabled) {
@@ -1466,13 +1414,9 @@ export class EngineRuntimeService implements EngineClipboardObserver {
       logger.info('Automatic clipboard send skipped reason=no_text');
       return;
     }
-    if (this.clipboardAutoSendTargets.length === 0) {
-      logger.warn('Automatic clipboard send skipped reason=no_target');
-      return;
-    }
     try {
       let handle: EngineRuntimeHandle = this.requireRunningHandle('capture_clipboard');
-      let report: EngineSendReport = await handle.sendText(text, this.clipboardAutoSendTargets);
+      let report: EngineSendReport = await handle.sendText(text, []);
       logger.info('Automatic clipboard send completed accepted=' + report.totalAccepted.toString() +
         ' pending=' + report.totalPending.toString() +
         ' offline=' + report.totalOffline.toString() +

@@ -1,11 +1,6 @@
 export {
   ClipboardHistoryItem,
-  LinkPreview,
-  ServerConfig,
-  ServerHistoryItem,
-  SyncContent,
-  SyncEvent,
-  SyncResult
+  LinkPreview
 } from './src/main/ets/model/ClipboardModels';
 
 export {
@@ -28,7 +23,6 @@ export {
   BackgroundSyncTaskService
 } from './src/main/ets/service/BackgroundSyncService';
 
-export { ConfigStorageService } from './src/main/ets/service/ConfigStorageService';
 export {
   EngineHostAdapter,
   EngineHostCallbacks,
@@ -41,6 +35,7 @@ export {
   EngineRuntimeBackend,
   EngineInvitationIssued,
   EngineActiveClipboard,
+  EngineNetworkSettings,
   EngineMemberSyncPreferences,
   EngineRuntimeError,
   EngineRuntimeEvent,
@@ -82,30 +77,4 @@ export {
   parseOpticalFrame,
   unpackOpticalEnvelope
 } from './src/main/ets/service/OpticalTransferService';
-export { MobileSyncClient } from './src/main/ets/service/MobileSyncClient';
-export { MobileSyncServerService } from './src/main/ets/service/MobileSyncServerService';
-export { NativeProtocolService } from './src/main/ets/service/NativeProtocolService';
 export { ReceivedNotificationService } from './src/main/ets/service/NotificationService';
-export { SpaceNodeService } from './src/main/ets/service/SpaceNodeService';
-
-export {
-  NativeCreateSpaceResult,
-  NativeJoinSpaceResult,
-  NativeMobileSyncCredential,
-  NativeMobileSyncDevice,
-  NativeMobileSyncInboundEvent,
-  NativeMobileSyncStatus,
-  NativeSpaceDevice,
-  NativeSpaceFileEvent,
-  NativeSpaceFileSendResult,
-  NativeSpaceFileStatusEvent,
-  NativeSpaceImageEvent,
-  NativeSpaceInvitation,
-  NativeSpaceMemberSyncPreferences,
-  NativeSpaceNetworkSettings,
-  NativeSpaceStatus,
-  NativeSpaceTextEvent,
-  setSpaceBackgroundMode,
-  stopSpaceNode,
-  wakeSpaceConnections
-} from 'uniclipboard_native';

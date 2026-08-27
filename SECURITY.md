@@ -15,6 +15,5 @@
 ## Security notes for users
 
 - 短时邀请码和空间口令应通过不同渠道传递；
-- 旧移动同步模式的 HTTP + Basic Auth 只应在可信局域网中使用；
-- 跨网络访问旧协议时应使用 HTTPS 反向代理或可信 VPN；
+- 鸿蒙端只通过官方 Engine 的加密空间传输内容；中继地址属于 Engine 网络配置，不是旧版 HTTP 同步服务；
 - 安装包只应来自你信任的仓库 Release，并核对发布者与校验值。

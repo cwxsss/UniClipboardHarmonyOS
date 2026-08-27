@@ -9,7 +9,7 @@ execFileSync(powershellCommand, [
   '-ExecutionPolicy',
   'Bypass',
   '-File',
-  resolve(process.cwd(), 'rust', 'verify-engine-release.ps1')
+  resolve(process.cwd(), 'tools', 'verify-engine-release.ps1')
 ], { stdio: 'inherit' });
 execFileSync(powershellCommand, [
   '-NoProfile',

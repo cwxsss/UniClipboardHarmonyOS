@@ -44,10 +44,6 @@
     {
       "name": "common",
       "srcPath": "./common"
-    },
-    {
-      "name": "uniclipboard_native",
-      "srcPath": "./rust/uniclipboard-native/package"
     }
   ]
 }
