@@ -5,7 +5,11 @@ import { Logger } from '../util/Logger';
 
 const PERMISSION_DENIED_CODE: number = 201;
 const TEXT_FORMAT: string = 'text/plain';
-export const BACKGROUND_CLIPBOARD_POLL_INTERVAL_MS: number = 200;
+export const BACKGROUND_CLIPBOARD_POLL_INTERVAL_MS: number = 1000;
+export const BACKGROUND_CLIPBOARD_POLL_RELAXED_INTERVAL_MS: number = 2000;
+export const BACKGROUND_CLIPBOARD_POLL_SLOW_INTERVAL_MS: number = 5000;
+const POLL_IDLE_RELAXED_ROUNDS: number = 2;
+const POLL_IDLE_SLOW_ROUNDS: number = 4;
 const logger: Logger = new Logger('ClipboardHost');
 
 export function shouldStartClipboardPolling(pollingEnabled: boolean, listening: boolean,
@@ -16,6 +20,16 @@ export function shouldStartClipboardPolling(pollingEnabled: boolean, listening: 
 export function shouldNotifyClipboardChange(hasClipboardBaseline: boolean,
   lastClipboardText: string, currentText: string): boolean {
   return hasClipboardBaseline && currentText !== lastClipboardText;
+}
+
+export function nextClipboardPollingDelayMs(idleRounds: number, clipboardChanged: boolean): number {
+  if (clipboardChanged || idleRounds < POLL_IDLE_RELAXED_ROUNDS) {
+    return BACKGROUND_CLIPBOARD_POLL_INTERVAL_MS;
+  }
+  if (idleRounds < POLL_IDLE_SLOW_ROUNDS) {
+    return BACKGROUND_CLIPBOARD_POLL_RELAXED_INTERVAL_MS;
+  }
+  return BACKGROUND_CLIPBOARD_POLL_SLOW_INTERVAL_MS;
 }
 
 export interface EngineClipboardRepresentation {
@@ -45,11 +59,15 @@ export class EngineClipboardHost {
   private listening: boolean = false;
   private pollingEnabled: boolean = false;
   private pollingTimerId: number = -1;
+  private pollIdleRounds: number = 0;
   private hasClipboardBaseline: boolean = false;
   private lastClipboardText: string = '';
   private lastPollFailureLogAtMs: number = 0;
   private updateCallback = (): void => {
-    this.notifyClipboardChange();
+    let changed: boolean = this.notifyClipboardChange();
+    if (changed) {
+      this.pollIdleRounds = 0;
+    }
   };
 
   verifyAccess(): void {
@@ -81,6 +99,7 @@ export class EngineClipboardHost {
           this.systemPasteboard.setDataSync(data);
           this.lastClipboardText = text;
           this.hasClipboardBaseline = true;
+          this.pollIdleRounds = 0;
           return;
         } catch (error) {
           throw this.accessError(error as Object, 'clipboard_write');
@@ -93,6 +112,7 @@ export class EngineClipboardHost {
   listen(observer: EngineClipboardObserver): void {
     this.releaseListener();
     this.observer = observer;
+    this.pollIdleRounds = 0;
     this.primeClipboardBaseline();
     try {
       this.systemPasteboard.on('update', this.updateCallback);
@@ -109,6 +129,7 @@ export class EngineClipboardHost {
     logger.info('Clipboard polling enabled=' + (enabled ? '1' : '0') +
       ' listening=' + (this.listening ? '1' : '0'));
     if (enabled) {
+      this.pollIdleRounds = 0;
       this.startPollingIfNeeded();
     } else {
       this.stopPolling();
@@ -120,6 +141,7 @@ export class EngineClipboardHost {
     if (!this.listening) {
       this.observer = null;
       this.hasClipboardBaseline = false;
+      this.pollIdleRounds = 0;
       return;
     }
     try {
@@ -130,6 +152,7 @@ export class EngineClipboardHost {
       this.listening = false;
       this.observer = null;
       this.hasClipboardBaseline = false;
+      this.pollIdleRounds = 0;
     }
   }
 
@@ -143,9 +166,9 @@ export class EngineClipboardHost {
     }
   }
 
-  private notifyClipboardChange(): void {
+  private notifyClipboardChange(): boolean {
     if (!this.listening || this.observer === null) {
-      return;
+      return false;
     }
     try {
       let data: pasteboard.PasteData = this.systemPasteboard.getDataSync();
@@ -153,10 +176,10 @@ export class EngineClipboardHost {
       if (!this.hasClipboardBaseline) {
         this.lastClipboardText = currentText;
         this.hasClipboardBaseline = true;
-        return;
+        return false;
       }
       if (!shouldNotifyClipboardChange(this.hasClipboardBaseline, this.lastClipboardText, currentText)) {
-        return;
+        return false;
       }
       this.lastClipboardText = currentText;
       logger.info('Clipboard observed text change length=' + currentText.length.toString());
@@ -164,6 +187,7 @@ export class EngineClipboardHost {
       if (observer !== null) {
         observer.onClipboardChanged(this.snapshotFromText(currentText));
       }
+      return true;
     } catch (error) {
       // Permission and transient pasteboard failures are retried by the next poll.
       let nowMs: number = Date.now();
@@ -171,6 +195,7 @@ export class EngineClipboardHost {
         this.lastPollFailureLogAtMs = nowMs;
         logger.warn('Clipboard polling read failed.');
       }
+      return false;
     }
   }
 
@@ -205,18 +230,33 @@ export class EngineClipboardHost {
     if (!shouldStartClipboardPolling(this.pollingEnabled, this.listening, this.pollingTimerId)) {
       return;
     }
-    this.pollingTimerId = setInterval((): void => {
-      this.notifyClipboardChange();
-    }, BACKGROUND_CLIPBOARD_POLL_INTERVAL_MS);
-    logger.info('Clipboard polling started.');
+    this.scheduleNextPoll();
+    logger.info('Clipboard polling started with adaptive backoff.');
   }
 
   private stopPolling(): void {
     if (this.pollingTimerId < 0) {
       return;
     }
-    clearInterval(this.pollingTimerId);
+    clearTimeout(this.pollingTimerId);
     this.pollingTimerId = -1;
+  }
+
+  private scheduleNextPoll(): void {
+    if (!shouldStartClipboardPolling(this.pollingEnabled, this.listening, this.pollingTimerId)) {
+      return;
+    }
+    let delayMs: number = nextClipboardPollingDelayMs(this.pollIdleRounds, false);
+    this.pollingTimerId = setTimeout((): void => {
+      this.pollingTimerId = -1;
+      let changed: boolean = this.notifyClipboardChange();
+      if (changed) {
+        this.pollIdleRounds = 0;
+      } else {
+        this.pollIdleRounds += 1;
+      }
+      this.scheduleNextPoll();
+    }, delayMs);
   }
 
   private accessError(error: Object, operation: string): EngineHostError {

@@ -119,6 +119,19 @@ function readyController(runtime: FakeControllerRuntime,
 }
 
 export default function clipboardFeatureControllerTest(): void {
+  describe('ClipboardFeatureController realtime lifecycle', (): void => {
+    it('clears a pending realtime poll when the app enters background', 0,
+      async (): Promise<void> => {
+        let controller: ClipboardFeatureController = new ClipboardFeatureController();
+        controller.sseTimerId = setTimeout((): void => {
+        }, 60000);
+
+        controller.pauseRealtimePolling();
+
+        expect(controller.sseTimerId).assertEqual(-1);
+      });
+  });
+
   describe('ClipboardFeatureController device removal', (): void => {
     it('keeps a removed offline peer absent and clears its selected send target', 0,
       async (): Promise<void> => {
@@ -217,6 +230,33 @@ export default function clipboardFeatureControllerTest(): void {
   });
 
   describe('ClipboardFeatureController space admission', (): void => {
+    it('accepts a desktop code-only invitation URI and clears a stale passphrase', 0,
+      async (): Promise<void> => {
+        let runtime: FakeControllerRuntime = new FakeControllerRuntime();
+        let interaction: FakeRemovalInteraction = new FakeRemovalInteraction();
+        let controller: ClipboardFeatureController = new ClipboardFeatureController(runtime, interaction);
+        controller.spacePassphrase = 'stale passphrase';
+
+        expect(controller.importSpaceInvitation(
+          'uniclipboard://join-space?v=1&code=abcd-1234')).assertTrue();
+        expect(controller.spaceInvitationCode).assertEqual('ABCD-1234');
+        expect(controller.spacePassphrase).assertEqual('');
+        expect(controller.spaceInvitationScanState).assertEqual(1);
+      });
+
+    it('keeps the passphrase when importing a full invitation URI', 0,
+      async (): Promise<void> => {
+        let runtime: FakeControllerRuntime = new FakeControllerRuntime();
+        let interaction: FakeRemovalInteraction = new FakeRemovalInteraction();
+        let controller: ClipboardFeatureController = new ClipboardFeatureController(runtime, interaction);
+
+        expect(controller.importSpaceInvitation(
+          'uniclipboard://join-space?v=1&code=abcd-1234&pwd=correct%20horse')).assertTrue();
+        expect(controller.spaceInvitationCode).assertEqual('ABCD-1234');
+        expect(controller.spacePassphrase).assertEqual('correct horse');
+        expect(controller.spaceInvitationScanState).assertEqual(1);
+      });
+
     it('allows an existing member to join another space without re-entering the device name', 0,
       async (): Promise<void> => {
         let runtime: FakeControllerRuntime = new FakeControllerRuntime();

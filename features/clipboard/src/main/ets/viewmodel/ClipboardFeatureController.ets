@@ -364,7 +364,6 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   public historyRestored: boolean = false;
   public historySaveBusy: boolean = false;
   public historySavePending: boolean = false;
-  public realtimeTick: number = 0;
   public syncScroller: Scroller = new Scroller();
   public devicesScroller: Scroller = new Scroller();
   public settingsScroller: Scroller = new Scroller();
@@ -463,19 +462,38 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   public onPageShow(): void {
     this.desktopGestureSharePageVisible = true;
     this.registerDesktopGestureShare();
-    this.pagePollingVisible = true;
-    this.pollIdleRounds = 0;
-    if (this.pollingActive && this.sseTimerId >= 0) {
-      clearTimeout(this.sseTimerId);
-      this.sseTimerId = -1;
-      this.schedulePollTimer(0);
+    this.resumeRealtimePolling();
+    if (this.spaceJoined) {
+      this.refreshSpaceDevices().catch((): void => {
+      });
     }
   }
 
   public onPageHide(): void {
     this.desktopGestureSharePageVisible = false;
     this.unregisterDesktopGestureShare();
+    this.pauseRealtimePolling();
+  }
+
+  public pauseRealtimePolling(): void {
     this.pagePollingVisible = false;
+    if (this.sseTimerId >= 0) {
+      clearTimeout(this.sseTimerId);
+      this.sseTimerId = -1;
+    }
+  }
+
+  public resumeRealtimePolling(): void {
+    this.pagePollingVisible = true;
+    this.pollIdleRounds = 0;
+    if (!this.pollingActive) {
+      return;
+    }
+    if (this.sseTimerId >= 0) {
+      clearTimeout(this.sseTimerId);
+      this.sseTimerId = -1;
+    }
+    this.schedulePollTimer(0);
   }
 
   public stop(): void {
@@ -510,7 +528,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   }
 
   private schedulePollTimer(delayMs: number): void {
-    if (!this.pollingActive) {
+    if (!this.pollingActive || !this.pagePollingVisible) {
       return;
     }
     this.sseTimerId = setTimeout(() => {
@@ -1499,13 +1517,22 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     return code.length === 9 && code.charAt(4) === '-';
   }
 
+  private acceptSpaceInvitation(code: string, passphrase: string): boolean {
+    if (!this.isSpaceInvitationCode(code)) {
+      this.spaceInvitationScanState = 2;
+      return false;
+    }
+    this.spaceInvitationCode = code.trim().toUpperCase();
+    this.spacePassphrase = passphrase;
+    this.spaceInvitationScanState = 1;
+    this.spaceJoinState = 0;
+    return true;
+  }
+
   public importSpaceInvitation(value: string): boolean {
     let payload: string = value.trim();
     if (this.isSpaceInvitationCode(payload)) {
-      this.spaceInvitationCode = payload.toUpperCase();
-      this.spaceInvitationScanState = 1;
-      this.spaceJoinState = 0;
-      return true;
+      return this.acceptSpaceInvitation(payload, '');
     }
     let prefix: string = 'uniclipboard://join-space?';
     if (!payload.startsWith(prefix)) {
@@ -1535,15 +1562,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       this.spaceInvitationScanState = 2;
       return false;
     }
-    if (!this.isSpaceInvitationCode(code) || passphrase.length === 0) {
-      this.spaceInvitationScanState = 2;
-      return false;
-    }
-    this.spaceInvitationCode = code;
-    this.spacePassphrase = passphrase;
-    this.spaceInvitationScanState = 1;
-    this.spaceJoinState = 0;
-    return true;
+    return this.acceptSpaceInvitation(code, passphrase);
   }
 
   public scanSpaceInvitation(): void {
@@ -4878,13 +4897,9 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   }
 
   public async consumeRealtimeEvents(): Promise<number> {
-    this.realtimeTick += 1;
     let activityCount: number = 0;
     if (this.spaceJoined) {
       activityCount += await this.pollOfficialEngineInbound();
-      if (this.realtimeTick % 4 === 0) {
-        this.refreshSpaceDevices();
-      }
     }
     if (this.spaceInvitationExpiresAtMs > 0 && Date.now() >= this.spaceInvitationExpiresAtMs) {
       this.spaceIssuedInvitationCode = '';
