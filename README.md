@@ -160,6 +160,15 @@ Set-Location $harmony
 
 成功标志必须包含 `SignHap` 和 `BUILD SUCCESSFUL`。常见的 ArkTS `WARN` 不等于构建失败，但 `SignHap` 失败或只生成 unsigned HAP 时不能交付。
 
+#### 版本号规则
+
+每次生成用于安装或发布的 HAP 前，必须在 `AppScope/app.json5` 同时递增：
+
+- `versionName`：按语义化版本递增补丁号，例如 `1.0.5` → `1.0.6`；
+- `versionCode`：每次递增 1，例如 `1000006` → `1000007`。
+
+应用关于页会从已安装包的 `bundleManager` 元数据读取并显示 `版本名（versionCode）`，不再依赖静态版本文案。构建后应从 HAP 的 `module.json` 或 `pack.info` 核对这两个字段，避免安装包文件名或旧缓存造成误判。
+
 #### 5. 产物核验与安装
 
 最终文件通常位于：

@@ -2518,7 +2518,7 @@ export struct CompactClipboardView {
         .fontWeight(FontWeight.Bold)
         .fontColor($r('app.color.text_primary'))
         .margin({ top: 16 })
-      Text($r('app.string.desktop_version'))
+      Text(this.controller.applicationVersionDisplay)
         .fontSize(12)
         .fontWeight(FontWeight.Medium)
         .fontColor(this.controller.accentColor())

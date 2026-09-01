@@ -277,7 +277,7 @@
     { "name": "desktop_light_theme", "value": "Light" },
     { "name": "desktop_dark_theme", "value": "Dark" },
     { "name": "desktop_follow_system", "value": "Follow system" },
-    { "name": "desktop_version", "value": "Version 1.0.0" },
+    { "name": "desktop_version", "value": "Version" },
     { "name": "space_create_mode", "value": "Create space" },
     { "name": "space_join_mode", "value": "Join space" },
     { "name": "space_create_title", "value": "Create a sync space" },

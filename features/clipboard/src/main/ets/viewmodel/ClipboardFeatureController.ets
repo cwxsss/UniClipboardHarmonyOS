@@ -48,6 +48,8 @@ import {
   LinkPreviewService,
   Logger,
   EngineVersionService,
+  ApplicationVersionInfo,
+  ApplicationVersionService,
   engineRuntimeService,
   EngineInvitationIssued,
   EngineActiveClipboard,
@@ -193,6 +195,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   public isLargeScreen: boolean = false;
   public statusCode: number = 0;
   public engineVersion: string = EngineVersionService.getVersion();
+  public applicationVersionDisplay: string = '版本信息加载中';
   public recentErrors: AppErrorRecord[] = [];
   private sessionHistoryDataSourceInstance: HistoryDataSource<ClipboardHistoryItem> =
     new HistoryDataSource<ClipboardHistoryItem>();
@@ -439,6 +442,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
 
   public start(uiContext: UIContext): void {
     this.uiContextRef = uiContext;
+    this.refreshApplicationVersion();
     let materialTypes: Array<hdsMaterial.MaterialType> = hdsMaterial.getSystemMaterialTypes();
     if (materialTypes.indexOf(hdsMaterial.MaterialType.IMMERSIVE) >= 0) {
       this.aboutMaterialLevel = hdsMaterial.MaterialLevel.EXQUISITE;
@@ -457,6 +461,15 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     this.restoreLocalHistory();
     engineRuntimeService.addEventObserver(this);
     this.initializeSpaceRuntime();
+  }
+
+  public refreshApplicationVersion(): void {
+    try {
+      let version: ApplicationVersionInfo = ApplicationVersionService.getSelf();
+      this.applicationVersionDisplay = ApplicationVersionService.format(version.versionName, version.versionCode);
+    } catch (error) {
+      this.applicationVersionDisplay = '版本信息不可用';
+    }
   }
 
   public onPageShow(): void {
@@ -1127,8 +1140,13 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   }
 
   public async revokeSpaceDevice(device: EngineRuntimeDevice): Promise<void> {
-    if (device.isLocal || this.desktopDeviceMutationBusy || this.spaceConnectBusy ||
-      !this.spaceJoined || this.spaceNodeState !== 2) {
+    if (device.isLocal || this.desktopDeviceMutationBusy || this.spaceConnectBusy) {
+      return;
+    }
+    if (!this.spaceJoined || this.spaceNodeState !== 2) {
+      this.statusCode = 3;
+      this.reportError('space', 'remove space device skipped: space runtime is not ready ' +
+        '(state=' + this.spaceNodeState + ')', $r('app.string.space_revoke_device_failed'));
       return;
     }
     try {

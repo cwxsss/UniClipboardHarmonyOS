@@ -32,6 +32,10 @@ export { EngineClipboardObserver } from './src/main/ets/engine/EngineClipboardHo
 export { EngineHostError, EngineHostErrorCategory } from './src/main/ets/engine/EngineHostError';
 export { EngineVersionService } from './src/main/ets/service/EngineVersionService';
 export {
+  ApplicationVersionInfo,
+  ApplicationVersionService
+} from './src/main/ets/service/ApplicationVersionService';
+export {
   EngineRuntimeBackend,
   EngineInvitationIssued,
   EngineActiveClipboard,

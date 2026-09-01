@@ -227,6 +227,21 @@ export default function clipboardFeatureControllerTest(): void {
       expect(runtime.queryCount).assertEqual(0);
       expect(interaction.successCount).assertEqual(0);
     });
+
+    it('reports when removal is requested before the space runtime is ready', 0,
+      async (): Promise<void> => {
+        let runtime: FakeControllerRuntime = new FakeControllerRuntime();
+        let interaction: FakeRemovalInteraction = new FakeRemovalInteraction();
+        let controller: ClipboardFeatureController = readyController(runtime, interaction);
+        controller.spaceNodeState = 1;
+
+        await controller.revokeSpaceDevice(offlineRemote());
+
+        expect(interaction.confirmationCount).assertEqual(0);
+        expect(runtime.removeCount).assertEqual(0);
+        expect(controller.statusCode).assertEqual(3);
+        expect(controller.recentErrors.length).assertEqual(1);
+      });
   });
 
   describe('ClipboardFeatureController space admission', (): void => {
