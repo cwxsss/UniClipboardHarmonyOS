@@ -82,7 +82,7 @@
     { "name": "space_passphrase_placeholder", "value": "Space passphrase" },
     { "name": "space_passphrase_label", "value": "Space passphrase (copyable)" },
     { "name": "space_scan_invitation", "value": "Scan space invitation QR code" },
-    { "name": "space_scan_success", "value": "Invitation filled. Confirm the device name to join." },
+    { "name": "space_scan_success", "value": "Invitation code filled. Enter the space passphrase to join." },
     { "name": "space_scan_invalid", "value": "No valid UniClipboard space invitation was found." },
     { "name": "space_manual_link_title", "value": "Connect manually" },
     { "name": "space_manual_link_note", "value": "Or enter the device name, invitation code, and space passphrase manually." },

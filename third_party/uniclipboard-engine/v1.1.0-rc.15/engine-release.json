@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "version": "v1.1.0-rc.15",
+  "packageVersion": "1.1.0-rc.15",
+  "sourceCommit": "f6f305d9689e4e79e7ab6d0e4921061f9416e4a6",
+  "releaseUrl": "https://github.com/UniClipboard/Engine/releases/tag/v1.1.0-rc.15",
+  "assetBaseUrl": "https://github.com/UniClipboard/Engine/releases/download/v1.1.0-rc.15",
+  "minimumHarmonyOsApi": 24,
+  "embeddedLibraries": [
+    {
+      "path": "package/libs/arm64-v8a/libuc_ohos_napi.so",
+      "sha256": "4abb39e9e6a2efd97323dfeca99a4dd3d6eab8315abe3b26dab2949bb892d6a9",
+      "size": 96564632
+    }
+  ],
+  "embeddedDeclaration": {
+    "path": "package/src/main/cpp/types/libuc_ohos_napi/index.d.ts",
+    "sha256": "c9f6cd20e70ba9ca207d7e89a48a5c9798545014f947cfb9984a936af4181b53",
+    "size": 11008
+  },
+  "files": [
+    { "name": "UniClipboardEngine.har", "sha256": "29b45fa430bbe9bfa38ea9dcde36ba4574b40f2d5e67c9d6a1f1ded5ea4f345a", "size": 28680101 },
+    { "name": "UniClipboardEngine.har.checksum.txt", "sha256": "e9691f3687f20a33f3839db19bb7c12c467a2e2ba065c92dcc87882ebcc95f49", "size": 65 },
+    { "name": "index.d.ts", "sha256": "5f5c936b4c95163ed6348cf604e1139d70848b759a3f91bdeb2099a9d5b0220c", "size": 10349 },
+    { "name": "release-manifest.json", "sha256": "c7b3560555f8f24acc7f3282698dfd020fb7def7f7300bada31d82b6a344f792", "size": 6394 },
+    { "name": "dependency-licenses.json", "sha256": "45950fc62631798f4eb35bc40f906b2b5944d43b77c81259ca6b8cae060882ae", "size": 131098 },
+    { "name": "LICENSE", "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30", "size": 11358 },
+    { "name": "source-commit.txt", "sha256": "ec96d12bdb858fce5cfd7b1ca5715895525eed49fa3bb95c8b75b2bffbe6577a", "size": 41 },
+    { "name": "uc-ohos-napi.checksum.txt", "sha256": "0f1577f62c2097a67a9cf4de0a25c8ebdbd2c2c6200dd98e5669e60189889504", "size": 65 },
+    { "name": "version.txt", "sha256": "d988df341e8009110187fe5a238d23355566137aedc9efc32bd6c82e62b1437b", "size": 13 }
+  ]
+}

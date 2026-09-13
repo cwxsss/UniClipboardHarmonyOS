@@ -1,5 +1,5 @@
 param(
-  [string]$ReleaseRoot = (Join-Path $PSScriptRoot '..\third_party\uniclipboard-engine\v1.1.0-rc.7')
+  [string]$ReleaseRoot = (Join-Path $PSScriptRoot '..\third_party\uniclipboard-engine\v1.1.0-rc.15')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -90,7 +90,7 @@ try {
   } else {
     @($release.embeddedLibrary)
   }
-  $entriesToCheck = @($embeddedLibraries + @($release.embeddedDeclaration))
+  $entriesToCheck = @($embeddedLibraries) + @($release.embeddedDeclaration)
   foreach ($entryMetadata in $entriesToCheck) {
     $relativeEntryPath = $entryMetadata.path.Replace('/', [System.IO.Path]::DirectorySeparatorChar)
     $entryPath = Join-Path $extractionRoot $relativeEntryPath
@@ -114,4 +114,8 @@ try {
 }
 
 Write-Output "Verified UniClipboard Engine $($release.version) ($($release.sourceCommit))."
-Write-Output "Release: $($release.releaseUrl)"
+if ([string]::IsNullOrWhiteSpace($release.releaseUrl)) {
+  Write-Output 'Release URL is intentionally unset until the pinned Engine commit is published.'
+} else {
+  Write-Output "Release: $($release.releaseUrl)"
+}

@@ -46,6 +46,8 @@ Thumbs.db
 # Packaged outputs belong in GitHub Releases, not source control
 *.app
 *.hap
+# Standalone native Engine libraries are distributed inside the HAR or Release assets.
+third_party/uniclipboard-engine/**/libuc_ohos_napi.so
 # The rc.7 Engine HAR is over GitHub's regular blob limit. Keep it as a
 # Release asset and retain only the checked metadata in the source tree.
 *.har

@@ -18,6 +18,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { systemShare } from '@kit.ShareKit';
+import { ClipboardFeatureController } from 'clipboard_feature';
 import {
   AppearanceStorageService,
   BackgroundSyncPreferenceService,
@@ -198,12 +199,15 @@ export default class EntryAbility extends UIAbility {
   }
 
   onForeground(): void {
+    let clipboardController: ClipboardFeatureController = ClipboardFeatureController.getInstance();
     this.backgroundSyncTaskService.stop(this.context).catch((): void => {
       hilog.warn(DOMAIN, 'testTag', 'Background sync task cleanup did not complete cleanly.');
     });
     this.startEngineRuntime().then((): void => {
       this.updateClipboardMonitoring();
+      clipboardController.resumeRealtimePolling();
     }).catch((error: Object): void => {
+      clipboardController.resumeRealtimePolling();
       let detail: string = error instanceof Error ? (error as Error).message : JSON.stringify(error);
       hilog.warn(DOMAIN, 'testTag', 'Official Engine resume did not complete cleanly: %{public}s', detail);
     });
@@ -211,6 +215,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   onBackground(): void {
+    ClipboardFeatureController.getInstance().pauseRealtimePolling();
     let backgroundSyncEnabled: boolean | undefined = AppStorage.get<boolean>('backgroundSyncEnabled');
     let spaceJoined: boolean | undefined = AppStorage.get<boolean>('spaceJoined');
     let keepEngineRunning: boolean = backgroundSyncEnabled === true && spaceJoined === true;

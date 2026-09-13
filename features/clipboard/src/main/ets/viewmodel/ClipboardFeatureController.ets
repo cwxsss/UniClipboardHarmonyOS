@@ -52,6 +52,8 @@ import {
   EngineInvitationIssued,
   EngineActiveClipboard,
   EngineNetworkSettings,
+  EnginePairingCandidateDiagnostic,
+  EnginePairingDiagnostics,
   EngineMemberSyncPreferences,
   EngineSendReport,
   EngineSpaceCreated,
@@ -276,6 +278,13 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   public connectionDiagnosticInternetGranted: boolean = false;
   public connectionDiagnosticBackgroundGranted: boolean = false;
   public connectionDiagnosticClipboardGranted: boolean = false;
+  public connectionDiagnosticPairingState: string = 'unavailable';
+  public connectionDiagnosticInvitationCandidateCount: number = 0;
+  public connectionDiagnosticInvitationCandidates: string = 'none';
+  public connectionDiagnosticInboundEventsDelivered: number = 0;
+  public connectionDiagnosticInboundLastStage: string = 'idle';
+  public connectionDiagnosticInboundLastStageElapsedMs: number = 0;
+  public connectionDiagnosticInboundLastFailure: string = 'none';
   public largeSection: number = 0;
   public largeSettingsSection: number = 0;
   public desktopSelectedId: string = '';
@@ -364,7 +373,6 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   public historyRestored: boolean = false;
   public historySaveBusy: boolean = false;
   public historySavePending: boolean = false;
-  public realtimeTick: number = 0;
   public syncScroller: Scroller = new Scroller();
   public devicesScroller: Scroller = new Scroller();
   public settingsScroller: Scroller = new Scroller();
@@ -463,19 +471,38 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   public onPageShow(): void {
     this.desktopGestureSharePageVisible = true;
     this.registerDesktopGestureShare();
-    this.pagePollingVisible = true;
-    this.pollIdleRounds = 0;
-    if (this.pollingActive && this.sseTimerId >= 0) {
-      clearTimeout(this.sseTimerId);
-      this.sseTimerId = -1;
-      this.schedulePollTimer(0);
+    this.resumeRealtimePolling();
+    if (this.spaceJoined) {
+      this.refreshSpaceDevices().catch((): void => {
+      });
     }
   }
 
   public onPageHide(): void {
     this.desktopGestureSharePageVisible = false;
     this.unregisterDesktopGestureShare();
+    this.pauseRealtimePolling();
+  }
+
+  public pauseRealtimePolling(): void {
     this.pagePollingVisible = false;
+    if (this.sseTimerId >= 0) {
+      clearTimeout(this.sseTimerId);
+      this.sseTimerId = -1;
+    }
+  }
+
+  public resumeRealtimePolling(): void {
+    this.pagePollingVisible = true;
+    this.pollIdleRounds = 0;
+    if (!this.pollingActive) {
+      return;
+    }
+    if (this.sseTimerId >= 0) {
+      clearTimeout(this.sseTimerId);
+      this.sseTimerId = -1;
+    }
+    this.schedulePollTimer(0);
   }
 
   public stop(): void {
@@ -510,7 +537,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   }
 
   private schedulePollTimer(delayMs: number): void {
-    if (!this.pollingActive) {
+    if (!this.pollingActive || !this.pagePollingVisible) {
       return;
     }
     this.sseTimerId = setTimeout(() => {
@@ -1499,13 +1526,22 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     return code.length === 9 && code.charAt(4) === '-';
   }
 
+  private acceptSpaceInvitation(code: string, passphrase: string): boolean {
+    if (!this.isSpaceInvitationCode(code)) {
+      this.spaceInvitationScanState = 2;
+      return false;
+    }
+    this.spaceInvitationCode = code.trim().toUpperCase();
+    this.spacePassphrase = passphrase;
+    this.spaceInvitationScanState = 1;
+    this.spaceJoinState = 0;
+    return true;
+  }
+
   public importSpaceInvitation(value: string): boolean {
     let payload: string = value.trim();
     if (this.isSpaceInvitationCode(payload)) {
-      this.spaceInvitationCode = payload.toUpperCase();
-      this.spaceInvitationScanState = 1;
-      this.spaceJoinState = 0;
-      return true;
+      return this.acceptSpaceInvitation(payload, '');
     }
     let prefix: string = 'uniclipboard://join-space?';
     if (!payload.startsWith(prefix)) {
@@ -1535,15 +1571,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       this.spaceInvitationScanState = 2;
       return false;
     }
-    if (!this.isSpaceInvitationCode(code) || passphrase.length === 0) {
-      this.spaceInvitationScanState = 2;
-      return false;
-    }
-    this.spaceInvitationCode = code;
-    this.spacePassphrase = passphrase;
-    this.spaceInvitationScanState = 1;
-    this.spaceJoinState = 0;
-    return true;
+    return this.acceptSpaceInvitation(code, passphrase);
   }
 
   public scanSpaceInvitation(): void {
@@ -1812,6 +1840,31 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     return target;
   }
 
+  private applyPairingDiagnostics(diagnostics: EnginePairingDiagnostics): void {
+    this.connectionDiagnosticPairingState = 'available';
+    this.connectionDiagnosticInvitationCandidateCount = diagnostics.candidateCount;
+    let candidates: string[] = [];
+    for (let index: number = 0; index < diagnostics.candidates.length; index += 1) {
+      let candidate: EnginePairingCandidateDiagnostic = diagnostics.candidates[index];
+      candidates.push(candidate.kind + ':' + candidate.addressHint + ':' + candidate.port.toString());
+    }
+    this.connectionDiagnosticInvitationCandidates = candidates.length === 0 ? 'none' : candidates.join(',');
+    this.connectionDiagnosticInboundEventsDelivered = diagnostics.inbound.eventsDelivered;
+    this.connectionDiagnosticInboundLastStage = diagnostics.inbound.lastStage;
+    this.connectionDiagnosticInboundLastStageElapsedMs = diagnostics.inbound.lastStageElapsedMs;
+    this.connectionDiagnosticInboundLastFailure = diagnostics.inbound.lastFailure;
+  }
+
+  private resetPairingDiagnostics(): void {
+    this.connectionDiagnosticPairingState = 'unavailable';
+    this.connectionDiagnosticInvitationCandidateCount = 0;
+    this.connectionDiagnosticInvitationCandidates = 'none';
+    this.connectionDiagnosticInboundEventsDelivered = 0;
+    this.connectionDiagnosticInboundLastStage = 'idle';
+    this.connectionDiagnosticInboundLastStageElapsedMs = 0;
+    this.connectionDiagnosticInboundLastFailure = 'none';
+  }
+
   public async refreshConnectionDiagnostics(): Promise<void> {
     if (this.connectionDiagnosticBusy) {
       return;
@@ -1823,6 +1876,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     this.connectionDiagnosticRelayCount = 0;
     this.connectionDiagnosticUnknownCount = 0;
     this.connectionDiagnosticOfflineCount = 0;
+    this.resetPairingDiagnostics();
     this.refreshConnectionDiagnosticNetworkType();
     this.refreshConnectionDiagnosticPermissions();
     let probeSucceeded: boolean = false;
@@ -1833,6 +1887,12 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     if (this.spaceNodeState === 2 && this.spaceJoined) {
       try {
         await engineRuntimeService.recoverNetwork();
+        try {
+          let diagnostics: EnginePairingDiagnostics = await engineRuntimeService.queryPairingDiagnostics();
+          this.applyPairingDiagnostics(diagnostics);
+        } catch (error) {
+          this.connectionDiagnosticPairingState = 'unavailable';
+        }
         let devices: EngineRuntimeDevice[] = await engineRuntimeService.queryDevices();
         let target: EngineRuntimeDevice | null = this.applyConnectionDiagnosticDevices(devices);
         if (target === null) {
@@ -1917,6 +1977,15 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
         this.connectionDiagnosticBackgroundGranted) + '\n' +
       'clipboard_permission=' + this.connectionDiagnosticPermissionCode(
         this.connectionDiagnosticClipboardGranted) + '\n' +
+      'pairing_diagnostics=' + this.connectionDiagnosticPairingState + '\n' +
+      'invitation_candidate_count=' + this.connectionDiagnosticInvitationCandidateCount.toString() + '\n' +
+      'invitation_candidates=' + this.connectionDiagnosticInvitationCandidates + '\n' +
+      'inbound_pairing_events_delivered=' +
+        this.connectionDiagnosticInboundEventsDelivered.toString() + '\n' +
+      'inbound_pairing_last_stage=' + this.connectionDiagnosticInboundLastStage + '\n' +
+      'inbound_pairing_last_stage_elapsed_ms=' +
+        this.connectionDiagnosticInboundLastStageElapsedMs.toString() + '\n' +
+      'inbound_pairing_last_failure=' + this.connectionDiagnosticInboundLastFailure + '\n' +
       'background_sync=' + (this.backgroundSyncEnabled ? 'enabled' : 'disabled') + '\n' +
       'last_failure=' + this.connectionDiagnosticLastFailure + '\n' +
       'last_failure_at_ms=' + this.connectionDiagnosticLastFailureAtMs.toString() + '\n' +
@@ -4878,13 +4947,9 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   }
 
   public async consumeRealtimeEvents(): Promise<number> {
-    this.realtimeTick += 1;
     let activityCount: number = 0;
     if (this.spaceJoined) {
       activityCount += await this.pollOfficialEngineInbound();
-      if (this.realtimeTick % 4 === 0) {
-        this.refreshSpaceDevices();
-      }
     }
     if (this.spaceInvitationExpiresAtMs > 0 && Date.now() >= this.spaceInvitationExpiresAtMs) {
       this.spaceIssuedInvitationCode = '';

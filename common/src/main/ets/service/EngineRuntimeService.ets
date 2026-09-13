@@ -1,16 +1,23 @@
 import { bundleManager, common } from '@kit.AbilityKit';
 import { util } from '@kit.ArkTS';
-import engine, {
+import engine from '@uniclipboard/engine';
+import type {
+  OhActiveClipboard,
   OhEngine,
+  OhEngineEvent,
   OhInvitationIssued,
   OhJoinSpaceStatus,
   OhJoinedSpace,
-  OhMemberSyncPreferences,
-  OhMemberSyncPreferencesPatch,
-  OhNetworkSettings,
+  OhLocalDevice,
+  OhMemberRemoval,
+  OhMembershipConvergence,
+  OhNetworkRecoveryStatus,
   OhSendReport,
+  OhSessionRecovery,
+  OhSharedDeviceRefresh,
+  OhSpaceCreated,
   PreparedHost
-} from '@uniclipboard/engine';
+} from 'libuc_ohos_napi.so';
 import {
   EngineHostAdapter,
   EngineHostCallbacks
@@ -62,8 +69,11 @@ export class EngineRuntimeEvent {
   errorCode: number | undefined = undefined;
   errorCategory: string | undefined = undefined;
   retryable: boolean | undefined = undefined;
+  memberRemoval: string | undefined = undefined;
+  sharedDeviceRefresh: string | undefined = undefined;
   networkRecoveryPhase: string | undefined = undefined;
   nextRetryInMs: number | undefined = undefined;
+  rePairingScope: string | undefined = undefined;
 
   constructor(kind: string) {
     this.kind = kind;
@@ -122,6 +132,82 @@ export class EngineSessionRecovery {
   }
 }
 
+export class EngineNetworkRecoveryStatus {
+  phase: string;
+  retryable: boolean;
+  nextRetryInMs: number | undefined;
+
+  constructor(phase: string, retryable: boolean, nextRetryInMs: number | undefined) {
+    this.phase = phase;
+    this.retryable = retryable;
+    this.nextRetryInMs = nextRetryInMs;
+  }
+}
+
+export class EngineLocalDevice {
+  deviceId: string;
+  displayName: string;
+
+  constructor(deviceId: string, displayName: string) {
+    this.deviceId = deviceId;
+    this.displayName = displayName;
+  }
+}
+
+export class EngineMembershipConvergence {
+  state: string;
+  pendingCount: number;
+  waitingForPeerCount: number;
+  waitingForUpdateCount: number;
+  versionIncompatibleCount: number;
+  blockedCount: number;
+  rejectedCount: number;
+
+  constructor(state: string, pendingCount: number, waitingForPeerCount: number,
+    waitingForUpdateCount: number, versionIncompatibleCount: number, blockedCount: number,
+    rejectedCount: number) {
+    this.state = state;
+    this.pendingCount = pendingCount;
+    this.waitingForPeerCount = waitingForPeerCount;
+    this.waitingForUpdateCount = waitingForUpdateCount;
+    this.versionIncompatibleCount = versionIncompatibleCount;
+    this.blockedCount = blockedCount;
+    this.rejectedCount = rejectedCount;
+  }
+}
+
+export class EngineJoinSpaceStatus {
+  status: string;
+  joinId: string;
+  peerUpgradeRequired: boolean;
+  rejectionReason: string | undefined;
+
+  constructor(status: string, joinId: string, peerUpgradeRequired: boolean,
+    rejectionReason: string | undefined) {
+    this.status = status;
+    this.joinId = joinId;
+    this.peerUpgradeRequired = peerUpgradeRequired;
+    this.rejectionReason = rejectionReason;
+  }
+}
+
+export class EngineMemberRemoval {
+  phase: string;
+  intentCount: number;
+  effectiveMemberCount: number;
+  convergenceDigest: string | undefined;
+  updatedAtMs: number;
+
+  constructor(phase: string, intentCount: number, effectiveMemberCount: number,
+    convergenceDigest: string | undefined, updatedAtMs: number) {
+    this.phase = phase;
+    this.intentCount = intentCount;
+    this.effectiveMemberCount = effectiveMemberCount;
+    this.convergenceDigest = convergenceDigest;
+    this.updatedAtMs = updatedAtMs;
+  }
+}
+
 export class EngineNetworkSettings {
   allowRelayFallback: boolean;
   customRelayUrls: string[];
@@ -129,6 +215,45 @@ export class EngineNetworkSettings {
   constructor(allowRelayFallback: boolean, customRelayUrls: string[]) {
     this.allowRelayFallback = allowRelayFallback;
     this.customRelayUrls = customRelayUrls;
+  }
+}
+
+export class EnginePairingCandidateDiagnostic {
+  kind: string;
+  addressHint: string;
+  port: number;
+
+  constructor(kind: string, addressHint: string, port: number) {
+    this.kind = kind;
+    this.addressHint = addressHint;
+    this.port = port;
+  }
+}
+
+export class EnginePairingInboundDiagnostics {
+  eventsDelivered: number;
+  lastStage: string;
+  lastStageElapsedMs: number;
+  lastFailure: string;
+
+  constructor(eventsDelivered: number, lastStage: string, lastStageElapsedMs: number, lastFailure: string) {
+    this.eventsDelivered = eventsDelivered;
+    this.lastStage = lastStage;
+    this.lastStageElapsedMs = lastStageElapsedMs;
+    this.lastFailure = lastFailure;
+  }
+}
+
+export class EnginePairingDiagnostics {
+  candidateCount: number;
+  candidates: EnginePairingCandidateDiagnostic[];
+  inbound: EnginePairingInboundDiagnostics;
+
+  constructor(candidateCount: number, candidates: EnginePairingCandidateDiagnostic[],
+    inbound: EnginePairingInboundDiagnostics) {
+    this.candidateCount = candidateCount;
+    this.candidates = candidates;
+    this.inbound = inbound;
   }
 }
 
@@ -218,6 +343,13 @@ export class EngineRuntimeDevice {
   }
 }
 
+interface EngineDeviceGroupChoicesPayload {
+  device_trust?: EngineDeviceTrustSnapshotPayload;
+  revision?: number;
+  devices?: EngineDeviceTrustRelationshipPayload[];
+  local_device_id?: string;
+}
+
 export class EngineWorkspaceConvergence {
   phase: string;
   effectiveMemberCount: number;
@@ -267,8 +399,24 @@ export class EngineMemberSyncPreferences {
   }
 }
 
+interface LegacyContentTypesPayload {
+  text: boolean;
+  image: boolean;
+  file: boolean;
+  link: boolean;
+  codeSnippet: boolean;
+  richText: boolean;
+}
+
+interface LegacyMemberSyncPreferencesPayload {
+  sendEnabled: boolean;
+  receiveEnabled: boolean;
+  sendContentTypes: LegacyContentTypesPayload;
+  receiveContentTypes: LegacyContentTypesPayload;
+}
+
 export function normalizeMemberSyncPreferences(
-  preferences: OhMemberSyncPreferences): EngineMemberSyncPreferences {
+  preferences: LegacyMemberSyncPreferencesPayload): EngineMemberSyncPreferences {
   return new EngineMemberSyncPreferences(
     preferences.sendEnabled,
     preferences.sendContentTypes.text,
@@ -291,7 +439,16 @@ export interface EngineRuntimeHandle {
   suspend(): Promise<void>;
   resume(): Promise<void>;
   recoverNetwork(): Promise<void>;
+  queryNetworkRecoveryStatus?(): Promise<EngineNetworkRecoveryStatus>;
+  queryLocalDevice?(): Promise<EngineLocalDevice>;
+  queryDeviceGroupChoices?(): Promise<string>;
+  queryMembershipConvergence?(): Promise<EngineMembershipConvergence>;
+  cancelJoinSpace?(joinId: string): Promise<EngineJoinSpaceStatus>;
+  refreshSharedDevices?(): Promise<string>;
+  querySharedDeviceRefresh?(requestId: string): Promise<string | null>;
+  queryMemberRemoval?(): Promise<EngineMemberRemoval>;
   queryNetworkSettings(): Promise<EngineNetworkSettings>;
+  queryPairingDiagnostics(): Promise<EnginePairingDiagnostics>;
   updateNetworkSettings(allowRelayFallback: boolean, customRelayUrls: string[]): Promise<EngineNetworkSettings>;
   probeRelayUrl(url: string): Promise<number>;
   nextEvent(timeoutMs: number): Promise<EngineRuntimeEvent | null>;
@@ -334,6 +491,10 @@ export interface EngineRuntimeHost {
   shutdown(): void;
 }
 
+function unsupportedEngineOperation(operation: string): Promise<never> {
+  return Promise.reject(new EngineRuntimeError('unsupported_by_engine', operation));
+}
+
 class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
   prepareHost(host: EngineHostCallbacks): PreparedHost {
     return engine.prepareHost(host);
@@ -346,18 +507,12 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
       (): Promise<void> => rawHandle.suspend(),
       (): Promise<void> => rawHandle.resume(),
       (): Promise<void> => rawHandle.recoverNetwork(),
-      async (): Promise<EngineNetworkSettings> => {
-        let result: OhNetworkSettings = await rawHandle.queryNetworkSettings();
-        return new EngineNetworkSettings(result.allowRelayFallback, result.customRelayUrls);
-      },
-      async (allowRelayFallback: boolean, customRelayUrls: string[]): Promise<EngineNetworkSettings> => {
-        let result: OhNetworkSettings = await rawHandle.updateNetworkSettings(
-          allowRelayFallback, customRelayUrls);
-        return new EngineNetworkSettings(result.allowRelayFallback, result.customRelayUrls);
-      },
-      (url: string): Promise<number> => rawHandle.probeRelayUrl(url),
+      (): Promise<EngineNetworkSettings> => unsupportedEngineOperation('query_network_settings'),
+      (): Promise<EnginePairingDiagnostics> => unsupportedEngineOperation('query_pairing_diagnostics'),
+      (): Promise<EngineNetworkSettings> => unsupportedEngineOperation('update_network_settings'),
+      (): Promise<number> => unsupportedEngineOperation('probe_relay_url'),
       async (timeoutMs: number): Promise<EngineRuntimeEvent | null> => {
-        let rawEvent = await rawHandle.nextEvent(timeoutMs);
+        let rawEvent: OhEngineEvent | null = await rawHandle.nextEvent(timeoutMs);
         if (rawEvent === null) {
           return null;
         }
@@ -370,17 +525,21 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
         event.errorCode = rawEvent.errorCode;
         event.errorCategory = rawEvent.errorCategory;
         event.retryable = rawEvent.retryable;
+        event.memberRemoval = rawEvent.memberRemoval === undefined ? undefined : JSON.stringify(rawEvent.memberRemoval);
+        event.sharedDeviceRefresh = rawEvent.sharedDeviceRefresh === undefined ?
+          undefined : JSON.stringify(rawEvent.sharedDeviceRefresh);
         event.networkRecoveryPhase = rawEvent.networkRecoveryPhase;
         event.nextRetryInMs = rawEvent.nextRetryInMs;
+        event.rePairingScope = rawEvent.rePairingScope;
         return event;
       },
       (deadlineMs: number): Promise<void> => rawHandle.shutdown(deadlineMs),
       async (deviceName: string | null, passphrase: string): Promise<EngineSpaceCreated> => {
-        let result = await rawHandle.createSpace(deviceName, passphrase);
+        let result: OhSpaceCreated = await rawHandle.createSpace(deviceName, passphrase);
         return new EngineSpaceCreated(result.spaceId, result.selfDeviceId, result.identityFingerprint);
       },
       async (allowSecureStorageUnlock: boolean): Promise<EngineSessionRecovery> => {
-        let result = await rawHandle.recoverSession(allowSecureStorageUnlock);
+        let result: OhSessionRecovery = await rawHandle.recoverSession(allowSecureStorageUnlock);
         return new EngineSessionRecovery(result.unlocked, result.resumed);
       },
       async (): Promise<EngineInvitationIssued> => {
@@ -404,82 +563,63 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
           result.migratedRecords, result.preservedUnreadableRecords);
       },
       async (text: string, targetDevices: string[]): Promise<EngineSendReport> => {
-        let result = await rawHandle.sendText(text, targetDevices);
+        let result: OhSendReport = await rawHandle.sendText(text, targetDevices);
         return new EngineSendReport(result.entryId, result.atMs, result.totalAccepted,
           result.totalDuplicate, result.totalOffline, result.totalErrored, result.totalPending);
       },
-      async (bytes: Uint8Array, mimeType: string, targetDevices: string[]): Promise<EngineSendReport> => {
-        let result: OhSendReport = await rawHandle.sendImage(bytes, mimeType, targetDevices);
-        return new EngineSendReport(result.entryId, result.atMs, result.totalAccepted,
-          result.totalDuplicate, result.totalOffline, result.totalErrored, result.totalPending);
-      },
-      async (fileHandles: string[], targetDevices: string[]): Promise<EngineSendReport> => {
-        let result: OhSendReport = await rawHandle.sendFiles(fileHandles, targetDevices);
-        return new EngineSendReport(result.entryId, result.atMs, result.totalAccepted,
-          result.totalDuplicate, result.totalOffline, result.totalErrored, result.totalPending);
-      },
-      (): Promise<string | null> => rawHandle.captureCurrentClipboard(),
+      (): Promise<EngineSendReport> => unsupportedEngineOperation('send_image'),
+      (): Promise<EngineSendReport> => unsupportedEngineOperation('send_files'),
+      (): Promise<string | null> => unsupportedEngineOperation('capture_clipboard'),
       async (): Promise<EngineActiveClipboard | null> => {
-        let result = await rawHandle.queryActiveClipboard();
+        let result: OhActiveClipboard | null = await rawHandle.queryActiveClipboard();
         if (result === null) {
           return null;
         }
         return new EngineActiveClipboard(result.entryId, result.activatedBy);
       },
-      async (deviceId: string): Promise<EngineMemberSyncPreferences> => {
-        let result: OhMemberSyncPreferences = await rawHandle.queryMemberSyncPreferences(deviceId);
-        return normalizeMemberSyncPreferences(result);
-      },
-      async (deviceId: string, sendEnabled: boolean, text: boolean, imageEnabled: boolean,
-        file: boolean, link: boolean, richText: boolean): Promise<EngineMemberSyncPreferences> => {
-        let patch: OhMemberSyncPreferencesPatch = {
-          sendEnabled: sendEnabled,
-          sendContentTypes: {
-            text: text,
-            image: imageEnabled,
-            file: file,
-            link: link,
-            richText: richText
-          }
-        };
-        let result: OhMemberSyncPreferences = await rawHandle.updateMemberSyncPreferences(deviceId, patch);
-        return normalizeMemberSyncPreferences(result);
-      },
-      async (deviceId: string): Promise<EngineMemberSyncPreferences> => {
-        let patch: OhMemberSyncPreferencesPatch = {
-          sendEnabled: true,
-          receiveEnabled: true,
-          sendContentTypes: {
-            text: true,
-            image: true,
-            file: true,
-            link: true,
-            codeSnippet: true,
-            richText: true
-          },
-          receiveContentTypes: {
-            text: true,
-            image: true,
-            file: true,
-            link: true,
-            codeSnippet: true,
-            richText: true
-          }
-        };
-        let result: OhMemberSyncPreferences = await rawHandle.updateMemberSyncPreferences(deviceId, patch);
-        return normalizeMemberSyncPreferences(result);
-      },
-      (entryId: string, mode: string): Promise<string> => rawHandle.restoreClipboard(entryId, mode),
+      (): Promise<EngineMemberSyncPreferences> => unsupportedEngineOperation('query_member_sync_preferences'),
+      (): Promise<EngineMemberSyncPreferences> => unsupportedEngineOperation('update_member_sync_preferences'),
+      (): Promise<EngineMemberSyncPreferences> => unsupportedEngineOperation('reset_member_sync_preferences'),
+      (): Promise<string> => unsupportedEngineOperation('restore_clipboard'),
       (entryId: string, destinationHandle: string): Promise<void> => rawHandle.exportEntry(entryId,
         destinationHandle),
       async (deviceId: string): Promise<EngineWorkspaceConvergence> => {
-        let result = await rawHandle.removeMember(deviceId);
+        let result: OhMemberRemoval = await rawHandle.removeMember(deviceId);
         return new EngineWorkspaceConvergence(result.phase, result.effectiveMemberCount,
           result.updatedAtMs);
       },
-      (): Promise<string> => rawHandle.queryDeviceTrust(),
-      (changeId: string, choice: string, confirmLocalRemoval: boolean): Promise<string> =>
-        rawHandle.decideDeviceTrustChange(changeId, choice, confirmLocalRemoval));
+      (): Promise<string> => rawHandle.queryDeviceGroupChoices(),
+      (): Promise<string> => unsupportedEngineOperation('decide_device_trust_change'),
+      async (): Promise<EngineNetworkRecoveryStatus> => {
+        let result: OhNetworkRecoveryStatus = await rawHandle.queryNetworkRecoveryStatus();
+        return new EngineNetworkRecoveryStatus(result.phase, result.retryable, result.nextRetryInMs);
+      },
+      async (): Promise<EngineLocalDevice> => {
+        let result: OhLocalDevice = await rawHandle.queryLocalDevice();
+        return new EngineLocalDevice(result.deviceId, result.displayName);
+      },
+      (): Promise<string> => rawHandle.queryDeviceGroupChoices(),
+      async (): Promise<EngineMembershipConvergence> => {
+        let result: OhMembershipConvergence = await rawHandle.queryMembershipConvergence();
+        return new EngineMembershipConvergence(result.state, result.pendingCount,
+          result.waitingForPeerCount, result.waitingForUpdateCount, result.versionIncompatibleCount,
+          result.blockedCount, result.rejectedCount);
+      },
+      async (joinId: string): Promise<EngineJoinSpaceStatus> => {
+        let result: OhJoinSpaceStatus = await rawHandle.cancelJoinSpace(joinId);
+        return new EngineJoinSpaceStatus(result.status, result.joinId, result.peerUpgradeRequired,
+          result.rejectionReason);
+      },
+      async (): Promise<string> => (await rawHandle.refreshSharedDevices()).requestId,
+      async (requestId: string): Promise<string | null> => {
+        let result: OhSharedDeviceRefresh | null = await rawHandle.querySharedDeviceRefresh(requestId);
+        return result === null ? null : JSON.stringify(result);
+      },
+      async (): Promise<EngineMemberRemoval> => {
+        let result: OhMemberRemoval = await rawHandle.queryMemberRemoval();
+        return new EngineMemberRemoval(result.phase, result.intentCount, result.effectiveMemberCount,
+          result.convergenceDigest, result.updatedAtMs);
+      });
   }
 }
 
@@ -489,6 +629,7 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
   private resumeCallback: () => Promise<void>;
   private recoverNetworkCallback: () => Promise<void>;
   private queryNetworkSettingsCallback: () => Promise<EngineNetworkSettings>;
+  private queryPairingDiagnosticsCallback: () => Promise<EnginePairingDiagnostics>;
   private updateNetworkSettingsCallback: (allowRelayFallback: boolean, customRelayUrls: string[]) =>
     Promise<EngineNetworkSettings>;
   private probeRelayUrlCallback: (url: string) => Promise<number>;
@@ -515,11 +656,20 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
   private queryDeviceTrustCallback: () => Promise<string>;
   private decideDeviceTrustChangeCallback: (changeId: string, choice: string,
     confirmLocalRemoval: boolean) => Promise<string>;
+  private queryNetworkRecoveryStatusCallback: (() => Promise<EngineNetworkRecoveryStatus>) | null = null;
+  private queryLocalDeviceCallback: (() => Promise<EngineLocalDevice>) | null = null;
+  private queryDeviceGroupChoicesCallback: (() => Promise<string>) | null = null;
+  private queryMembershipConvergenceCallback: (() => Promise<EngineMembershipConvergence>) | null = null;
+  private cancelJoinSpaceCallback: ((joinId: string) => Promise<EngineJoinSpaceStatus>) | null = null;
+  private refreshSharedDevicesCallback: (() => Promise<string>) | null = null;
+  private querySharedDeviceRefreshCallback: ((requestId: string) => Promise<string | null>) | null = null;
+  private queryMemberRemovalCallback: (() => Promise<EngineMemberRemoval>) | null = null;
 
   constructor(lifecycleStateCallback: () => Promise<string>, suspendCallback: () => Promise<void>,
     resumeCallback: () => Promise<void>,
     recoverNetworkCallback: () => Promise<void>,
     queryNetworkSettingsCallback: () => Promise<EngineNetworkSettings>,
+    queryPairingDiagnosticsCallback: () => Promise<EnginePairingDiagnostics>,
     updateNetworkSettingsCallback: (allowRelayFallback: boolean, customRelayUrls: string[]) =>
       Promise<EngineNetworkSettings>,
     probeRelayUrlCallback: (url: string) => Promise<number>,
@@ -544,12 +694,21 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
     removeMemberCallback: (deviceId: string) => Promise<EngineWorkspaceConvergence>,
     queryDeviceTrustCallback: () => Promise<string>,
     decideDeviceTrustChangeCallback: (changeId: string, choice: string,
-      confirmLocalRemoval: boolean) => Promise<string>) {
+      confirmLocalRemoval: boolean) => Promise<string>,
+    queryNetworkRecoveryStatusCallback: (() => Promise<EngineNetworkRecoveryStatus>) | null = null,
+    queryLocalDeviceCallback: (() => Promise<EngineLocalDevice>) | null = null,
+    queryDeviceGroupChoicesCallback: (() => Promise<string>) | null = null,
+    queryMembershipConvergenceCallback: (() => Promise<EngineMembershipConvergence>) | null = null,
+    cancelJoinSpaceCallback: ((joinId: string) => Promise<EngineJoinSpaceStatus>) | null = null,
+    refreshSharedDevicesCallback: (() => Promise<string>) | null = null,
+    querySharedDeviceRefreshCallback: ((requestId: string) => Promise<string | null>) | null = null,
+    queryMemberRemovalCallback: (() => Promise<EngineMemberRemoval>) | null = null) {
     this.lifecycleStateCallback = lifecycleStateCallback;
     this.suspendCallback = suspendCallback;
     this.resumeCallback = resumeCallback;
     this.recoverNetworkCallback = recoverNetworkCallback;
     this.queryNetworkSettingsCallback = queryNetworkSettingsCallback;
+    this.queryPairingDiagnosticsCallback = queryPairingDiagnosticsCallback;
     this.updateNetworkSettingsCallback = updateNetworkSettingsCallback;
     this.probeRelayUrlCallback = probeRelayUrlCallback;
     this.nextEventCallback = nextEventCallback;
@@ -571,6 +730,14 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
     this.removeMemberCallback = removeMemberCallback;
     this.queryDeviceTrustCallback = queryDeviceTrustCallback;
     this.decideDeviceTrustChangeCallback = decideDeviceTrustChangeCallback;
+    this.queryNetworkRecoveryStatusCallback = queryNetworkRecoveryStatusCallback;
+    this.queryLocalDeviceCallback = queryLocalDeviceCallback;
+    this.queryDeviceGroupChoicesCallback = queryDeviceGroupChoicesCallback;
+    this.queryMembershipConvergenceCallback = queryMembershipConvergenceCallback;
+    this.cancelJoinSpaceCallback = cancelJoinSpaceCallback;
+    this.refreshSharedDevicesCallback = refreshSharedDevicesCallback;
+    this.querySharedDeviceRefreshCallback = querySharedDeviceRefreshCallback;
+    this.queryMemberRemovalCallback = queryMemberRemovalCallback;
   }
 
   async lifecycleState(): Promise<string> {
@@ -591,6 +758,10 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
 
   async queryNetworkSettings(): Promise<EngineNetworkSettings> {
     return await this.queryNetworkSettingsCallback();
+  }
+
+  async queryPairingDiagnostics(): Promise<EnginePairingDiagnostics> {
+    return await this.queryPairingDiagnosticsCallback();
   }
 
   async updateNetworkSettings(allowRelayFallback: boolean, customRelayUrls: string[]):
@@ -680,6 +851,62 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
   async decideDeviceTrustChange(changeId: string, choice: string,
     confirmLocalRemoval: boolean): Promise<string> {
     return await this.decideDeviceTrustChangeCallback(changeId, choice, confirmLocalRemoval);
+  }
+
+  async queryNetworkRecoveryStatus(): Promise<EngineNetworkRecoveryStatus> {
+    if (this.queryNetworkRecoveryStatusCallback === null) {
+      return await unsupportedEngineOperation('query_network_recovery_status');
+    }
+    return await this.queryNetworkRecoveryStatusCallback();
+  }
+
+  async queryLocalDevice(): Promise<EngineLocalDevice> {
+    if (this.queryLocalDeviceCallback === null) {
+      return await unsupportedEngineOperation('query_local_device');
+    }
+    return await this.queryLocalDeviceCallback();
+  }
+
+  async queryDeviceGroupChoices(): Promise<string> {
+    if (this.queryDeviceGroupChoicesCallback === null) {
+      return await this.queryDeviceTrust();
+    }
+    return await this.queryDeviceGroupChoicesCallback();
+  }
+
+  async queryMembershipConvergence(): Promise<EngineMembershipConvergence> {
+    if (this.queryMembershipConvergenceCallback === null) {
+      return await unsupportedEngineOperation('query_membership_convergence');
+    }
+    return await this.queryMembershipConvergenceCallback();
+  }
+
+  async cancelJoinSpace(joinId: string): Promise<EngineJoinSpaceStatus> {
+    if (this.cancelJoinSpaceCallback === null) {
+      return await unsupportedEngineOperation('cancel_join_space');
+    }
+    return await this.cancelJoinSpaceCallback(joinId);
+  }
+
+  async refreshSharedDevices(): Promise<string> {
+    if (this.refreshSharedDevicesCallback === null) {
+      return await unsupportedEngineOperation('refresh_shared_devices');
+    }
+    return await this.refreshSharedDevicesCallback();
+  }
+
+  async querySharedDeviceRefresh(requestId: string): Promise<string | null> {
+    if (this.querySharedDeviceRefreshCallback === null) {
+      return await unsupportedEngineOperation('query_shared_device_refresh');
+    }
+    return await this.querySharedDeviceRefreshCallback(requestId);
+  }
+
+  async queryMemberRemoval(): Promise<EngineMemberRemoval> {
+    if (this.queryMemberRemovalCallback === null) {
+      return await unsupportedEngineOperation('query_member_removal');
+    }
+    return await this.queryMemberRemovalCallback();
   }
 }
 
@@ -936,6 +1163,12 @@ export class EngineRuntimeService implements EngineClipboardObserver {
       (handle: EngineRuntimeHandle): Promise<EngineNetworkSettings> => handle.queryNetworkSettings());
   }
 
+  async queryPairingDiagnostics(): Promise<EnginePairingDiagnostics> {
+    return await this.executeReadOnly('query_pairing_diagnostics',
+      (handle: EngineRuntimeHandle): Promise<EnginePairingDiagnostics> =>
+        handle.queryPairingDiagnostics());
+  }
+
   async updateNetworkSettings(allowRelayFallback: boolean, customRelayUrls: string[]):
     Promise<EngineNetworkSettings> {
     return await this.executeFeature('update_network_settings',
@@ -1033,7 +1266,9 @@ export class EngineRuntimeService implements EngineClipboardObserver {
     if (serialized.trim().length === 0) {
       return [];
     }
-    let snapshot: EngineDeviceTrustSnapshotPayload = JSON.parse(serialized) as EngineDeviceTrustSnapshotPayload;
+    let decoded: EngineDeviceGroupChoicesPayload = JSON.parse(serialized) as EngineDeviceGroupChoicesPayload;
+    let snapshot: EngineDeviceTrustSnapshotPayload = decoded.device_trust === undefined ?
+      decoded as EngineDeviceTrustSnapshotPayload : decoded.device_trust;
     let sources: EngineDeviceTrustRelationshipPayload[] = snapshot.devices === undefined ? [] : snapshot.devices;
     let localDeviceId: string = snapshot.local_device_id === undefined ? '' : snapshot.local_device_id;
     let actionableSources: EngineDeviceTrustRelationshipPayload[] =
@@ -1100,6 +1335,10 @@ export class EngineRuntimeService implements EngineClipboardObserver {
   async queryDeviceTrust(): Promise<string> {
     return await this.executeReadOnly('query_device_trust',
       (handle: EngineRuntimeHandle): Promise<string> => handle.queryDeviceTrust());
+  }
+
+  async queryDeviceGroupChoices(): Promise<string> {
+    return await this.queryDeviceTrust();
   }
 
   async decideDeviceTrustChange(changeId: string, choice: string,

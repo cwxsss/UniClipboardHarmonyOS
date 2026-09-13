@@ -330,7 +330,7 @@
     },
     {
       "name": "space_scan_success",
-      "value": "邀请信息已填充，请确认设备名称后加入"
+      "value": "邀请码已填充，请输入空间口令后加入"
     },
     {
       "name": "space_scan_invalid",

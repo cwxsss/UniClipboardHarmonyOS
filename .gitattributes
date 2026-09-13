@@ -10,3 +10,8 @@
 *.so binary
 third_party/uniclipboard-engine/** -text
 third_party/uniclipboard-engine/v1.1.0-rc.7/UniClipboardEngine.har filter=lfs diff=lfs merge=lfs -text
+third_party/uniclipboard-engine/v1.1.0-rc8/UniClipboardEngine.har filter=lfs diff=lfs merge=lfs -text
+third_party/uniclipboard-engine/v1.1.0-rc8/*.json text eol=lf
+third_party/uniclipboard-engine/v1.1.0-rc8/*.txt text eol=lf
+third_party/uniclipboard-engine/v1.1.0-rc8/index.d.ts text eol=lf
+third_party/uniclipboard-engine/v1.1.0-rc8/LICENSE text eol=lf

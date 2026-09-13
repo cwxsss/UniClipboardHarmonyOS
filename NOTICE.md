@@ -10,7 +10,7 @@ This repository contains and modifies code from:
 - Imported snapshot: source archive from the `0.19.0-alpha.3` development stage; the archive did not preserve an exact Git commit identifier
 
 本仓库不再复制或编译 Engine 的 Rust 核心源码；鸿蒙端通过
-`third_party/uniclipboard-engine/v1.1.0-rc.7/` 中固定提交生成的官方 HAR 使用
+`third_party/uniclipboard-engine/v1.1.0-rc.15/` 中固定提交生成的官方 HAR 使用
 Engine。该 HAR 及其依赖许可证清单保留了上游版权与许可证信息。
 
 ## HarmonyOS modifications
