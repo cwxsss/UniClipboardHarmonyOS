@@ -1,5 +1,6 @@
 import { bundleManager, common } from '@kit.AbilityKit';
 import { util } from '@kit.ArkTS';
+import { fileIo } from '@kit.CoreFileKit';
 import engine from '@uniclipboard/engine';
 import type {
   OhActiveClipboard,
@@ -10,10 +11,13 @@ import type {
   OhJoinedSpace,
   OhLocalDevice,
   OhMemberRemoval,
+  OhMemberSyncPreferences,
   OhMembershipConvergence,
+  OhNetworkSettings,
   OhNetworkRecoveryStatus,
   OhSendReport,
   OhSessionRecovery,
+  OhHostDirectories,
   OhSharedDeviceRefresh,
   OhSpaceCreated,
   PreparedHost
@@ -34,7 +38,42 @@ import {
 const ENGINE_EVENT_TIMEOUT_MS: number = 1000;
 const ENGINE_SHUTDOWN_DEADLINE_MS: number = 3000;
 const ENGINE_PROFILE_SUFFIX: string = '.engine-v1-1';
+const ENGINE_DIAGNOSTIC_DETAIL_MAX_LENGTH: number = 256;
 const logger: Logger = new Logger('EngineRuntime');
+
+function diagnosticDetailSummary(detail: string): string {
+  let summary: string = detail.replace(/\s+/g, ' ').trim();
+  summary = summary.replace(/(passphrase|password|secret|token|authorization)(\s*[:=]\s*)[^\s,;]+/gi,
+    '$1$2[redacted]');
+  summary = summary.replace(/[A-Za-z]:[\\/][^\s,;]+|\/data\/[^\s,;]+/g, '[path]');
+  if (summary.length === 0) {
+    return 'none';
+  }
+  if (summary.length > ENGINE_DIAGNOSTIC_DETAIL_MAX_LENGTH) {
+    return summary.substring(0, ENGINE_DIAGNOSTIC_DETAIL_MAX_LENGTH) + '...';
+  }
+  return summary;
+}
+
+function diagnosticErrorCategory(error: Object): string {
+  if (error instanceof EngineRuntimeError) {
+    return (error as EngineRuntimeError).category;
+  }
+  if (error instanceof EngineHostError) {
+    return (error as EngineHostError).category;
+  }
+  return 'native_error';
+}
+
+function diagnosticErrorDetail(error: Object): string {
+  if (error instanceof EngineRuntimeError) {
+    return diagnosticDetailSummary((error as EngineRuntimeError).detail);
+  }
+  if (error instanceof Error) {
+    return diagnosticDetailSummary((error as Error).message);
+  }
+  return 'unknown_error';
+}
 
 export enum EngineRuntimeState {
   IDLE = 'idle',
@@ -507,10 +546,13 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
       (): Promise<void> => rawHandle.suspend(),
       (): Promise<void> => rawHandle.resume(),
       (): Promise<void> => rawHandle.recoverNetwork(),
-      (): Promise<EngineNetworkSettings> => unsupportedEngineOperation('query_network_settings'),
+      (): Promise<EngineNetworkSettings> => rawHandle.queryNetworkSettings().then((result: OhNetworkSettings) =>
+        new EngineNetworkSettings(result.allowRelayFallback, result.customRelayUrls)),
       (): Promise<EnginePairingDiagnostics> => unsupportedEngineOperation('query_pairing_diagnostics'),
-      (): Promise<EngineNetworkSettings> => unsupportedEngineOperation('update_network_settings'),
-      (): Promise<number> => unsupportedEngineOperation('probe_relay_url'),
+      (allowRelayFallback: boolean, customRelayUrls: string[]): Promise<EngineNetworkSettings> =>
+        rawHandle.updateNetworkSettings(allowRelayFallback, customRelayUrls).then((result: OhNetworkSettings) =>
+          new EngineNetworkSettings(result.allowRelayFallback, result.customRelayUrls)),
+      (url: string): Promise<number> => rawHandle.probeRelayUrl(url),
       async (timeoutMs: number): Promise<EngineRuntimeEvent | null> => {
         let rawEvent: OhEngineEvent | null = await rawHandle.nextEvent(timeoutMs);
         if (rawEvent === null) {
@@ -567,9 +609,15 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
         return new EngineSendReport(result.entryId, result.atMs, result.totalAccepted,
           result.totalDuplicate, result.totalOffline, result.totalErrored, result.totalPending);
       },
-      (): Promise<EngineSendReport> => unsupportedEngineOperation('send_image'),
-      (): Promise<EngineSendReport> => unsupportedEngineOperation('send_files'),
-      (): Promise<string | null> => unsupportedEngineOperation('capture_clipboard'),
+      (bytes: Uint8Array, mimeType: string, targetDevices: string[]): Promise<EngineSendReport> =>
+        rawHandle.sendImage(bytes, mimeType, targetDevices).then((result: OhSendReport) =>
+          new EngineSendReport(result.entryId, result.atMs, result.totalAccepted,
+            result.totalDuplicate, result.totalOffline, result.totalErrored, result.totalPending)),
+      (fileHandles: string[], targetDevices: string[]): Promise<EngineSendReport> =>
+        rawHandle.sendFiles(fileHandles, targetDevices).then((result: OhSendReport) =>
+          new EngineSendReport(result.entryId, result.atMs, result.totalAccepted,
+            result.totalDuplicate, result.totalOffline, result.totalErrored, result.totalPending)),
+      (): Promise<string | null> => rawHandle.captureCurrentClipboard(),
       async (): Promise<EngineActiveClipboard | null> => {
         let result: OhActiveClipboard | null = await rawHandle.queryActiveClipboard();
         if (result === null) {
@@ -577,10 +625,36 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
         }
         return new EngineActiveClipboard(result.entryId, result.activatedBy);
       },
-      (): Promise<EngineMemberSyncPreferences> => unsupportedEngineOperation('query_member_sync_preferences'),
-      (): Promise<EngineMemberSyncPreferences> => unsupportedEngineOperation('update_member_sync_preferences'),
-      (): Promise<EngineMemberSyncPreferences> => unsupportedEngineOperation('reset_member_sync_preferences'),
-      (): Promise<string> => unsupportedEngineOperation('restore_clipboard'),
+      (deviceId: string): Promise<EngineMemberSyncPreferences> => rawHandle.queryMemberSyncPreferences(deviceId).then(
+        (result: OhMemberSyncPreferences) => new EngineMemberSyncPreferences(result.sendEnabled,
+          result.sendContentTypes.text, result.sendContentTypes.image, result.sendContentTypes.file,
+          result.sendContentTypes.link, result.sendContentTypes.codeSnippet, result.sendContentTypes.richText,
+          result.receiveEnabled, result.receiveContentTypes.text, result.receiveContentTypes.image,
+          result.receiveContentTypes.file, result.receiveContentTypes.link,
+          result.receiveContentTypes.codeSnippet, result.receiveContentTypes.richText)),
+      (deviceId: string, sendEnabled: boolean, text: boolean, imageEnabled: boolean, file: boolean,
+        link: boolean, richText: boolean): Promise<EngineMemberSyncPreferences> => rawHandle.updateMemberSyncPreferences(
+        deviceId, {
+          sendEnabled: sendEnabled,
+          sendContentTypes: { text: text, image: imageEnabled, file: file, link: link, richText: richText }
+        }).then((result: OhMemberSyncPreferences) => new EngineMemberSyncPreferences(result.sendEnabled,
+          result.sendContentTypes.text, result.sendContentTypes.image, result.sendContentTypes.file,
+          result.sendContentTypes.link, result.sendContentTypes.codeSnippet, result.sendContentTypes.richText,
+          result.receiveEnabled, result.receiveContentTypes.text, result.receiveContentTypes.image,
+          result.receiveContentTypes.file, result.receiveContentTypes.link,
+          result.receiveContentTypes.codeSnippet, result.receiveContentTypes.richText)),
+      (deviceId: string): Promise<EngineMemberSyncPreferences> => rawHandle.updateMemberSyncPreferences(deviceId, {
+        sendEnabled: true,
+        receiveEnabled: true,
+        sendContentTypes: { text: true, image: true, file: true, link: true, richText: true },
+        receiveContentTypes: { text: true, image: true, file: true, link: true, richText: true }
+      }).then((result: OhMemberSyncPreferences) => new EngineMemberSyncPreferences(result.sendEnabled,
+        result.sendContentTypes.text, result.sendContentTypes.image, result.sendContentTypes.file,
+        result.sendContentTypes.link, result.sendContentTypes.codeSnippet, result.sendContentTypes.richText,
+        result.receiveEnabled, result.receiveContentTypes.text, result.receiveContentTypes.image,
+        result.receiveContentTypes.file, result.receiveContentTypes.link,
+        result.receiveContentTypes.codeSnippet, result.receiveContentTypes.richText)),
+      (entryId: string, mode: string): Promise<string> => rawHandle.restoreClipboard(entryId, mode),
       (entryId: string, destinationHandle: string): Promise<void> => rawHandle.exportEntry(entryId,
         destinationHandle),
       async (deviceId: string): Promise<EngineWorkspaceConvergence> => {
@@ -977,6 +1051,8 @@ export class EngineRuntimeService implements EngineClipboardObserver {
   private eventPolling: boolean = false;
   private observers: EngineRuntimeObserver[] = [];
   private eventObservers: EngineRuntimeEventObserver[] = [];
+  private processObservabilityInstalled: boolean = false;
+  private processObservabilityLogDirectory: string = '';
 
   private constructor(backend: EngineRuntimeBackend, host: EngineRuntimeHost,
     profileId: string = ENGINE_PROFILE_SUFFIX, clipboardCaptureEnabled: boolean = true) {
@@ -1051,6 +1127,21 @@ export class EngineRuntimeService implements EngineClipboardObserver {
 
   getSnapshot(): EngineRuntimeSnapshot {
     return new EngineRuntimeSnapshot(this.state, this.lastErrorCategory);
+  }
+
+  async prepareProcessDiagnosticExport(deadlineMs: number = 3000): Promise<string> {
+    try {
+      let report = await engine.prepareLocalDiagnosticExport(deadlineMs);
+      return 'engine_local_diagnostic_export=' + report.status + '\n' +
+        'engine_local_diagnostic_flush=' + report.flush + '\n' +
+        'engine_local_diagnostic_requested_at=' + report.requestedAtUtc + '\n' +
+        'engine_local_diagnostic_completed_at=' + report.completedAtUtc + '\n' +
+        'engine_local_diagnostic_other_processes_flushed=' +
+        report.otherProcessesFlushed.toString() + '\n';
+    } catch (error) {
+      logger.warn('Engine local diagnostic export failed');
+      return 'engine_local_diagnostic_export=unavailable\n';
+    }
   }
 
   addObserver(observer: EngineRuntimeObserver): void {
@@ -1439,7 +1530,10 @@ export class EngineRuntimeService implements EngineClipboardObserver {
       await this.handle.resume();
       this.setState(EngineRuntimeState.RUNNING);
     } catch (error) {
-      throw this.fail('resume', error);
+      let runtimeError: EngineRuntimeError = this.fail('resume', error);
+      logger.error('Engine resume failed category=' + runtimeError.category +
+        ' operation=' + runtimeError.operation + ' detail=' + diagnosticDetailSummary(runtimeError.detail));
+      throw runtimeError;
     }
   }
 
@@ -1471,10 +1565,86 @@ export class EngineRuntimeService implements EngineClipboardObserver {
       let bundleInfo: bundleManager.BundleInfo = bundleManager.getBundleInfoForSelfSync(
         bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_APPLICATION);
       this.startConfig = new EngineRuntimeStartConfig(bundleInfo.versionName, this.profileId);
+      this.installProcessObservabilityIfSupported(this.callbacks, bundleInfo.versionName);
       this.lastErrorCategory = '';
       this.setState(EngineRuntimeState.IDLE);
     } catch (error) {
-      throw this.fail('prepare', error);
+      let runtimeError: EngineRuntimeError = this.fail('prepare', error);
+      logger.error('Engine prepare failed category=' + runtimeError.category +
+        ' operation=' + runtimeError.operation + ' detail=' + diagnosticDetailSummary(runtimeError.detail));
+      throw runtimeError;
+    }
+  }
+
+  private installProcessObservabilityIfSupported(callbacks: EngineHostCallbacks | null,
+    appVersion: string): void {
+    if (this.processObservabilityInstalled || callbacks === null ||
+      !(this.backend instanceof OfficialEngineRuntimeBackend)) {
+      return;
+    }
+    let directories: OhHostDirectories = {
+      privateDataDirectory: callbacks.privateDataDirectory,
+      cacheDirectory: callbacks.cacheDirectory,
+      temporaryDirectory: callbacks.temporaryDirectory
+    };
+    try {
+      let setup = engine.installProcessObservability({
+        serviceVersion: appVersion,
+        environment: 'development',
+        appChannel: 'development',
+        remoteDiagnosticsEnabled: false
+      }, directories);
+      this.processObservabilityInstalled = true;
+      this.processObservabilityLogDirectory = directories.cacheDirectory + '/logs';
+      logger.info('Engine process observability installed localFile=' + setup.localFile +
+        ' reused=' + setup.reused.toString());
+    } catch (error) {
+      logger.warn('Engine process observability unavailable category=' + diagnosticErrorCategory(error) +
+        ' operation=install_process_observability detail=' + diagnosticErrorDetail(error));
+    }
+  }
+
+  private async logNativeDiagnosticTail(): Promise<void> {
+    if (this.processObservabilityLogDirectory.length === 0) {
+      return;
+    }
+    try {
+      try {
+        await engine.prepareLocalDiagnosticExport(1500);
+      } catch (error) {
+      }
+      let date: string = new Date().toISOString().substring(0, 10);
+      let path: string = this.processObservabilityLogDirectory + '/engine.' + date + '.jsonl';
+      let file: fileIo.File = fileIo.openSync(path, fileIo.OpenMode.READ_ONLY);
+      try {
+        let stat: fileIo.Stat = fileIo.statSync(file.fd);
+        let length: number = Math.min(stat.size, 65536);
+        let offset: number = Math.max(0, stat.size - length);
+        let buffer: ArrayBuffer = new ArrayBuffer(length);
+        fileIo.readSync(file.fd, buffer, { offset: offset, length: length });
+        let decoder: util.TextDecoder = util.TextDecoder.create('utf-8', {
+          fatal: false,
+          ignoreBOM: true
+        });
+        let content: string = decoder.decodeToString(new Uint8Array(buffer));
+        let pattern: RegExp = /(uc-engine startup failed|engine startup failed|dependency wiring|clipboard background|p2p session|application runtime|profile storage|startup_error)/i;
+        let emitted: number = 0;
+        let lines: string[] = content.split('\n');
+        for (let index: number = 0; index < lines.length && emitted < 8; index += 1) {
+          let line: string = lines[index].trim();
+          if (line.length > 0 && pattern.test(line)) {
+            logger.error('Engine native diagnostic line=' + diagnosticDetailSummary(line));
+            emitted += 1;
+          }
+        }
+        logger.info('Engine native diagnostic tail scanned_bytes=' + length.toString() +
+          ' matched_lines=' + emitted.toString());
+      } finally {
+        fileIo.closeSync(file.fd);
+      }
+    } catch (error) {
+      logger.warn('Engine native diagnostic tail unavailable category=' +
+        diagnosticErrorCategory(error) + ' detail=' + diagnosticErrorDetail(error));
     }
   }
 
@@ -1503,7 +1673,11 @@ export class EngineRuntimeService implements EngineClipboardObserver {
       this.lastErrorCategory = '';
       this.setState(EngineRuntimeState.RUNNING);
     } catch (error) {
-      throw this.fail('start', error);
+      let runtimeError: EngineRuntimeError = this.fail('start', error);
+      await this.logNativeDiagnosticTail();
+      logger.error('Engine start failed category=' + runtimeError.category +
+        ' operation=' + runtimeError.operation + ' detail=' + diagnosticDetailSummary(runtimeError.detail));
+      throw runtimeError;
     }
   }
 
@@ -1696,7 +1870,14 @@ export class EngineRuntimeService implements EngineClipboardObserver {
 
   private async executeFeature<T>(operation: string,
     action: (handle: EngineRuntimeHandle) => Promise<T>): Promise<T> {
-    let handle: EngineRuntimeHandle = this.requireRunningHandle(operation);
+    let handle: EngineRuntimeHandle;
+    try {
+      handle = this.requireRunningHandle(operation);
+    } catch (error) {
+      let runtimeError: EngineRuntimeError = this.toRuntimeError(operation, error as Object);
+      logger.error('Engine operation failed operation=' + operation + ' category=' + runtimeError.category);
+      throw runtimeError;
+    }
     try {
       let result: T = await action(handle);
       if (this.state === EngineRuntimeState.RUNNING && this.handle === handle && this.eventPollTask === null) {
@@ -1705,17 +1886,30 @@ export class EngineRuntimeService implements EngineClipboardObserver {
       return result;
     } catch (error) {
       // An operation failure such as a stale invitation must not tear down a healthy runtime.
-      throw this.toRuntimeError(operation, error);
+      let runtimeError: EngineRuntimeError = this.toRuntimeError(operation, error);
+      logger.error('Engine operation failed operation=' + operation + ' category=' + runtimeError.category);
+      throw runtimeError;
     }
   }
 
   private async executeReadOnly<T>(operation: string,
     action: (handle: EngineRuntimeHandle) => Promise<T>): Promise<T> {
-    let handle: EngineRuntimeHandle = this.requireRunningHandle(operation);
+    let handle: EngineRuntimeHandle;
+    try {
+      handle = this.requireRunningHandle(operation);
+    } catch (error) {
+      let runtimeError: EngineRuntimeError = this.toRuntimeError(operation, error as Object);
+      logger.error('Engine read-only operation failed operation=' + operation +
+        ' category=' + runtimeError.category);
+      throw runtimeError;
+    }
     try {
       return await action(handle);
     } catch (error) {
-      throw this.toRuntimeError(operation, error);
+      let runtimeError: EngineRuntimeError = this.toRuntimeError(operation, error);
+      logger.error('Engine read-only operation failed operation=' + operation +
+        ' category=' + runtimeError.category);
+      throw runtimeError;
     }
   }
 
@@ -1739,7 +1933,7 @@ export class EngineRuntimeService implements EngineClipboardObserver {
     }
     if (error instanceof EngineHostError) {
       let hostError: EngineHostError = error as EngineHostError;
-      return new EngineRuntimeError(hostError.category, operation);
+      return new EngineRuntimeError(hostError.category, operation, hostError.message);
     }
     if (error instanceof Error) {
       let nativeError: Error = error as Error;

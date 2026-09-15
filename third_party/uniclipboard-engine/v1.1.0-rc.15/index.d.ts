@@ -106,6 +106,43 @@ export interface OhNetworkRecoveryStatus {
   nextRetryInMs?: number
 }
 
+export interface OhNetworkSettings {
+  allowRelayFallback: boolean
+  customRelayUrls: string[]
+}
+
+export interface OhContentTypes {
+  text: boolean
+  image: boolean
+  link: boolean
+  file: boolean
+  codeSnippet: boolean
+  richText: boolean
+}
+
+export interface OhContentTypesPatch {
+  text?: boolean
+  image?: boolean
+  link?: boolean
+  file?: boolean
+  codeSnippet?: boolean
+  richText?: boolean
+}
+
+export interface OhMemberSyncPreferences {
+  sendEnabled: boolean
+  receiveEnabled: boolean
+  sendContentTypes: OhContentTypes
+  receiveContentTypes: OhContentTypes
+}
+
+export interface OhMemberSyncPreferencesPatch {
+  sendEnabled?: boolean
+  receiveEnabled?: boolean
+  sendContentTypes?: OhContentTypesPatch
+  receiveContentTypes?: OhContentTypesPatch
+}
+
 export interface OhLocalDevice {
   deviceId: string
   displayName: string
@@ -225,7 +262,12 @@ export interface OhEngine {
   recoverSession(allowSecureStorageUnlock: boolean): Promise<OhSessionRecovery>
   recoverNetwork(): Promise<void>
   queryNetworkRecoveryStatus(): Promise<OhNetworkRecoveryStatus>
+  queryNetworkSettings(): Promise<OhNetworkSettings>
+  updateNetworkSettings(allowRelayFallback: boolean, customRelayUrls: string[]): Promise<OhNetworkSettings>
+  probeRelayUrl(url: string): Promise<number>
   queryLocalDevice(): Promise<OhLocalDevice>
+  queryMemberSyncPreferences(deviceId: string): Promise<OhMemberSyncPreferences>
+  updateMemberSyncPreferences(deviceId: string, patch: OhMemberSyncPreferencesPatch): Promise<OhMemberSyncPreferences>
   queryDeviceGroupChoices(): Promise<string>
   queryMembershipConvergence(): Promise<OhMembershipConvergence>
   issueInvitation(): Promise<OhInvitationIssued>
@@ -245,6 +287,10 @@ export interface OhEngine {
   suspend(): Promise<void>
   resume(): Promise<void>
   sendText(text: string, targetDevices: string[]): Promise<OhSendReport>
+  sendImage(bytes: Uint8Array, mimeType: string, targetDevices: string[]): Promise<OhSendReport>
+  sendFiles(fileHandles: string[], targetDevices: string[]): Promise<OhSendReport>
+  captureCurrentClipboard(): Promise<string | null>
+  restoreClipboard(entryId: string, mode: string): Promise<string>
   exportEntry(entryId: string, destinationHandle: string): Promise<void>
   nextEvent(timeoutMs: number): Promise<OhEngineEvent | null>
   shutdown(deadlineMs: number): Promise<void>

@@ -177,6 +177,8 @@ Get-FileHash -Algorithm SHA256 $hap
 
 rc.15 产物核验应至少确认 HAR、N-API 原生库、类型声明、版本和源提交彼此一致，并能在 ArkTS 字节码或 arm64 native 库中找到 `queryDeviceGroupChoices`、`recoverNetwork`、`queryMembershipConvergence` 和 `queryActiveClipboard`。安装测试时使用 `hdc install -r` 更新现有应用，保留用户数据；不要为了签名问题直接清空手机数据。
 
+运行时诊断：rc.15 客户端会在 Engine 启动前启用脱敏本地进程观测，日志写入应用缓存目录下的 `logs`；启动、建空间、加入空间和只读操作失败会记录阶段、操作和错误类别，不记录口令、密钥、剪贴板内容或原始路径。设置页中的连接诊断导出会先刷新 Engine 本地日志，再生成可分享的脱敏诊断摘要。
+
 #### 本次问题复盘
 
 - rc.15 的官方 HarmonyOS 公共声明聚焦空间恢复、设备组选择、文本同步、活动剪贴板和文件导出；旧版鸿蒙界面中的图片/文件发送、成员同步偏好和配对诊断接口不在该声明中，运行时会显式返回“不支持”，不会静默调用不存在的 N-API。

@@ -1344,6 +1344,10 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     } catch (error) {
       await this.restoreSpaceAdmissionProfile(profileId, addedProfile);
       this.spaceCreateState = 2;
+      let runtimeError: EngineRuntimeError = error instanceof EngineRuntimeError ?
+        error as EngineRuntimeError : new EngineRuntimeError('engine_unavailable', 'create_space');
+      logger.error('Create space failed category=' + runtimeError.category +
+        ' operation=' + runtimeError.operation);
     } finally {
       this.spaceCreateBusy = false;
     }
@@ -2018,7 +2022,9 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       targetFile = fileIo.openSync(targetPath,
         fileIo.OpenMode.CREATE | fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.TRUNC);
       let encoder: util.TextEncoder = new util.TextEncoder();
-      let data: Uint8Array = encoder.encodeInto(this.buildRedactedConnectionDiagnosticLog());
+      let engineDiagnosticLog: string = await engineRuntimeService.prepareProcessDiagnosticExport(3000);
+      let data: Uint8Array = encoder.encodeInto(this.buildRedactedConnectionDiagnosticLog() +
+        engineDiagnosticLog);
       fileIo.writeSync(targetFile.fd, data.buffer);
       fileIo.closeSync(targetFile.fd);
       targetFile = null;
