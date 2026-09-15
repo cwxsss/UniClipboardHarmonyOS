@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "version": "v1.1.0-rc.15",
+  "packageVersion": "1.1.0-rc.15",
+  "sourceCommit": "918bf39b8282fe18030180048fccc1526c9b5cde",
+  "releaseUrl": "https://github.com/UniClipboard/Engine/releases/tag/v1.1.0-rc.15",
+  "assetBaseUrl": "https://github.com/UniClipboard/Engine/releases/download/v1.1.0-rc.15",
+  "minimumHarmonyOsApi": 24,
+  "embeddedLibraries": [
+    {
+      "path": "package/libs/arm64-v8a/libuc_ohos_napi.so",
+      "sha256": "275cb456017d75bbc8a4d591194c1d76d9a5b08c29cf981adda7fb9f474b9187",
+      "size": 96121208
+    }
+  ],
+  "embeddedDeclaration": {
+    "path": "package/src/main/cpp/types/libuc_ohos_napi/index.d.ts",
+    "sha256": "cd5983404a3aa8ed1b6b75ffe38f87b36f71265b3d3d730dd86b4d11384ef1fd",
+    "size": 12556
+  },
+  "files": [
+    {
+      "name": "UniClipboardEngine.har",
+      "sha256": "9e98a1f6b08270e22cd1efba06e1d0be098d0f0c9f4f66e71d1e03de0da2b760",
+      "size": 28612010
+    },
+    {
+      "name": "UniClipboardEngine.har.checksum.txt",
+      "sha256": "62ac444f237299e5364e9c4636d8e59cf81399962e55d1e9c4d5d6d7e9f8e879",
+      "size": 65
+    },
+    {
+      "name": "index.d.ts",
+      "sha256": "72dee53d056c0a4bcd7954f89342c48fd9c2c2c64521b72af9ce28a3ce261f13",
+      "size": 11809
+    },
+    {
+      "name": "release-manifest.json",
+      "sha256": "66fa4f47e78e4f557f55303b54522e4e76251ced275e1d22e40d8127fb7f38f2",
+      "size": 6394
+    },
+    {
+      "name": "dependency-licenses.json",
+      "sha256": "45950fc62631798f4eb35bc40f906b2b5944d43b77c81259ca6b8cae060882ae",
+      "size": 131098
+    },
+    {
+      "name": "LICENSE",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "size": 11358
+    },
+    {
+      "name": "source-commit.txt",
+      "sha256": "927b1c9fdfe00071286cb9bf0d0edfb470a5dc14f3fe8dc1260dcdee4d0bc190",
+      "size": 41
+    },
+    {
+      "name": "uc-ohos-napi.checksum.txt",
+      "sha256": "58a59ff84c725ba55ab4f7a2edee48af59009c67d116735700d9e9d2c06fe43f",
+      "size": 65
+    },
+    {
+      "name": "version.txt",
+      "sha256": "d988df341e8009110187fe5a238d23355566137aedc9efc32bd6c82e62b1437b",
+      "size": 13
+    }
+  ]
+}

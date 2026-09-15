@@ -6,6 +6,6 @@
   "author": "UniClipboard HarmonyOS contributors",
   "license": "AGPL-3.0-only",
   "dependencies": {
-    "@uniclipboard/engine": "file:../third_party/uniclipboard-engine/v1.1.0-rc.7/UniClipboardEngine.har"
+    "@uniclipboard/engine": "file:../third_party/uniclipboard-engine/v1.1.0-rc.15/UniClipboardEngine.har"
   }
 }

@@ -40,6 +40,9 @@ export {
   EngineInvitationIssued,
   EngineActiveClipboard,
   EngineNetworkSettings,
+  EnginePairingCandidateDiagnostic,
+  EnginePairingInboundDiagnostics,
+  EnginePairingDiagnostics,
   EngineMemberSyncPreferences,
   EngineRuntimeError,
   EngineRuntimeEvent,
@@ -57,6 +60,11 @@ export {
   EngineRuntimeState,
   EngineWorkspaceConvergence,
   EngineSessionRecovery,
+  EngineNetworkRecoveryStatus,
+  EngineLocalDevice,
+  EngineMembershipConvergence,
+  EngineJoinSpaceStatus,
+  EngineMemberRemoval,
   engineRuntimeService
 } from './src/main/ets/service/EngineRuntimeService';
 export {

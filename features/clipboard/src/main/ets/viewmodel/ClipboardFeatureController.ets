@@ -54,6 +54,8 @@ import {
   EngineInvitationIssued,
   EngineActiveClipboard,
   EngineNetworkSettings,
+  EnginePairingCandidateDiagnostic,
+  EnginePairingDiagnostics,
   EngineMemberSyncPreferences,
   EngineSendReport,
   EngineSpaceCreated,
@@ -279,6 +281,13 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   public connectionDiagnosticInternetGranted: boolean = false;
   public connectionDiagnosticBackgroundGranted: boolean = false;
   public connectionDiagnosticClipboardGranted: boolean = false;
+  public connectionDiagnosticPairingState: string = 'unavailable';
+  public connectionDiagnosticInvitationCandidateCount: number = 0;
+  public connectionDiagnosticInvitationCandidates: string = 'none';
+  public connectionDiagnosticInboundEventsDelivered: number = 0;
+  public connectionDiagnosticInboundLastStage: string = 'idle';
+  public connectionDiagnosticInboundLastStageElapsedMs: number = 0;
+  public connectionDiagnosticInboundLastFailure: string = 'none';
   public largeSection: number = 0;
   public largeSettingsSection: number = 0;
   public desktopSelectedId: string = '';
@@ -1353,6 +1362,10 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     } catch (error) {
       await this.restoreSpaceAdmissionProfile(profileId, addedProfile);
       this.spaceCreateState = 2;
+      let runtimeError: EngineRuntimeError = error instanceof EngineRuntimeError ?
+        error as EngineRuntimeError : new EngineRuntimeError('engine_unavailable', 'create_space');
+      logger.error('Create space failed category=' + runtimeError.category +
+        ' operation=' + runtimeError.operation);
     } finally {
       this.spaceCreateBusy = false;
     }
@@ -1849,6 +1862,31 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     return target;
   }
 
+  private applyPairingDiagnostics(diagnostics: EnginePairingDiagnostics): void {
+    this.connectionDiagnosticPairingState = 'available';
+    this.connectionDiagnosticInvitationCandidateCount = diagnostics.candidateCount;
+    let candidates: string[] = [];
+    for (let index: number = 0; index < diagnostics.candidates.length; index += 1) {
+      let candidate: EnginePairingCandidateDiagnostic = diagnostics.candidates[index];
+      candidates.push(candidate.kind + ':' + candidate.addressHint + ':' + candidate.port.toString());
+    }
+    this.connectionDiagnosticInvitationCandidates = candidates.length === 0 ? 'none' : candidates.join(',');
+    this.connectionDiagnosticInboundEventsDelivered = diagnostics.inbound.eventsDelivered;
+    this.connectionDiagnosticInboundLastStage = diagnostics.inbound.lastStage;
+    this.connectionDiagnosticInboundLastStageElapsedMs = diagnostics.inbound.lastStageElapsedMs;
+    this.connectionDiagnosticInboundLastFailure = diagnostics.inbound.lastFailure;
+  }
+
+  private resetPairingDiagnostics(): void {
+    this.connectionDiagnosticPairingState = 'unavailable';
+    this.connectionDiagnosticInvitationCandidateCount = 0;
+    this.connectionDiagnosticInvitationCandidates = 'none';
+    this.connectionDiagnosticInboundEventsDelivered = 0;
+    this.connectionDiagnosticInboundLastStage = 'idle';
+    this.connectionDiagnosticInboundLastStageElapsedMs = 0;
+    this.connectionDiagnosticInboundLastFailure = 'none';
+  }
+
   public async refreshConnectionDiagnostics(): Promise<void> {
     if (this.connectionDiagnosticBusy) {
       return;
@@ -1860,6 +1898,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     this.connectionDiagnosticRelayCount = 0;
     this.connectionDiagnosticUnknownCount = 0;
     this.connectionDiagnosticOfflineCount = 0;
+    this.resetPairingDiagnostics();
     this.refreshConnectionDiagnosticNetworkType();
     this.refreshConnectionDiagnosticPermissions();
     let probeSucceeded: boolean = false;
@@ -1870,6 +1909,12 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     if (this.spaceNodeState === 2 && this.spaceJoined) {
       try {
         await engineRuntimeService.recoverNetwork();
+        try {
+          let diagnostics: EnginePairingDiagnostics = await engineRuntimeService.queryPairingDiagnostics();
+          this.applyPairingDiagnostics(diagnostics);
+        } catch (error) {
+          this.connectionDiagnosticPairingState = 'unavailable';
+        }
         let devices: EngineRuntimeDevice[] = await engineRuntimeService.queryDevices();
         let target: EngineRuntimeDevice | null = this.applyConnectionDiagnosticDevices(devices);
         if (target === null) {
@@ -1954,6 +1999,15 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
         this.connectionDiagnosticBackgroundGranted) + '\n' +
       'clipboard_permission=' + this.connectionDiagnosticPermissionCode(
         this.connectionDiagnosticClipboardGranted) + '\n' +
+      'pairing_diagnostics=' + this.connectionDiagnosticPairingState + '\n' +
+      'invitation_candidate_count=' + this.connectionDiagnosticInvitationCandidateCount.toString() + '\n' +
+      'invitation_candidates=' + this.connectionDiagnosticInvitationCandidates + '\n' +
+      'inbound_pairing_events_delivered=' +
+        this.connectionDiagnosticInboundEventsDelivered.toString() + '\n' +
+      'inbound_pairing_last_stage=' + this.connectionDiagnosticInboundLastStage + '\n' +
+      'inbound_pairing_last_stage_elapsed_ms=' +
+        this.connectionDiagnosticInboundLastStageElapsedMs.toString() + '\n' +
+      'inbound_pairing_last_failure=' + this.connectionDiagnosticInboundLastFailure + '\n' +
       'background_sync=' + (this.backgroundSyncEnabled ? 'enabled' : 'disabled') + '\n' +
       'last_failure=' + this.connectionDiagnosticLastFailure + '\n' +
       'last_failure_at_ms=' + this.connectionDiagnosticLastFailureAtMs.toString() + '\n' +
@@ -1986,7 +2040,9 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       targetFile = fileIo.openSync(targetPath,
         fileIo.OpenMode.CREATE | fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.TRUNC);
       let encoder: util.TextEncoder = new util.TextEncoder();
-      let data: Uint8Array = encoder.encodeInto(this.buildRedactedConnectionDiagnosticLog());
+      let engineDiagnosticLog: string = await engineRuntimeService.prepareProcessDiagnosticExport(3000);
+      let data: Uint8Array = encoder.encodeInto(this.buildRedactedConnectionDiagnosticLog() +
+        engineDiagnosticLog);
       fileIo.writeSync(targetFile.fd, data.buffer);
       fileIo.closeSync(targetFile.fd);
       targetFile = null;

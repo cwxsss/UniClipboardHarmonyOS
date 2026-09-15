@@ -9,15 +9,24 @@ param(
   [string]$X86Library,
   [Parameter(Mandatory = $true)]
   [string]$SourceCommit,
+  [string]$Version = 'v1.1.0-rc.7',
+  [string]$PackageVersion = '1.1.0-rc.7',
+  [string]$ReleaseUrl = '',
   [string]$Destination
 )
 
 $ErrorActionPreference = 'Stop'
 
-$version = 'v1.1.0-rc.7'
-$packageVersion = '1.1.0-rc.7'
+$version = $Version
+$packageVersion = $PackageVersion
+if ($version -notmatch '^v\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$') {
+  throw "Invalid Engine release version: $version"
+}
+if ($packageVersion -ne $version.Substring(1)) {
+  throw 'Engine package version must equal the release version without its v prefix'
+}
 $destination = if ([string]::IsNullOrWhiteSpace($Destination)) {
-  Join-Path $PSScriptRoot '..\third_party\uniclipboard-engine\v1.1.0-rc.7'
+  Join-Path $PSScriptRoot "..\third_party\uniclipboard-engine\$version"
 } else {
   $Destination
 }
@@ -32,7 +41,7 @@ if (Test-Path -LiteralPath $destination) {
   throw "Refusing to overwrite immutable Engine directory: $destination"
 }
 if ((& git -C $engineRootPath rev-parse HEAD).Trim() -ne $SourceCommit) {
-  throw 'Engine checkout does not match the pinned rc.7 source commit'
+  throw 'Engine checkout does not match the pinned source commit'
 }
 foreach ($requiredPath in @($baseHarPathValue, $arm64LibraryPath, $x86LibraryPath)) {
   if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
@@ -161,7 +170,7 @@ function Get-HarEntryMetadata {
 }
 
 $temporaryRoot = Join-Path ([System.IO.Path]::GetTempPath()) `
-  ("uniclipboard-engine-rc7-" + [System.Guid]::NewGuid().ToString('N'))
+  ("uniclipboard-engine-" + $version + '-' + [System.Guid]::NewGuid().ToString('N'))
 $packageRoot = Join-Path $temporaryRoot 'package'
 $harBuildPath = Join-Path $temporaryRoot 'UniClipboardEngine.har'
 New-Item -ItemType Directory -Path $temporaryRoot | Out-Null
@@ -237,7 +246,7 @@ try {
 
   & tar.exe -czf $harBuildPath -C $temporaryRoot 'package'
   if ($LASTEXITCODE -ne 0) {
-    throw "Unable to create rc.7 Engine HAR; tar exited with code $LASTEXITCODE"
+    throw "Unable to create $version Engine HAR; tar exited with code $LASTEXITCODE"
   }
 
   New-Item -ItemType Directory -Path $destination | Out-Null
@@ -354,7 +363,7 @@ $release = [ordered]@{
   version = $version
   packageVersion = $packageVersion
   sourceCommit = $SourceCommit
-  releaseUrl = "https://github.com/cwxsss/Engine/commit/$SourceCommit"
+  releaseUrl = $ReleaseUrl
   assetBaseUrl = ''
   minimumHarmonyOsApi = 24
   embeddedLibrary = $embeddedArm64

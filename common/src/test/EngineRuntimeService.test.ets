@@ -10,6 +10,8 @@ import {
   EngineInvitationIssued,
   EngineMemberSyncPreferences,
   EngineNetworkSettings,
+  EnginePairingDiagnostics,
+  EnginePairingInboundDiagnostics,
   EngineRuntimeEvent,
   EngineRuntimeHandle,
   EngineRuntimeHost,
@@ -139,6 +141,11 @@ class TestRuntimeHandle implements EngineRuntimeHandle {
 
   async queryNetworkSettings(): Promise<EngineNetworkSettings> {
     return new EngineNetworkSettings(true, []);
+  }
+
+  async queryPairingDiagnostics(): Promise<EnginePairingDiagnostics> {
+    return new EnginePairingDiagnostics(0, [],
+      new EnginePairingInboundDiagnostics(0, 'idle', 0, 'none'));
   }
 
   async updateNetworkSettings(allowRelayFallback: boolean, customRelayUrls: string[]):

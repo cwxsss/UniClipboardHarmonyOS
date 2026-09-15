@@ -77,7 +77,7 @@ products/default (Entry HAP)
 
 ### 环境要求
 
-- DevEco Studio 与 HarmonyOS SDK；本工程当前目标和最低兼容 API 均为 24（Engine `v1.1.0-rc.7` 要求 API 24）；
+- DevEco Studio 与 HarmonyOS SDK；本工程当前目标和最低兼容 API 均为 24（Engine `v1.1.0-rc.15` 要求 API 24）；
 - PowerShell 与 `devecocli`；
 - 只有在重新生成官方 Engine HAR 时，才需要在 Engine 仓库使用 Rust 工具链；本仓库的普通 HAP 构建直接使用已固定的 HAR 和原生库。
 
@@ -184,11 +184,13 @@ $hap = 'products/default/build/default/outputs/default/entry-default-signed.hap'
 Get-FileHash -Algorithm SHA256 $hap
 ```
 
-本次修复至少应能在 ArkTS 字节码或 arm64 native 库中找到 `queryMemberSyncPreferences`、`updateMemberSyncPreferences`、`receiveEnabled` 和 `receiveContentTypes`。安装测试时使用 `hdc install -r` 更新现有应用，保留用户数据；不要为了签名问题直接清空手机数据。
+rc.15 产物核验应至少确认 HAR、N-API 原生库、类型声明、版本和源提交彼此一致，并能在 ArkTS 字节码或 arm64 native 库中找到 `queryDeviceGroupChoices`、`recoverNetwork`、`queryMembershipConvergence` 和 `queryActiveClipboard`。安装测试时使用 `hdc install -r` 更新现有应用，保留用户数据；不要为了签名问题直接清空手机数据。
+
+运行时诊断：rc.15 客户端会在 Engine 启动前启用脱敏本地进程观测，日志写入应用缓存目录下的 `logs`；启动、建空间、加入空间和只读操作失败会记录阶段、操作和错误类别，不记录口令、密钥、剪贴板内容或原始路径。设置页中的连接诊断导出会先刷新 Engine 本地日志，再生成可分享的脱敏诊断摘要。
 
 #### 本次问题复盘
 
-- “设备-内容类型”不可操作的直接原因是鸿蒙源码调用了成员同步偏好接口，但旧版 Engine HAR 的公开声明/二进制没有这些接口；当前工程使用包含该接口的 Engine `v1.1.0-rc.7`。
+- rc.15 的官方 HarmonyOS 公共声明聚焦空间恢复、设备组选择、文本同步、活动剪贴板和文件导出；旧版鸿蒙界面中的图片/文件发送、成员同步偏好和配对诊断接口不在该声明中，运行时会显式返回“不支持”，不会静默调用不存在的 N-API。
 - HAP 曾经生成成功但签名失败，原因是误用了另一个项目的 ClashBox 证书；包名和证书的 bundleName 必须同时是 `com.sss.uniclipboard`。
 - DevEco 启动失败 `UnixDomainSockets.bind` 时，先检查旧的 DevEco 进程和 HDC 端口；本次通过隔离 `idea.system.path` 启动恢复 IDE，未修改项目源码。缓存锁只能在确认无 DevEco 进程后移动到备份目录，不能随意删除用户配置。
 - DevEco 提示 HDC 端口已被占用时，优先设置 `OHOS_HDC_SERVER_PORT` 后重启 IDE，再用同一端口的 `hdc -s` 连接手机；不要反复重置手机应用或重新安装来替代 HDC 连接修复。
@@ -203,7 +205,7 @@ Get-FileHash -Algorithm SHA256 $hap
 
 当前 HAP 的唯一产品入口是 `products/default/`，共享业务状态和 Engine 编排位于 `features/clipboard/`。修复同步、设备或媒体接收功能时必须沿 `products/default -> features/clipboard -> common` 跟踪真实调用链；涉及界面交互时必须同时覆盖 Compact 和 Expanded 视图。
 
-每次生成真机 HAP 前至少验证以下路径：应用退到后台后接收桌面文本、桌面图片显示预览和图片识别入口、桌面文件显示预览和保存入口、远端设备同步类型开关可操作并能重新读取已保存状态。后台任务模式由上面的构建检查自动保证，其余路径需要在连接真实 Engine 设备后验证。
+每次生成真机 HAP 前至少验证以下路径：应用退到后台后接收桌面文本、会话恢复后设备组状态可读取、活动剪贴板状态可读取、文本导出到用户选择的位置。图片/文件发送、成员同步偏好和旧配对诊断需等待 Engine 公共契约重新提供后再恢复对应界面入口。后台任务模式由上面的构建检查自动保证，其余路径需要在连接真实 Engine 设备后验证。
 
 ## 源码结构
 
@@ -211,18 +213,18 @@ Get-FileHash -Algorithm SHA256 $hap
 - `features/clipboard/`：剪贴板特性 HAR，封装共享状态和业务流程；
 - `common/`：公共能力 HAR，包含模型、存储、通知与同步服务；
 - `AppScope/`：应用级资源与元数据；
-- `third_party/uniclipboard-engine/v1.1.0-rc.7/`：固定版本的官方 Engine HAR、声明、原生库和校验清单；
+- `third_party/uniclipboard-engine/v1.1.0-rc.15/`：固定版本的官方 Engine HAR、声明、原生库和校验清单；
 - `common/src/main/ets/service/EngineRuntimeService.ets`：ArkTS 到官方 Engine 的唯一运行时边界。
 
 当前构建入口由根 `build-profile.json5` 指向 `products/default/`。
 
 ## 当前边界
 
-- 官方 Engine 空间已支持桌面到 HarmonyOS 的文本、图片和单文件传输；收到的图片和文件保存在应用受管缓存中，用户可从同步页写入剪贴板、预览或保存；
-- 当前 HarmonyOS Engine 的 `exportEntry` 接口只导出载荷字节，不返回原始文件名和媒体类型，因此接收文件暂时使用通用显示名；该限制应通过扩展 Engine 公共契约解决，客户端不会根据内容任意猜测原文件名；
+- 官方 rc.15 Engine 空间已支持桌面到 HarmonyOS 的文本同步、活动剪贴板查询和条目导出；
+- 当前 HarmonyOS Engine 的 `exportEntry` 接口只导出载荷字节，不返回原始文件名和媒体类型，因此接收文件暂时使用通用显示名。rc.15 的公开接口暂未提供图片/文件发送和成员同步偏好入口，客户端不会伪造这些调用；
 - 鸿蒙端不再提供旧 LAN/HTTP 兼容同步入口；所有同步均通过官方 Engine 加密空间完成；
 - 空间节点随应用进程运行，并通过 `dataTransfer` 持续任务维持后台文本接收；系统仍可能依据省电策略终止长期闲置进程；
-- 当前 Engine HAR 同时包含 arm64-v8a 和 x86_64 原生库，分别用于真机和模拟器；
+- 当前官方 rc.15 HAR 内嵌 `arm64-v8a` 原生库；x86_64 模拟器产物不在本次发布清单内；
 - 应用市场发布不代表 UniClipboard 上游官方背书；协议兼容性仍可能随上游预览版本变化。
 
 ## 参与贡献与安全问题
