@@ -426,6 +426,7 @@
     { "name": "connection_diagnostics_permission_clipboard", "value": "Clipboard read" },
     { "name": "connection_diagnostics_permission_granted", "value": "Granted" },
     { "name": "connection_diagnostics_permission_denied", "value": "Unavailable" },
+    { "name": "connection_diagnostics_permission_clipboard_action", "value": "Open system settings to allow clipboard read" },
     { "name": "connection_diagnostics_redaction_note", "value": "Exported logs omit device identifiers, device names, network addresses, connection links, credentials, and clipboard content." },
     { "name": "connection_diagnostics_refresh_action", "value": "Run again" },
     { "name": "connection_diagnostics_export_action", "value": "Export redacted log" },

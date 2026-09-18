@@ -1,5 +1,7 @@
 param(
-  [string]$ReleaseRoot = (Join-Path $PSScriptRoot '..\third_party\uniclipboard-engine\v1.1.0-rc.15')
+  # 必须与 oh-package.json5 / common-oh-package.json5 里引用的 HAR 版本一致，
+  # 否则这个校验会在验一个已经不再发布的旧产物。
+  [string]$ReleaseRoot = (Join-Path $PSScriptRoot '..\third_party\uniclipboard-engine\v1.1.0-rc.17')
 )
 
 $ErrorActionPreference = 'Stop'

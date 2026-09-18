@@ -1506,6 +1506,7 @@
     { "name": "connection_diagnostics_permission_clipboard", "value": "剪贴板读取" },
     { "name": "connection_diagnostics_permission_granted", "value": "已授权" },
     { "name": "connection_diagnostics_permission_denied", "value": "不可用" },
+    { "name": "connection_diagnostics_permission_clipboard_action", "value": "去系统设置开启剪贴板读取权限" },
     { "name": "connection_diagnostics_redaction_note", "value": "导出日志会移除设备标识、设备名、网络地址、连接链接、凭据和剪贴板内容。" },
     { "name": "connection_diagnostics_refresh_action", "value": "重新诊断" },
     { "name": "connection_diagnostics_export_action", "value": "导出脱敏日志" },

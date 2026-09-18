@@ -294,6 +294,23 @@ export struct ConnectionDiagnosticsSheet {
             this.controller.connectionDiagnosticBackgroundGranted)
           this.permissionRow($r('app.string.connection_diagnostics_permission_clipboard'),
             this.controller.connectionDiagnosticClipboardGranted)
+          if (!this.controller.connectionDiagnosticClipboardGranted) {
+            // 剪贴板读取权限被拒后系统不会再弹窗，必须引导用户去设置页手动开启，
+            // 否则手机→PC 方向会一直静默失效。
+            Button($r('app.string.connection_diagnostics_permission_clipboard_action'),
+              { type: ButtonType.Normal })
+              .width('100%')
+              .height(38)
+              .margin({ top: 4 })
+              .fontSize(13)
+              .fontColor(Api26Material.accentTextColor())
+              .backgroundColor(this.controller.accentColor())
+              .borderRadius($r('app.float.corner_radius_level10'))
+              .attributeModifier(Api26Material.accent())
+              .onClick((): void => {
+                this.controller.openPasteboardPermissionSettings();
+              })
+          }
         }
         .width('100%')
         .padding({ left: 16, right: 16, top: 14, bottom: 8 })

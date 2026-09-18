@@ -596,7 +596,14 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
           normalizedDeviceName, passphrase,
           preserveUnreadableHistory);
         if (status.status !== 'active' || status.joinedSpace === undefined) {
-          let reason: string = status.rejectionReason === undefined ? status.status : status.rejectionReason;
+          // rc.17 起 Engine 会把「已终结」的加入尝试单独上报（cancelled/expired/
+          // superseded），原因放在 terminationReason 而非 rejectionReason。
+          let reason: string = status.status;
+          if (status.rejectionReason !== undefined) {
+            reason = status.rejectionReason;
+          } else if (status.terminationReason !== undefined) {
+            reason = status.terminationReason;
+          }
           throw new Error('join_space_' + reason);
         }
         let result: OhJoinedSpace = status.joinedSpace;
@@ -681,8 +688,11 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
       },
       async (joinId: string): Promise<EngineJoinSpaceStatus> => {
         let result: OhJoinSpaceStatus = await rawHandle.cancelJoinSpace(joinId);
+        // 取消本身就会产生 cancelled 终止态，原因在 rc.17 里报在 terminationReason 上。
+        let reason: string | undefined = result.rejectionReason === undefined ?
+          result.terminationReason : result.rejectionReason;
         return new EngineJoinSpaceStatus(result.status, result.joinId, result.peerUpgradeRequired,
-          result.rejectionReason);
+          reason);
       },
       async (): Promise<string> => (await rawHandle.refreshSharedDevices()).requestId,
       async (requestId: string): Promise<string | null> => {

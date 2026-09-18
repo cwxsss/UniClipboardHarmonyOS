@@ -609,21 +609,30 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     let storedBackgroundSyncEnabled: boolean = this.backgroundSyncPreferenceService.load(context);
     this.backgroundSyncEnabled = storedBackgroundSyncEnabled;
     AppStorage.setOrCreate('backgroundSyncEnabled', this.backgroundSyncEnabled);
-    if (!storedBackgroundSyncEnabled || this.hasPasteboardReadPermission()) {
+    if (this.hasPasteboardReadPermission()) {
       return;
     }
+    // 读取剪贴板权限是「前台同步」与「后台同步」的共同前提：没有它时引擎既读不到
+    // 本机剪贴板（手机→PC 方向完全失效），也收不到剪贴板变更事件。此前只有用户
+    // 手动打开「后台同步」开关才会触发申请，于是默认配置下永远拿不到授权——
+    // 真机实测 ohos.permission.READ_PASTEBOARD 的 grantStatus 为 -1（拒绝）。
+    // 因此启动时无条件申请一次；是否开启后台轮询仍完全由已存偏好决定。
     this.requestPasteboardReadPermissionOnce().then((granted: boolean): void => {
       if (granted) {
-        this.persistBackgroundSyncPreference(true);
+        this.persistBackgroundSyncPreference(storedBackgroundSyncEnabled);
         return;
       }
-      this.persistBackgroundSyncPreference(false);
+      if (storedBackgroundSyncEnabled) {
+        this.persistBackgroundSyncPreference(false);
+      }
       this.recordConnectionDiagnosticFailure('pasteboard_permission_denied');
-      logger.warn('UniClipboard background sync remains disabled because clipboard permission was denied.');
+      logger.warn('UniClipboard cannot read the system clipboard because permission was denied; phone-to-PC sync stays unavailable.');
     }).catch((): void => {
-      this.persistBackgroundSyncPreference(false);
+      if (storedBackgroundSyncEnabled) {
+        this.persistBackgroundSyncPreference(false);
+      }
       this.recordConnectionDiagnosticFailure('pasteboard_permission_denied');
-      logger.warn('UniClipboard background sync permission request did not complete.');
+      logger.warn('UniClipboard clipboard read permission request did not complete.');
     });
   }
 
@@ -672,6 +681,32 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     };
     task.then(clearTask, clearTask);
     return task;
+  }
+
+  /**
+   * 用户已拒绝过授权弹窗后的唯一补救入口：拉起系统的本应用权限设置页。
+   * 普通 requestPermissionsFromUser 在拒绝后不会再弹窗，只能走这里。
+   */
+  public async openPasteboardPermissionSettings(): Promise<void> {
+    let context: common.Context | undefined = this.getUIContext().getHostContext();
+    if (context === undefined) {
+      return;
+    }
+    try {
+      let accessManager: abilityAccessCtrl.AtManager = abilityAccessCtrl.createAtManager();
+      let results: Array<abilityAccessCtrl.GrantStatus> = await accessManager.requestPermissionOnSetting(
+        context, [READ_PASTEBOARD_PERMISSION]);
+      let granted: boolean = results.length > 0 &&
+        results[0] === abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED;
+      if (granted) {
+        this.persistBackgroundSyncPreference(this.backgroundSyncEnabled);
+      } else {
+        this.recordConnectionDiagnosticFailure('pasteboard_permission_denied');
+      }
+      this.refreshConnectionDiagnosticPermissions();
+    } catch (error) {
+      logger.warn('UniClipboard could not open the clipboard permission settings page.');
+    }
   }
 
   private persistBackgroundSyncPreference(enabled: boolean): void {

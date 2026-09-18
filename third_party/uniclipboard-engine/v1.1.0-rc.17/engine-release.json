@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "version": "v1.1.0-rc.17",
+  "packageVersion": "1.1.0-rc.17",
+  "sourceCommit": "3cc2f95f6b73c0306f8a81c9a114d7b3720760da",
+  "releaseUrl": "",
+  "assetBaseUrl": "",
+  "minimumHarmonyOsApi": 24,
+  "embeddedLibrary": {
+    "path": "package/libs/arm64-v8a/libuc_ohos_napi.so",
+    "sha256": "cad644173b9074015a3ac0cc25b80a2fcaa55a1932b68e435f238d82644c8abb",
+    "size": 25662352
+  },
+  "embeddedLibraries": [
+    {
+      "path": "package/libs/arm64-v8a/libuc_ohos_napi.so",
+      "sha256": "cad644173b9074015a3ac0cc25b80a2fcaa55a1932b68e435f238d82644c8abb",
+      "size": 25662352
+    },
+    {
+      "path": "package/libs/x86_64/libuc_ohos_napi.so",
+      "sha256": "a7f11b4732a41ae3b694c64ba03865299e198181c0b4b215d4a186c3dd3355c3",
+      "size": 29260128
+    }
+  ],
+  "embeddedDeclaration": {
+    "path": "package/src/main/cpp/types/libuc_ohos_napi/index.d.ts",
+    "sha256": "cefaf06245992644815185e9dfa3336bc7c6b14ce43d54eb692df61ddf5a806b",
+    "size": 11981
+  },
+  "files": [
+    {
+      "name": "UniClipboardEngine.har",
+      "sha256": "1d4ea98e08049de914a1f0fb138895f3493783bd934e140b1b7fa7aa1785d922",
+      "size": 22118680
+    },
+    {
+      "name": "UniClipboardEngine.har.checksum.txt",
+      "sha256": "a23ecec955c06acc45fe8be10a49a6864bc716bec5d5fb3d35edca76f3ee429e",
+      "size": 89
+    },
+    {
+      "name": "index.d.ts",
+      "sha256": "cefaf06245992644815185e9dfa3336bc7c6b14ce43d54eb692df61ddf5a806b",
+      "size": 11981
+    },
+    {
+      "name": "release-manifest.json",
+      "sha256": "7b2965eff3ee0babb58506d1563be188d29198e27c921b41a271317062594102",
+      "size": 2142
+    },
+    {
+      "name": "dependency-licenses.json",
+      "sha256": "d6d48c9ff5f03ac5b6b8a9dee47fda7720efa35fcf9a5099f20648b39142de8f",
+      "size": 142716
+    },
+    {
+      "name": "LICENSE",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "size": 11358
+    },
+    {
+      "name": "source-commit.txt",
+      "sha256": "28929443b5395fde7ae9852be0f39d030eb184786228aeae23278e50c3876051",
+      "size": 41
+    },
+    {
+      "name": "uc-ohos-napi.checksum.txt",
+      "sha256": "55f696bb5d03b575ba703fcac24dbe270ef59e85fbcd8475ae4c2742b111ef5a",
+      "size": 95
+    },
+    {
+      "name": "uc-ohos-napi-x86_64.checksum.txt",
+      "sha256": "a2ae313b379ab69e6c452d55bdb3a1e66782017aeeba51b6f7d2b2fe92332e08",
+      "size": 92
+    },
+    {
+      "name": "version.txt",
+      "sha256": "f32322e3630d41a82347db86705625fe1ded800c460d8097f81c62988748cc4d",
+      "size": 13
+    }
+  ]
+}
