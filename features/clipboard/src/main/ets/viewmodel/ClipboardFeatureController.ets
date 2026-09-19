@@ -267,6 +267,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   public spaceRelayFallbackEnabled: boolean = true;
   public spaceRelayUrlsText: string = '';
   public spaceRelaySettingsBusy: boolean = false;
+  // 0 = 无状态，1 = 保存成功，2 = 中继不可达或地址格式有误，3 = 引擎未就绪（与中继无关）。
   public spaceRelaySettingsState: number = 0;
   public connectionDiagnosticBusy: boolean = false;
   public connectionDiagnosticExportState: number = 0;
@@ -1164,8 +1165,13 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     this.spaceRelaySettingsState = 0;
     let requestedAllowRelayFallback: boolean = this.spaceRelayFallbackEnabled;
     let requestedRelayUrls: string[] = this.spaceRelayUrls();
+    // 保存失败有两类完全不同的原因，必须分开上报，否则排查方向会被彻底带偏：
+    // - 引擎未就绪（spaceNodeState !== 2）：任何地址都写不进去，与中继本身无关；
+    // - 引擎已就绪：才真的是中继不可达或地址格式有误。
+    // rc.17 的升级前备份 fail-closed 会让引擎永远起不来，此时旧文案把故障指向了中继。
+    let engineReady: boolean = this.spaceNodeState === 2;
     try {
-      if (this.spaceNodeState === 2) {
+      if (engineReady) {
         for (let index = 0; index < requestedRelayUrls.length; index += 1) {
           await this.engineRuntime.probeRelayUrl(requestedRelayUrls[index]);
         }
@@ -1176,8 +1182,15 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       this.spaceRelayUrlsText = settings.customRelayUrls.join('\n');
       this.spaceRelaySettingsState = 1;
     } catch (error) {
-      this.reportError('space-relay', 'failed to save relay settings: ' + this.errorDetail(error));
-      this.spaceRelaySettingsState = 2;
+      let detail: string = this.errorDetail(error);
+      if (engineReady) {
+        this.reportError('space-relay', 'failed to save relay settings: ' + detail);
+        this.spaceRelaySettingsState = 2;
+      } else {
+        this.reportError('space-relay',
+          'failed to save relay settings while the sync engine is unavailable: ' + detail);
+        this.spaceRelaySettingsState = 3;
+      }
     } finally {
       this.spaceRelaySettingsBusy = false;
     }

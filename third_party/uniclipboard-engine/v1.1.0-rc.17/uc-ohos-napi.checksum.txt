@@ -1,1 +1,1 @@
-cad644173b9074015a3ac0cc25b80a2fcaa55a1932b68e435f238d82644c8abb  arm64-v8a/libuc_ohos_napi.so
+998af03a9ec992d04ae121f42e6464519bbd3baf477127826f1ccd0d5f945959  arm64-v8a/libuc_ohos_napi.so

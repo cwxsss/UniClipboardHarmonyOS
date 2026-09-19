@@ -128,6 +128,7 @@
     { "name": "space_relay_saving_action", "value": "Saving…" },
     { "name": "space_relay_saved", "value": "Relay settings saved. Fully exit and reopen the app to apply them." },
     { "name": "space_relay_save_failed", "value": "Could not save. The relay is unreachable or the URL is invalid. Edit the settings and retry." },
+    { "name": "space_relay_save_engine_unavailable", "value": "Could not save: the sync engine is not ready yet, which is unrelated to the relay URL. Fully exit and reopen the app, then retry. If it still fails, check the pre-upgrade backup failure in the diagnostic log." },
     { "name": "space_invitation_code_label", "value": "Space invitation code (copyable)" },
     { "name": "background_sync_title", "value": "Keep syncing in background" },
     { "name": "background_sync_note", "value": "When enabled, the app reads newly copied content in the background and syncs it to your computer; an ongoing notification is shown and clipboard access is required." },

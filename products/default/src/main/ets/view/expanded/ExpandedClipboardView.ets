@@ -3865,7 +3865,8 @@ export struct ExpandedClipboardView {
         })
       Row({ space: 12 }) {
         Button(this.controller.spaceRelaySettingsBusy ? $r('app.string.space_relay_saving_action') :
-          (this.controller.spaceRelaySettingsState === 2 ? $r('app.string.space_relay_retry_action') :
+          (this.controller.spaceRelaySettingsState === 2 || this.controller.spaceRelaySettingsState === 3 ?
+            $r('app.string.space_relay_retry_action') :
             $r('app.string.space_relay_save_action')), { type: ButtonType.Normal })
           .height(44)
           .fontColor(Api26Material.accentTextColor())
@@ -3882,6 +3883,10 @@ export struct ExpandedClipboardView {
             .fontColor($r('app.color.success'))
         } else if (this.controller.spaceRelaySettingsState === 2) {
           Text($r('app.string.space_relay_save_failed'))
+            .fontSize(12)
+            .fontColor($r('app.color.danger'))
+        } else if (this.controller.spaceRelaySettingsState === 3) {
+          Text($r('app.string.space_relay_save_engine_unavailable'))
             .fontSize(12)
             .fontColor($r('app.color.danger'))
         }
