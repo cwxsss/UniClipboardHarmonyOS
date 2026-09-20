@@ -2,25 +2,25 @@
   "schemaVersion": 1,
   "version": "v1.1.0-rc.17",
   "packageVersion": "1.1.0-rc.17",
-  "sourceCommit": "8c3fce6581fe97cda8b72816673ebba490e03f2b",
+  "sourceCommit": "33af2d1525916ba5863ec325cf13e8b7537b9d7a",
   "releaseUrl": "",
   "assetBaseUrl": "",
   "minimumHarmonyOsApi": 24,
   "embeddedLibrary": {
     "path": "package/libs/arm64-v8a/libuc_ohos_napi.so",
-    "sha256": "998af03a9ec992d04ae121f42e6464519bbd3baf477127826f1ccd0d5f945959",
-    "size": 35021824
+    "sha256": "25cbf52346743da6469f3af0afa81f44e36089c07bd4bbed5a932cb9fe1a3999",
+    "size": 25903640
   },
   "embeddedLibraries": [
     {
       "path": "package/libs/arm64-v8a/libuc_ohos_napi.so",
-      "sha256": "998af03a9ec992d04ae121f42e6464519bbd3baf477127826f1ccd0d5f945959",
-      "size": 35021824
+      "sha256": "25cbf52346743da6469f3af0afa81f44e36089c07bd4bbed5a932cb9fe1a3999",
+      "size": 25903640
     },
     {
       "path": "package/libs/x86_64/libuc_ohos_napi.so",
-      "sha256": "0a34ada88356d2ccfbcb0892e891b8675377fdaa0a28c5a9dfff9da62110227f",
-      "size": 38722640
+      "sha256": "a7f11b4732a41ae3b694c64ba03865299e198181c0b4b215d4a186c3dd3355c3",
+      "size": 29260128
     }
   ],
   "embeddedDeclaration": {
@@ -31,12 +31,12 @@
   "files": [
     {
       "name": "UniClipboardEngine.har",
-      "sha256": "a26b0636f6effcf71501079ee3277af3f4d05c0577b8ea0fe73c7a25c4845762",
-      "size": 28497311
+      "sha256": "92ecbf38abfdaf345ea0bb87da2cbfaa5bfc2845b5aecc5b2ed9f07cbe863f71",
+      "size": 22290618
     },
     {
       "name": "UniClipboardEngine.har.checksum.txt",
-      "sha256": "8c3396e921317da038b74e3008a130d1ccc66ee0380c5bbcc2372c55f74e1bf5",
+      "sha256": "c8c6eec93688f53c9a283ac334e3ad8ae1b85033b5bfc5ec94f6569bb6ccb20a",
       "size": 89
     },
     {
@@ -46,8 +46,8 @@
     },
     {
       "name": "release-manifest.json",
-      "sha256": "4fc33a9dd74b20d2b4886ab3bb910069d8a37680d21b8feaabecf8321e8ac9cc",
-      "size": 2142
+      "sha256": "a5bd3176a2e2c9bc5bcfe011cfbc2bc5e804ab98a5e7d220b83dce0a91c9c2cb",
+      "size": 2143
     },
     {
       "name": "dependency-licenses.json",
@@ -61,18 +61,18 @@
     },
     {
       "name": "source-commit.txt",
-      "sha256": "d10e8258c2153bdb347ad43fbddd03f4a5b71f9ddd9f274baae4c3a3d721b288",
+      "sha256": "13303df0aef49c1d738e77385570185272843c8d2c6e85f3593a8ac4988c9b12",
       "size": 41
     },
     {
       "name": "uc-ohos-napi.checksum.txt",
-      "sha256": "3c62fb44089786abc0e8aa94a552033dc6ff11d8a39d9141f89a678832543def",
-      "size": 95
+      "sha256": "9bb1bfe3b4991c5ff81e5fd223f284da22a38041c0bd311d96e80b93e1902f7a",
+      "size": 85
     },
     {
       "name": "uc-ohos-napi-x86_64.checksum.txt",
-      "sha256": "4ca99d4fb73758c22edcdee3d27543c605612fe8a82a36ccf79f81a50d9fe404",
-      "size": 92
+      "sha256": "f54136c5313ab9ffa1a58b8e1f63d0ad0de52fcbce2fd5e8552d6a92cb39a1fa",
+      "size": 85
     },
     {
       "name": "version.txt",

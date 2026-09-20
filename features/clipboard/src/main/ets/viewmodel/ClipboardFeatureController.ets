@@ -465,6 +465,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       this.schedulePollTimer(POLL_INTERVAL_BASE_MS);
     }
     this.restoreBackgroundSyncPreference();
+    this.ensurePasteboardPermission();
     this.restoreAppearanceMode();
     this.restoreAppearanceTheme();
     this.restoreAppearanceVisualSettings();
@@ -610,28 +611,24 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     let storedBackgroundSyncEnabled: boolean = this.backgroundSyncPreferenceService.load(context);
     this.backgroundSyncEnabled = storedBackgroundSyncEnabled;
     AppStorage.setOrCreate('backgroundSyncEnabled', this.backgroundSyncEnabled);
+    engineRuntimeService.setClipboardPollingEnabled(storedBackgroundSyncEnabled && this.spaceJoined);
+  }
+
+  /**
+   * 读取剪贴板权限 (ohos.permission.READ_PASTEBOARD) 是前台与后台读取剪贴板的前提。
+   * 与后台常驻任务 (backgroundTaskManager) 彻底解耦，独立在启动时或需要时申请。
+   */
+  public ensurePasteboardPermission(): void {
     if (this.hasPasteboardReadPermission()) {
       return;
     }
-    // 读取剪贴板权限是「前台同步」与「后台同步」的共同前提：没有它时引擎既读不到
-    // 本机剪贴板（手机→PC 方向完全失效），也收不到剪贴板变更事件。此前只有用户
-    // 手动打开「后台同步」开关才会触发申请，于是默认配置下永远拿不到授权——
-    // 真机实测 ohos.permission.READ_PASTEBOARD 的 grantStatus 为 -1（拒绝）。
-    // 因此启动时无条件申请一次；是否开启后台轮询仍完全由已存偏好决定。
     this.requestPasteboardReadPermissionOnce().then((granted: boolean): void => {
-      if (granted) {
-        this.persistBackgroundSyncPreference(storedBackgroundSyncEnabled);
-        return;
+      if (!granted) {
+        this.recordConnectionDiagnosticFailure('pasteboard_permission_denied');
+        logger.warn('UniClipboard cannot read the system clipboard because permission was denied; phone-to-PC sync stays unavailable.');
       }
-      if (storedBackgroundSyncEnabled) {
-        this.persistBackgroundSyncPreference(false);
-      }
-      this.recordConnectionDiagnosticFailure('pasteboard_permission_denied');
-      logger.warn('UniClipboard cannot read the system clipboard because permission was denied; phone-to-PC sync stays unavailable.');
+      this.refreshConnectionDiagnosticPermissions();
     }).catch((): void => {
-      if (storedBackgroundSyncEnabled) {
-        this.persistBackgroundSyncPreference(false);
-      }
       this.recordConnectionDiagnosticFailure('pasteboard_permission_denied');
       logger.warn('UniClipboard clipboard read permission request did not complete.');
     });

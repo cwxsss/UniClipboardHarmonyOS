@@ -62,6 +62,7 @@ export class EngineClipboardHost {
   private pollIdleRounds: number = 0;
   private hasClipboardBaseline: boolean = false;
   private lastClipboardText: string = '';
+  private lastChangeCount: number = -1;
   private lastPollFailureLogAtMs: number = 0;
   private updateCallback = (): void => {
     let changed: boolean = this.notifyClipboardChange();
@@ -99,6 +100,11 @@ export class EngineClipboardHost {
           this.systemPasteboard.setDataSync(data);
           this.lastClipboardText = text;
           this.hasClipboardBaseline = true;
+          try {
+            this.lastChangeCount = this.systemPasteboard.getChangeCount();
+          } catch (error) {
+            this.lastChangeCount = -1;
+          }
           this.pollIdleRounds = 0;
           return;
         } catch (error) {
@@ -141,6 +147,7 @@ export class EngineClipboardHost {
     if (!this.listening) {
       this.observer = null;
       this.hasClipboardBaseline = false;
+      this.lastChangeCount = -1;
       this.pollIdleRounds = 0;
       return;
     }
@@ -152,6 +159,7 @@ export class EngineClipboardHost {
       this.listening = false;
       this.observer = null;
       this.hasClipboardBaseline = false;
+      this.lastChangeCount = -1;
       this.pollIdleRounds = 0;
     }
   }
@@ -161,8 +169,14 @@ export class EngineClipboardHost {
       let data: pasteboard.PasteData = this.systemPasteboard.getDataSync();
       this.lastClipboardText = this.extractText(data);
       this.hasClipboardBaseline = true;
+      try {
+        this.lastChangeCount = this.systemPasteboard.getChangeCount();
+      } catch (error) {
+        this.lastChangeCount = -1;
+      }
     } catch (error) {
       this.hasClipboardBaseline = false;
+      this.lastChangeCount = -1;
     }
   }
 
@@ -171,8 +185,24 @@ export class EngineClipboardHost {
       return false;
     }
     try {
+      let currentChangeCount: number = -1;
+      let hasChangeCount: boolean = false;
+      try {
+        currentChangeCount = this.systemPasteboard.getChangeCount();
+        hasChangeCount = true;
+      } catch (error) {
+        hasChangeCount = false;
+      }
+
+      if (hasChangeCount && this.lastChangeCount >= 0 && currentChangeCount === this.lastChangeCount) {
+        return false;
+      }
+
       let data: pasteboard.PasteData = this.systemPasteboard.getDataSync();
       let currentText: string = this.extractText(data);
+      if (hasChangeCount) {
+        this.lastChangeCount = currentChangeCount;
+      }
       if (!this.hasClipboardBaseline) {
         this.lastClipboardText = currentText;
         this.hasClipboardBaseline = true;
@@ -202,12 +232,33 @@ export class EngineClipboardHost {
   private extractText(data: pasteboard.PasteData): string {
     let recordCount: number = data.getRecordCount();
     for (let index: number = 0; index < recordCount; index += 1) {
-      let text: string = data.getRecord(index).toPlainText();
+      let record: pasteboard.PasteDataRecord = data.getRecord(index);
+      let text: string = record.toPlainText();
       if (text.length > 0) {
         return text;
       }
+      let uri: string = record.uri;
+      if (uri !== undefined && uri !== null && uri.length > 0) {
+        if (!uri.startsWith('file://') && !uri.startsWith('datashare://')) {
+          return uri;
+        }
+      }
+      let htmlText: string = record.htmlText;
+      if (htmlText !== undefined && htmlText !== null && htmlText.length > 0) {
+        return htmlText;
+      }
     }
-    return data.getPrimaryText();
+    let primaryText: string = data.getPrimaryText();
+    if (primaryText !== undefined && primaryText !== null && primaryText.length > 0) {
+      return primaryText;
+    }
+    let primaryUri: string = data.getPrimaryUri();
+    if (primaryUri !== undefined && primaryUri !== null && primaryUri.length > 0) {
+      if (!primaryUri.startsWith('file://') && !primaryUri.startsWith('datashare://')) {
+        return primaryUri;
+      }
+    }
+    return '';
   }
 
   private snapshotFromText(text: string): EngineClipboardSnapshot {
