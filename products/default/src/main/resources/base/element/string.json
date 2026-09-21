@@ -5,6 +5,26 @@
       "value": "UniClipboard 应用入口"
     },
     {
+      "name": "filter_chip_all",
+      "value": "全部"
+    },
+    {
+      "name": "filter_chip_text",
+      "value": "文本"
+    },
+    {
+      "name": "filter_chip_link",
+      "value": "网页"
+    },
+    {
+      "name": "filter_chip_image",
+      "value": "图片"
+    },
+    {
+      "name": "filter_chip_file",
+      "value": "文件"
+    },
+    {
       "name": "EntryAbility_desc",
       "value": "UniClipboard 主页面"
     },

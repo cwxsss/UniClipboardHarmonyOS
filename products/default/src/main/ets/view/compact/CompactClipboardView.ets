@@ -1240,34 +1240,102 @@ export struct CompactClipboardView {
               })
           }
           .width('100%')
-          Row({ space: 8 }) {
-            Button($r('app.string.desktop_all'), { type: ButtonType.Normal })
-              .layoutWeight(1)
-              .height(34)
-              .fontSize(12)
-              .fontColor(!this.controller.historySnippetOnly ? this.controller.accentColor() :
-                $r('app.color.text_primary'))
-              .backgroundColor(!this.controller.historySnippetOnly ? this.controller.accentSoftColor() :
-                $r('app.color.surface_muted'))
-              .borderRadius($r('app.float.corner_radius_level10'))
-              .attributeModifier(Api26Material.accent())
-              .onClick((): void => {
-                this.controller.clearHistoryLibraryFilters();
-              })
-            Button($r('app.string.history_snippets_title'), { type: ButtonType.Normal })
-              .layoutWeight(1)
-              .height(34)
-              .fontSize(12)
-              .fontColor(this.controller.historySnippetOnly ? this.controller.accentColor() :
-                $r('app.color.text_primary'))
-              .backgroundColor(this.controller.historySnippetOnly ? this.controller.accentSoftColor() :
-                $r('app.color.surface_muted'))
-              .borderRadius($r('app.float.corner_radius_level10'))
-              .attributeModifier(Api26Material.accent())
-              .onClick((): void => {
-                this.controller.historySnippetOnly = true;
-              })
+          Scroll() {
+            Row({ space: 8 }) {
+              Button($r('app.string.filter_chip_all'), { type: ButtonType.Normal })
+                .height(32)
+                .fontSize(12)
+                .padding({ left: 14, right: 14 })
+                .fontColor((!this.controller.historySnippetOnly && this.controller.desktopTypeFilter === 0) ?
+                  this.controller.accentColor() : $r('app.color.text_primary'))
+                .backgroundColor((!this.controller.historySnippetOnly && this.controller.desktopTypeFilter === 0) ?
+                  this.controller.accentSoftColor() : $r('app.color.surface_muted'))
+                .borderRadius(16)
+                .attributeModifier(Api26Material.accent())
+                .onClick((): void => {
+                  this.controller.historySnippetOnly = false;
+                  this.controller.setHistoryTypeFilter(0);
+                })
+
+              Button($r('app.string.filter_chip_text'), { type: ButtonType.Normal })
+                .height(32)
+                .fontSize(12)
+                .padding({ left: 14, right: 14 })
+                .fontColor((!this.controller.historySnippetOnly && this.controller.desktopTypeFilter === 1) ?
+                  this.controller.accentColor() : $r('app.color.text_primary'))
+                .backgroundColor((!this.controller.historySnippetOnly && this.controller.desktopTypeFilter === 1) ?
+                  this.controller.accentSoftColor() : $r('app.color.surface_muted'))
+                .borderRadius(16)
+                .attributeModifier(Api26Material.accent())
+                .onClick((): void => {
+                  this.controller.historySnippetOnly = false;
+                  this.controller.setHistoryTypeFilter(1);
+                })
+
+              Button($r('app.string.filter_chip_link'), { type: ButtonType.Normal })
+                .height(32)
+                .fontSize(12)
+                .padding({ left: 14, right: 14 })
+                .fontColor((!this.controller.historySnippetOnly && this.controller.desktopTypeFilter === 2) ?
+                  this.controller.accentColor() : $r('app.color.text_primary'))
+                .backgroundColor((!this.controller.historySnippetOnly && this.controller.desktopTypeFilter === 2) ?
+                  this.controller.accentSoftColor() : $r('app.color.surface_muted'))
+                .borderRadius(16)
+                .attributeModifier(Api26Material.accent())
+                .onClick((): void => {
+                  this.controller.historySnippetOnly = false;
+                  this.controller.setHistoryTypeFilter(2);
+                })
+
+              Button($r('app.string.filter_chip_image'), { type: ButtonType.Normal })
+                .height(32)
+                .fontSize(12)
+                .padding({ left: 14, right: 14 })
+                .fontColor((!this.controller.historySnippetOnly && this.controller.desktopTypeFilter === 3) ?
+                  this.controller.accentColor() : $r('app.color.text_primary'))
+                .backgroundColor((!this.controller.historySnippetOnly && this.controller.desktopTypeFilter === 3) ?
+                  this.controller.accentSoftColor() : $r('app.color.surface_muted'))
+                .borderRadius(16)
+                .attributeModifier(Api26Material.accent())
+                .onClick((): void => {
+                  this.controller.historySnippetOnly = false;
+                  this.controller.setHistoryTypeFilter(3);
+                })
+
+              Button($r('app.string.filter_chip_file'), { type: ButtonType.Normal })
+                .height(32)
+                .fontSize(12)
+                .padding({ left: 14, right: 14 })
+                .fontColor((!this.controller.historySnippetOnly && this.controller.desktopTypeFilter === 4) ?
+                  this.controller.accentColor() : $r('app.color.text_primary'))
+                .backgroundColor((!this.controller.historySnippetOnly && this.controller.desktopTypeFilter === 4) ?
+                  this.controller.accentSoftColor() : $r('app.color.surface_muted'))
+                .borderRadius(16)
+                .attributeModifier(Api26Material.accent())
+                .onClick((): void => {
+                  this.controller.historySnippetOnly = false;
+                  this.controller.setHistoryTypeFilter(4);
+                })
+
+              Button($r('app.string.history_snippets_title'), { type: ButtonType.Normal })
+                .height(32)
+                .fontSize(12)
+                .padding({ left: 14, right: 14 })
+                .fontColor(this.controller.historySnippetOnly ? this.controller.accentColor() :
+                  $r('app.color.text_primary'))
+                .backgroundColor(this.controller.historySnippetOnly ? this.controller.accentSoftColor() :
+                  $r('app.color.surface_muted'))
+                .borderRadius(16)
+                .attributeModifier(Api26Material.accent())
+                .onClick((): void => {
+                  this.controller.historySnippetOnly = true;
+                  this.controller.setHistoryTypeFilter(0);
+                })
+            }
+            .padding({ left: 2, right: 2 })
           }
+          .scrollable(ScrollDirection.Horizontal)
+          .scrollBar(BarState.Off)
           .width('100%')
           if (this.controller.historyDeviceOptions().length > 0) {
             Text($r('app.string.history_devices_title'))

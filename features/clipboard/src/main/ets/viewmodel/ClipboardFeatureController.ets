@@ -2871,6 +2871,12 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     return true;
   }
 
+  public setHistoryTypeFilter(type: number): void {
+    this.desktopTypeFilter = this.desktopTypeFilter === type ? 0 : type;
+    this.historyRevision += 1;
+    AppStorage.setOrCreate('historyRevision', this.historyRevision);
+  }
+
   public compactFilteredHistory(): ClipboardHistoryItem[] {
     let signature: string = this.historyFilterSignature();
     if (historyFilterCache.compactSource === this.history &&
@@ -2880,7 +2886,9 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     let items: ClipboardHistoryItem[] = [];
     for (let index: number = 0; index < this.history.length; index++) {
       let item: ClipboardHistoryItem = this.history[index];
-      if (this.desktopSearchMatches(item.text) && this.historyItemMatchesLibraryFilters(item)) {
+      if (this.desktopSearchMatches(item.text) &&
+        this.desktopTypeMatchesFilter(item.kind, item.text) &&
+        this.historyItemMatchesLibraryFilters(item)) {
         items.push(item);
       }
     }
@@ -2889,6 +2897,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     historyFilterCache.compactSignature = signature;
     return items;
   }
+
 
   public desktopSessionHistoryDataSource(): HistoryDataSource<ClipboardHistoryItem> {
     this.sessionHistoryDataSourceInstance.reload(this.desktopFilteredSessionHistory());

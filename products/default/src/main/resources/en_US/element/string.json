@@ -5,6 +5,26 @@
       "value": "UniClipboard application entry"
     },
     {
+      "name": "filter_chip_all",
+      "value": "All"
+    },
+    {
+      "name": "filter_chip_text",
+      "value": "Text"
+    },
+    {
+      "name": "filter_chip_link",
+      "value": "Links"
+    },
+    {
+      "name": "filter_chip_image",
+      "value": "Images"
+    },
+    {
+      "name": "filter_chip_file",
+      "value": "Files"
+    },
+    {
       "name": "EntryAbility_desc",
       "value": "UniClipboard main page"
     },

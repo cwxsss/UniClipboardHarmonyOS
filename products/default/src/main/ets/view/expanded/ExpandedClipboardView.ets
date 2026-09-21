@@ -1499,6 +1499,84 @@ export struct ExpandedClipboardView {
       .borderRadius($r('app.float.corner_radius_level10'))
       .backgroundColor($r('app.color.surface_muted'))
       .attributeModifier(Api26Material.subtle())
+      Scroll() {
+        Row({ space: 8 }) {
+          Button($r('app.string.filter_chip_all'), { type: ButtonType.Normal })
+            .height(32)
+            .fontSize(12)
+            .padding({ left: 14, right: 14 })
+            .fontColor(this.controller.desktopTypeFilter === 0 ?
+              this.controller.accentColor() : $r('app.color.text_primary'))
+            .backgroundColor(this.controller.desktopTypeFilter === 0 ?
+              this.controller.accentSoftColor() : $r('app.color.surface_muted'))
+            .borderRadius(16)
+            .attributeModifier(Api26Material.accent())
+            .onClick((): void => {
+              this.controller.setHistoryTypeFilter(0);
+            })
+
+          Button($r('app.string.filter_chip_text'), { type: ButtonType.Normal })
+            .height(32)
+            .fontSize(12)
+            .padding({ left: 14, right: 14 })
+            .fontColor(this.controller.desktopTypeFilter === 1 ?
+              this.controller.accentColor() : $r('app.color.text_primary'))
+            .backgroundColor(this.controller.desktopTypeFilter === 1 ?
+              this.controller.accentSoftColor() : $r('app.color.surface_muted'))
+            .borderRadius(16)
+            .attributeModifier(Api26Material.accent())
+            .onClick((): void => {
+              this.controller.setHistoryTypeFilter(1);
+            })
+
+          Button($r('app.string.filter_chip_link'), { type: ButtonType.Normal })
+            .height(32)
+            .fontSize(12)
+            .padding({ left: 14, right: 14 })
+            .fontColor(this.controller.desktopTypeFilter === 2 ?
+              this.controller.accentColor() : $r('app.color.text_primary'))
+            .backgroundColor(this.controller.desktopTypeFilter === 2 ?
+              this.controller.accentSoftColor() : $r('app.color.surface_muted'))
+            .borderRadius(16)
+            .attributeModifier(Api26Material.accent())
+            .onClick((): void => {
+              this.controller.setHistoryTypeFilter(2);
+            })
+
+          Button($r('app.string.filter_chip_image'), { type: ButtonType.Normal })
+            .height(32)
+            .fontSize(12)
+            .padding({ left: 14, right: 14 })
+            .fontColor(this.controller.desktopTypeFilter === 3 ?
+              this.controller.accentColor() : $r('app.color.text_primary'))
+            .backgroundColor(this.controller.desktopTypeFilter === 3 ?
+              this.controller.accentSoftColor() : $r('app.color.surface_muted'))
+            .borderRadius(16)
+            .attributeModifier(Api26Material.accent())
+            .onClick((): void => {
+              this.controller.setHistoryTypeFilter(3);
+            })
+
+          Button($r('app.string.filter_chip_file'), { type: ButtonType.Normal })
+            .height(32)
+            .fontSize(12)
+            .padding({ left: 14, right: 14 })
+            .fontColor(this.controller.desktopTypeFilter === 4 ?
+              this.controller.accentColor() : $r('app.color.text_primary'))
+            .backgroundColor(this.controller.desktopTypeFilter === 4 ?
+              this.controller.accentSoftColor() : $r('app.color.surface_muted'))
+            .borderRadius(16)
+            .attributeModifier(Api26Material.accent())
+            .onClick((): void => {
+              this.controller.setHistoryTypeFilter(4);
+            })
+        }
+        .padding({ left: 16, right: 16 })
+      }
+      .scrollable(ScrollDirection.Horizontal)
+      .scrollBar(BarState.Off)
+      .width('100%')
+      .margin({ bottom: 10 })
       if (this.controller.historySelectionMode) {
         Row({ space: 8 }) {
           Text(this.controller.historySelectedIds.length.toString())

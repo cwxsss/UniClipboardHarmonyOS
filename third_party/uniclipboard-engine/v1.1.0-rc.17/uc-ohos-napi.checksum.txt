@@ -1,1 +1,1 @@
-25cbf52346743da6469f3af0afa81f44e36089c07bd4bbed5a932cb9fe1a3999  libuc_ohos_napi.so
+8d5a7345d5d3aa07a1cfe65ef1711dea586e1d9739fd29b087701f6331b572a7  libuc_ohos_napi.so

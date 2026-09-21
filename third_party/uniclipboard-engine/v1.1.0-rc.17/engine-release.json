@@ -2,20 +2,20 @@
   "schemaVersion": 1,
   "version": "v1.1.0-rc.17",
   "packageVersion": "1.1.0-rc.17",
-  "sourceCommit": "33af2d1525916ba5863ec325cf13e8b7537b9d7a",
+  "sourceCommit": "9f139d031e45da7b57225c50ffdb896b010cfa05",
   "releaseUrl": "",
   "assetBaseUrl": "",
   "minimumHarmonyOsApi": 24,
   "embeddedLibrary": {
     "path": "package/libs/arm64-v8a/libuc_ohos_napi.so",
-    "sha256": "25cbf52346743da6469f3af0afa81f44e36089c07bd4bbed5a932cb9fe1a3999",
-    "size": 25903640
+    "sha256": "8d5a7345d5d3aa07a1cfe65ef1711dea586e1d9739fd29b087701f6331b572a7",
+    "size": 26386072
   },
   "embeddedLibraries": [
     {
       "path": "package/libs/arm64-v8a/libuc_ohos_napi.so",
-      "sha256": "25cbf52346743da6469f3af0afa81f44e36089c07bd4bbed5a932cb9fe1a3999",
-      "size": 25903640
+      "sha256": "8d5a7345d5d3aa07a1cfe65ef1711dea586e1d9739fd29b087701f6331b572a7",
+      "size": 26386072
     },
     {
       "path": "package/libs/x86_64/libuc_ohos_napi.so",
@@ -31,12 +31,12 @@
   "files": [
     {
       "name": "UniClipboardEngine.har",
-      "sha256": "92ecbf38abfdaf345ea0bb87da2cbfaa5bfc2845b5aecc5b2ed9f07cbe863f71",
-      "size": 22290618
+      "sha256": "8c2f5bda614f20e7cdb2c0a65aaa708a729e913bb8a215a4004f3c4fa4f82719",
+      "size": 22450247
     },
     {
       "name": "UniClipboardEngine.har.checksum.txt",
-      "sha256": "c8c6eec93688f53c9a283ac334e3ad8ae1b85033b5bfc5ec94f6569bb6ccb20a",
+      "sha256": "9a5f47a8f99d8d34f4b7cf6b22d87e45634ae3d7ef2e95725d36e39b3a627955",
       "size": 89
     },
     {
@@ -46,7 +46,7 @@
     },
     {
       "name": "release-manifest.json",
-      "sha256": "a5bd3176a2e2c9bc5bcfe011cfbc2bc5e804ab98a5e7d220b83dce0a91c9c2cb",
+      "sha256": "030045f5daa5c64db705bc74156d68287874aac39323408294fa513bf1dfca47",
       "size": 2143
     },
     {
@@ -61,12 +61,12 @@
     },
     {
       "name": "source-commit.txt",
-      "sha256": "13303df0aef49c1d738e77385570185272843c8d2c6e85f3593a8ac4988c9b12",
+      "sha256": "29b9a7c1fa0309d06a2d63d20cafd31a40087535801945dbf8c78fe817ed68c4",
       "size": 41
     },
     {
       "name": "uc-ohos-napi.checksum.txt",
-      "sha256": "9bb1bfe3b4991c5ff81e5fd223f284da22a38041c0bd311d96e80b93e1902f7a",
+      "sha256": "38d64e34fe3be09fa7792217e7146963ccb833e2430f3ffaf48ce7c484a05330",
       "size": 85
     },
     {
