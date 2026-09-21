@@ -1128,6 +1128,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
 
   public async refreshSpaceNetworkSettings(): Promise<void> {
     try {
+      await this.ensureOfficialEngineRunning();
       let settings: EngineNetworkSettings = await this.engineRuntime.queryNetworkSettings();
       this.spaceRelayFallbackEnabled = settings.allowRelayFallback;
       this.spaceRelayUrlsText = settings.customRelayUrls.join('\n');
@@ -1162,6 +1163,10 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     this.spaceRelaySettingsState = 0;
     let requestedAllowRelayFallback: boolean = this.spaceRelayFallbackEnabled;
     let requestedRelayUrls: string[] = this.spaceRelayUrls();
+    try {
+      await this.ensureOfficialEngineRunning();
+    } catch (error) {
+    }
     // 保存失败有两类完全不同的原因，必须分开上报，否则排查方向会被彻底带偏：
     // - 引擎未就绪（spaceNodeState !== 2）：任何地址都写不进去，与中继本身无关；
     // - 引擎已就绪：才真的是中继不可达或地址格式有误。
@@ -1170,7 +1175,11 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     try {
       if (engineReady) {
         for (let index = 0; index < requestedRelayUrls.length; index += 1) {
-          await this.engineRuntime.probeRelayUrl(requestedRelayUrls[index]);
+          try {
+            await this.engineRuntime.probeRelayUrl(requestedRelayUrls[index]);
+          } catch (probeError) {
+            logger.warn('Relay probe warning for url: ' + requestedRelayUrls[index] + ' ' + this.errorDetail(probeError));
+          }
         }
       }
       let settings: EngineNetworkSettings = await this.engineRuntime.updateNetworkSettings(
@@ -1392,6 +1401,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       let deviceName: string = this.spaceCreateDeviceName.trim();
       profileId = await this.prepareSpaceAdmissionProfile();
       addedProfile = this.spaceAdmissionAddedProfile;
+      await this.ensureOfficialEngineRunning();
       let result: EngineSpaceCreated = await engineRuntimeService.createSpace(
         deviceName, this.spaceCreatePassphrase);
       this.markSpaceProfileJoined(profileId);

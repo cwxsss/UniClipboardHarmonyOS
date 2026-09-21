@@ -20,6 +20,7 @@ import type {
   OhHostDirectories,
   OhSharedDeviceRefresh,
   OhSpaceCreated,
+  OhStartupLifecycle,
   PreparedHost
 } from 'libuc_ohos_napi.so';
 import {
@@ -540,7 +541,8 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
   }
 
   async startEngine(config: EngineRuntimeStartConfig, preparedHost: PreparedHost): Promise<EngineRuntimeHandle> {
-    let rawHandle: OhEngine = await engine.startEngine(config, preparedHost);
+    let lifecycle: OhStartupLifecycle = engine.createStartupLifecycle();
+    let rawHandle: OhEngine = await engine.startEngine(config, preparedHost, lifecycle);
     return new CallbackEngineRuntimeHandle(
       (): Promise<string> => rawHandle.lifecycleState(),
       (): Promise<void> => rawHandle.suspend(),

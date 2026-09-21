@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "release": {
     "version": "v1.1.0-rc.17",
-    "commit": "9f139d031e45da7b57225c50ffdb896b010cfa05",
+    "commit": "ed5f729e0b5d3812a213e8f9738027df54291141",
     "rustToolchain": "1.95.0",
     "cargoLockSha256": "b0616af88654829584f1fa10aa7f8b34f7a96eff56bc267dae22a5c364a2d7e0"
   },

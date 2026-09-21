@@ -222,12 +222,19 @@ export interface OhSharedDeviceRefresh {
   unavailableSourceCount: number
 }
 
-export interface OhMemberRemoval {
-  phase: 'applied' | 'converging' | 'complete' | 'recovery_required'
-  intentCount: number
+export interface OhWorkspaceConvergence {
+  phase: string
+  revision: number
+  historyEventCount: number
   effectiveMemberCount: number
+  pendingRemovalDecisionDeviceIds: string[]
+  pendingRemovalDecisionEventId?: string
+  divergedPeerDeviceIds: string[]
+  upgradeRequiredPeerDeviceIds: string[]
   convergenceDigest?: string
+  removed: boolean
   updatedAtMs: number
+  failureCategory?: string
 }
 
 export interface OhEngineEvent {
@@ -240,8 +247,8 @@ export interface OhEngineEvent {
   errorCode?: number
   errorCategory?: string
   retryable?: boolean
-  memberRemoval?: OhMemberRemoval
-  sharedDeviceRefresh?: OhSharedDeviceRefresh
+  workspaceConvergence?: OhWorkspaceConvergence
+  deviceTrustRevision?: number
   networkRecoveryPhase?: 'idle' | 'recovering' | 'retry_scheduled' | 'failed'
   nextRetryInMs?: number
   rePairingScope?: 'all_devices'
@@ -282,11 +289,11 @@ export interface OhEngine {
   cancelJoinSpace(joinId: string): Promise<OhJoinSpaceStatus>
   refreshSharedDevices(): Promise<OhSharedDeviceRefreshStarted>
   querySharedDeviceRefresh(requestId: string): Promise<OhSharedDeviceRefresh | null>
-  removeMember(deviceId: string): Promise<OhMemberRemoval>
-  queryMemberRemoval(): Promise<OhMemberRemoval>
+  removeMember(deviceId: string): Promise<OhWorkspaceConvergence>
   queryActiveClipboard(): Promise<OhActiveClipboard | null>
   lifecycleState(): Promise<string>
   suspend(): Promise<void>
+  suspendWithDeadline(deadlineMs: number): Promise<void>
   resume(): Promise<void>
   sendText(text: string, targetDevices: string[]): Promise<OhSendReport>
   sendImage(bytes: Uint8Array, mimeType: string, targetDevices: string[]): Promise<OhSendReport>
@@ -296,6 +303,12 @@ export interface OhEngine {
   exportEntry(entryId: string, destinationHandle: string): Promise<void>
   nextEvent(timeoutMs: number): Promise<OhEngineEvent | null>
   shutdown(deadlineMs: number): Promise<void>
+  shutdownUntilComplete(): Promise<void>
+}
+
+export interface OhStartupLifecycle {
+  suspendWithDeadline(deadlineMs: number): Promise<void>
+  resume(): Promise<void>
 }
 
 
@@ -379,9 +392,11 @@ declare const engine: {
   flushProcessObservability(deadlineMs: number): Promise<OhObservabilitySignalSummary>
   shutdownProcessObservability(deadlineMs: number): Promise<OhObservabilitySignalSummary>
   prepareHost(host: OhHost): PreparedHost
+  createStartupLifecycle(): OhStartupLifecycle
   startEngine(
     config: { appVersion: string; profileId: string },
-    preparedHost: PreparedHost
+    preparedHost: PreparedHost,
+    lifecycle: OhStartupLifecycle
   ): Promise<OhEngine>
 }
 
