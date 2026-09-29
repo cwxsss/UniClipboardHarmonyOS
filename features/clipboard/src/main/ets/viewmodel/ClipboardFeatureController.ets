@@ -1347,7 +1347,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       addedProfile = this.spaceAdmissionAddedProfile;
       let result: EngineSpaceJoined = await engineRuntimeService.joinSpace(
         this.spaceInvitationCode.trim(), deviceName.length > 0 ? deviceName : null,
-        this.spacePassphrase, true);
+        this.spacePassphrase, false);
       this.markSpaceProfileJoined(profileId);
       let hasMigratedRecords: boolean = this.hasMigrationRecords(result.migratedRecords);
       let hasPreservedUnreadableRecords: boolean = this.hasMigrationRecords(result.preservedUnreadableRecords);

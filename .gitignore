@@ -48,9 +48,10 @@ Thumbs.db
 *.hap
 # Standalone native Engine libraries are distributed inside the HAR or Release assets.
 third_party/uniclipboard-engine/**/libuc_ohos_napi.so
-# The rc.7 Engine HAR is over GitHub's regular blob limit. Keep it as a
-# Release asset and retain only the checked metadata in the source tree.
+# Release HARs normally stay as release assets. The compact rc20-harmony HAR is
+# checked in because the local package manifests pin directly to this fixed file.
 *.har
+!third_party/uniclipboard-engine/v1.1.0-rc.20-harmony/UniClipboardEngine.har
 
 # UniClipboard optical-transfer web companion
 /tools/optical-transfer-web/node_modules/

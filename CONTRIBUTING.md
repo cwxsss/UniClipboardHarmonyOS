@@ -25,8 +25,8 @@ $env:DEVECO_SDK_HOME = '<your-openharmony-sdk-path>'
 devecocli build
 ```
 
-Engine 原生库和 HAR 的生成属于 Engine 仓库；本仓库只提交经过校验的固定版本
-HAR、NAPI 类型声明和鸿蒙端适配代码。
+本仓库固定 Engine `v1.1.0-rc.20` 上游提交，并通过 `tools/apply-engine-ohos-rc20-adaptation.ps1` 补充 Harmony N-API 操作。
+从该固定 Engine 提交构建本地 HAR，并随代码提交校验后的 HAR、N-API 声明和鸿蒙端调用适配。
 
 请在 PR 中写明测试设备、HarmonyOS/API 版本、实际执行的命令，以及仍未覆盖的场景。UI 改动请附手机和大屏截图，并同时检查浅色、深色与中英文界面。
 

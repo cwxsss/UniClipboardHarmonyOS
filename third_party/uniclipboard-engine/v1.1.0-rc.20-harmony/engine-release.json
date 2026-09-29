@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "version": "v1.1.0-rc.20",
+  "packageVersion": "1.1.0-rc.20",
+  "sourceCommit": "3f3eef7450e06013c3178b716eee9d5a3c419349",
+  "releaseUrl": "",
+  "assetBaseUrl": "",
+  "minimumHarmonyOsApi": 24,
+  "embeddedLibraries": [
+    {
+      "path": "package/libs/arm64-v8a/libuc_ohos_napi.so",
+      "sha256": "db4842427efb7a8f4fd14360b5766bafefc80341bfaa3a7774b841c7707d8a7e",
+      "size": 26729216
+    }
+  ],
+  "embeddedDeclaration": {
+    "path": "package/src/main/cpp/types/libuc_ohos_napi/index.d.ts",
+    "sha256": "a7a6df546ce926de18f16feaa268412f435edde5dc37391a9c252c576e458db9",
+    "size": 12636
+  },
+  "harmonyAdaptation": {
+    "script": "tools/apply-engine-ohos-rc20-adaptation.ps1",
+    "scriptSha256": "571aac4ed16a9f4cce4ee59ff05c9cd3a574c199839a64519dee05385e327004",
+    "metadata": "harmony-adaptation.json",
+    "physicalDeviceAcceptance": "not_run"
+  },
+  "files": [
+    {
+      "name": "UniClipboardEngine.har",
+      "sha256": "a1ae3906ce0fcff1d223000482c77540592e95b6b915bd17617453a60bc2320b",
+      "size": 12422458
+    },
+    {
+      "name": "UniClipboardEngine.har.checksum.txt",
+      "sha256": "96e2703118afa3c713f681f57982683886d98f85296ea91d99244386c98c1540",
+      "size": 65
+    },
+    {
+      "name": "index.d.ts",
+      "sha256": "a7a6df546ce926de18f16feaa268412f435edde5dc37391a9c252c576e458db9",
+      "size": 12636
+    },
+    {
+      "name": "release-manifest.json",
+      "sha256": "e338a74a266094952f74277220d1853ae9d1881d7a8c1e68da29bdf8b81aef43",
+      "size": 1999
+    },
+    {
+      "name": "upstream-release-manifest.json",
+      "sha256": "f3347f1ec2b6dbd1f9e539a64e3db428aeae74f340bfbcfcb88acdb035cb0540",
+      "size": 6385
+    },
+    {
+      "name": "dependency-licenses.json",
+      "sha256": "fccf27bbb13791cb3868695e5d4132c9d84aac57791096c5ad215359fc4f2b95",
+      "size": 138267
+    },
+    {
+      "name": "LICENSE",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "size": 11358
+    },
+    {
+      "name": "source-commit.txt",
+      "sha256": "e294217138c808c8d9d7004524cbb146635cadfe19eb58a5ff24ed501d52a463",
+      "size": 41
+    },
+    {
+      "name": "uc-ohos-napi.checksum.txt",
+      "sha256": "186b523f270158b37536aae949a2b4bae8db75014856c48f243f51df51699140",
+      "size": 65
+    },
+    {
+      "name": "version.txt",
+      "sha256": "ee426eb068ae998120b2a8f3b7917dff613d6934e8665550a0ca2c9b0989aea4",
+      "size": 13
+    },
+    {
+      "name": "harmony-adaptation.json",
+      "sha256": "283c0f8f19d760c3db5356916afcac777ab72a87d58559f40c36c22ca2ae401b",
+      "size": 1226
+    }
+  ]
+}

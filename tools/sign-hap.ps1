@@ -4,6 +4,7 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$SignedHap,
   [string]$SdkRoot = '',
+  [string]$JavaHome = '',
   [string]$BundleName = 'com.sss.uniclipboard',
   [string]$SigningDirectory = '',
   [string]$Password = '',
@@ -31,9 +32,16 @@ $sdkRootPath = [System.IO.Path]::GetFullPath($SdkRoot)
 $unsignedHapPath = [System.IO.Path]::GetFullPath($UnsignedHap)
 $signedHapPath = [System.IO.Path]::GetFullPath($SignedHap)
 $devecoRoot = Split-Path -Parent $sdkRootPath
+if ([string]::IsNullOrWhiteSpace($JavaHome)) {
+  $JavaHome = if (-not [string]::IsNullOrWhiteSpace($env:JAVA_HOME)) {
+    $env:JAVA_HOME
+  } else {
+    Join-Path $devecoRoot 'jbr'
+  }
+}
 $toolchainsRoot = Join-Path $sdkRootPath 'default\openharmony\toolchains'
-$java = Join-Path $devecoRoot 'jbr\bin\java.exe'
-$keytool = Join-Path $devecoRoot 'jbr\bin\keytool.exe'
+$java = Join-Path $JavaHome 'bin\java.exe'
+$keytool = Join-Path $JavaHome 'bin\keytool.exe'
 $signTool = Join-Path $toolchainsRoot 'lib\hap-sign-tool.jar'
 $keystore = Join-Path $toolchainsRoot 'lib\OpenHarmony.p12'
 $profileTemplate = Join-Path $toolchainsRoot 'lib\UnsgnedReleasedProfileTemplate.json'

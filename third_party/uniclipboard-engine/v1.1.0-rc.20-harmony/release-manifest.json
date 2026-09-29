@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "release": {
+    "version": "v1.1.0-rc.20",
+    "commit": "3f3eef7450e06013c3178b716eee9d5a3c419349",
+    "rustToolchain": "1.95.0",
+    "cargoLockSha256": "0e35973a9adec9e266e3784340cc4c1a3fd83de51042094858e4240e8d09b0f0"
+  },
+  "generators": {
+    "uniffi": "0.31.1",
+    "napi": "2.16.17",
+    "napiBuild": "2.3.2",
+    "napiDerive": "2.16.13",
+    "kotlin": "2.1.20",
+    "swift": "UniFFI 0.31.1",
+    "arkts": "napi-rs 2.16.17"
+  },
+  "compatibility": {
+    "p2pProtocols": [
+      "pairing/1",
+      "presence/0",
+      "clipboard/0",
+      "active-clipboard/0",
+      "active-clipboard-pull/0",
+      "transfer-progress/0",
+      "iroh-blobs"
+    ],
+    "database": "Diesel SQLite embedded migrations",
+    "latestMigration": "2026-09-13-000003_group_update_delivery",
+    "minimumSystems": {
+      "ios": "16.4",
+      "androidApi": 24,
+      "harmonyosApi": 24
+    }
+  },
+  "artifacts": [
+    {
+      "name": "UniClipboardEngine.har",
+      "sha256": "a1ae3906ce0fcff1d223000482c77540592e95b6b915bd17617453a60bc2320b",
+      "size": 12422458
+    },
+    {
+      "name": "index.d.ts",
+      "platform": "harmonyos",
+      "architectures": [],
+      "sha256": "a7a6df546ce926de18f16feaa268412f435edde5dc37391a9c252c576e458db9",
+      "size": 12636
+    },
+    {
+      "name": "libuc_ohos_napi.so",
+      "platform": "harmonyos",
+      "architectures": [
+        "arm64-v8a"
+      ],
+      "sha256": "db4842427efb7a8f4fd14360b5766bafefc80341bfaa3a7774b841c7707d8a7e",
+      "size": 26729216
+    }
+  ],
+  "provenance": {
+    "upstreamReleaseManifest": "upstream-release-manifest.json",
+    "upstreamHarSha256": "2c71b892092689f4ac657a915edddc93f2425cfdac0a56d418f60fd96ce7513a",
+    "harmonyAdaptation": "harmony-adaptation.json",
+    "adaptationScript": "tools/apply-engine-ohos-rc20-adaptation.ps1",
+    "adaptationScriptSha256": "571aac4ed16a9f4cce4ee59ff05c9cd3a574c199839a64519dee05385e327004"
+  }
+}

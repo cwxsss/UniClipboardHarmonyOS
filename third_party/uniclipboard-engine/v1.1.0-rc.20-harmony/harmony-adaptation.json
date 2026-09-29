@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "engineVersion": "v1.1.0-rc.20",
+  "sourceCommit": "3f3eef7450e06013c3178b716eee9d5a3c419349",
+  "upstreamHarSha256": "2c71b892092689f4ac657a915edddc93f2425cfdac0a56d418f60fd96ce7513a",
+  "adaptationScript": "tools/apply-engine-ohos-rc20-adaptation.ps1",
+  "adaptationScriptSha256": "571aac4ed16a9f4cce4ee59ff05c9cd3a574c199839a64519dee05385e327004",
+  "build": {
+    "rustToolchain": "1.95.0",
+    "cargoProfile": "release",
+    "target": "aarch64-unknown-linux-ohos",
+    "harmonySdk": "6.1.1",
+    "minimumHarmonyOsApi": 24
+  },
+  "embeddedLibrary": {
+    "path": "package/libs/arm64-v8a/libuc_ohos_napi.so",
+    "sha256": "db4842427efb7a8f4fd14360b5766bafefc80341bfaa3a7774b841c7707d8a7e",
+    "size": 26729216
+  },
+  "embeddedDeclaration": {
+    "path": "package/src/main/cpp/types/libuc_ohos_napi/index.d.ts",
+    "sha256": "a7a6df546ce926de18f16feaa268412f435edde5dc37391a9c252c576e458db9",
+    "size": 12636
+  },
+  "physicalDeviceAcceptance": {
+    "status": "not_run",
+    "reason": "No HarmonyOS device installation or cross-device acceptance was performed."
+  },
+  "unsupportedOhosOperations": [
+    "queryDeviceGroupChoices",
+    "chooseDeviceGroup"
+  ]
+}

@@ -10,17 +10,13 @@ import type {
   OhJoinSpaceStatus,
   OhJoinedSpace,
   OhLocalDevice,
-  OhMemberRemoval,
-  OhMemberSyncPreferences,
-  OhMembershipConvergence,
-  OhNetworkSettings,
   OhNetworkRecoveryStatus,
   OhSendReport,
   OhSessionRecovery,
   OhHostDirectories,
-  OhSharedDeviceRefresh,
   OhSpaceCreated,
   OhStartupLifecycle,
+  OhWorkspaceConvergence,
   PreparedHost
 } from 'libuc_ohos_napi.so';
 import {
@@ -30,11 +26,6 @@ import {
 import { EngineClipboardObserver, EngineClipboardSnapshot } from '../engine/EngineClipboardHost';
 import { EngineHostError } from '../engine/EngineHostError';
 import { Logger } from '../util/Logger';
-import {
-  EngineDeviceTrustRelationshipPayload,
-  EngineDeviceTrustSnapshotPayload,
-  projectActionableDeviceTrustRows
-} from './DeviceTrustProjection';
 
 const ENGINE_EVENT_TIMEOUT_MS: number = 1000;
 const ENGINE_SHUTDOWN_DEADLINE_MS: number = 3000;
@@ -109,8 +100,8 @@ export class EngineRuntimeEvent {
   errorCode: number | undefined = undefined;
   errorCategory: string | undefined = undefined;
   retryable: boolean | undefined = undefined;
-  memberRemoval: string | undefined = undefined;
-  sharedDeviceRefresh: string | undefined = undefined;
+  workspaceConvergence: string | undefined = undefined;
+  deviceTrustRevision: number | undefined = undefined;
   networkRecoveryPhase: string | undefined = undefined;
   nextRetryInMs: number | undefined = undefined;
   rePairingScope: string | undefined = undefined;
@@ -128,14 +119,19 @@ export class EngineRuntimeError extends Error {
   category: string;
   operation: string;
   detail: string;
+  errorCode: number | undefined;
+  retryable: boolean | undefined;
 
-  constructor(category: string, operation: string, detail: string = '') {
+  constructor(category: string, operation: string, detail: string = '', errorCode: number | undefined = undefined,
+    retryable: boolean | undefined = undefined) {
     super('ENGINE_RUNTIME_' + category.toUpperCase() + ':' + operation +
       (detail.length > 0 ? ':' + detail : ''));
     this.name = 'EngineRuntimeError';
     this.category = category;
     this.operation = operation;
     this.detail = detail;
+    this.errorCode = errorCode;
+    this.retryable = retryable;
   }
 }
 
@@ -383,22 +379,40 @@ export class EngineRuntimeDevice {
   }
 }
 
-interface EngineDeviceGroupChoicesPayload {
-  device_trust?: EngineDeviceTrustSnapshotPayload;
-  revision?: number;
-  devices?: EngineDeviceTrustRelationshipPayload[];
-  local_device_id?: string;
+interface EngineDeviceSummaryPayload {
+  deviceId: string;
+  displayName: string;
+  isLocal: boolean;
+  online: boolean;
 }
 
 export class EngineWorkspaceConvergence {
   phase: string;
+  revision: number;
+  historyEventCount: number;
   effectiveMemberCount: number;
+  pendingRemovalDecisionDeviceIds: string[];
+  pendingRemovalDecisionEventId: string | undefined;
+  divergedPeerDeviceIds: string[];
+  upgradeRequiredPeerDeviceIds: string[];
+  convergenceDigest: string | undefined;
+  removed: boolean;
   updatedAtMs: number;
+  failureCategory: string | undefined;
 
-  constructor(phase: string, effectiveMemberCount: number, updatedAtMs: number) {
-    this.phase = phase;
-    this.effectiveMemberCount = effectiveMemberCount;
-    this.updatedAtMs = updatedAtMs;
+  constructor(result: OhWorkspaceConvergence) {
+    this.phase = result.phase;
+    this.revision = result.revision;
+    this.historyEventCount = result.historyEventCount;
+    this.effectiveMemberCount = result.effectiveMemberCount;
+    this.pendingRemovalDecisionDeviceIds = result.pendingRemovalDecisionDeviceIds;
+    this.pendingRemovalDecisionEventId = result.pendingRemovalDecisionEventId;
+    this.divergedPeerDeviceIds = result.divergedPeerDeviceIds;
+    this.upgradeRequiredPeerDeviceIds = result.upgradeRequiredPeerDeviceIds;
+    this.convergenceDigest = result.convergenceDigest;
+    this.removed = result.removed;
+    this.updatedAtMs = result.updatedAtMs;
+    this.failureCategory = result.failureCategory;
   }
 }
 
@@ -453,6 +467,22 @@ interface LegacyMemberSyncPreferencesPayload {
   receiveEnabled: boolean;
   sendContentTypes: LegacyContentTypesPayload;
   receiveContentTypes: LegacyContentTypesPayload;
+}
+
+interface EngineMemberSyncContentTypesPatch {
+  text: boolean;
+  image: boolean;
+  file: boolean;
+  link: boolean;
+  code_snippet?: boolean;
+  rich_text: boolean;
+}
+
+interface EngineMemberSyncPreferencesPatch {
+  send_enabled?: boolean;
+  receive_enabled?: boolean;
+  send_content_types?: EngineMemberSyncContentTypesPatch;
+  receive_content_types?: EngineMemberSyncContentTypesPatch;
 }
 
 export function normalizeMemberSyncPreferences(
@@ -548,12 +578,12 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
       (): Promise<void> => rawHandle.suspend(),
       (): Promise<void> => rawHandle.resume(),
       (): Promise<void> => rawHandle.recoverNetwork(),
-      (): Promise<EngineNetworkSettings> => rawHandle.queryNetworkSettings().then((result: OhNetworkSettings) =>
-        new EngineNetworkSettings(result.allowRelayFallback, result.customRelayUrls)),
+      (): Promise<EngineNetworkSettings> => rawHandle.queryNetworkSettings().then((serialized: string) =>
+        JSON.parse(serialized) as EngineNetworkSettings),
       (): Promise<EnginePairingDiagnostics> => unsupportedEngineOperation('query_pairing_diagnostics'),
       (allowRelayFallback: boolean, customRelayUrls: string[]): Promise<EngineNetworkSettings> =>
-        rawHandle.updateNetworkSettings(allowRelayFallback, customRelayUrls).then((result: OhNetworkSettings) =>
-          new EngineNetworkSettings(result.allowRelayFallback, result.customRelayUrls)),
+        rawHandle.updateNetworkSettings(allowRelayFallback, customRelayUrls).then((serialized: string) =>
+          JSON.parse(serialized) as EngineNetworkSettings),
       (url: string): Promise<number> => rawHandle.probeRelayUrl(url),
       async (timeoutMs: number): Promise<EngineRuntimeEvent | null> => {
         let rawEvent: OhEngineEvent | null = await rawHandle.nextEvent(timeoutMs);
@@ -569,9 +599,9 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
         event.errorCode = rawEvent.errorCode;
         event.errorCategory = rawEvent.errorCategory;
         event.retryable = rawEvent.retryable;
-        event.memberRemoval = rawEvent.memberRemoval === undefined ? undefined : JSON.stringify(rawEvent.memberRemoval);
-        event.sharedDeviceRefresh = rawEvent.sharedDeviceRefresh === undefined ?
-          undefined : JSON.stringify(rawEvent.sharedDeviceRefresh);
+        event.workspaceConvergence = rawEvent.workspaceConvergence === undefined ?
+          undefined : JSON.stringify(rawEvent.workspaceConvergence);
+        event.deviceTrustRevision = rawEvent.deviceTrustRevision;
         event.networkRecoveryPhase = rawEvent.networkRecoveryPhase;
         event.nextRetryInMs = rawEvent.nextRetryInMs;
         event.rePairingScope = rawEvent.rePairingScope;
@@ -598,15 +628,23 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
           normalizedDeviceName, passphrase,
           preserveUnreadableHistory);
         if (status.status !== 'active' || status.joinedSpace === undefined) {
-          // rc.17 起 Engine 会把「已终结」的加入尝试单独上报（cancelled/expired/
-          // superseded），原因放在 terminationReason 而非 rejectionReason。
+          // rc.20 reports terminal join attempts and recoverable attention states separately.
           let reason: string = status.status;
           if (status.rejectionReason !== undefined) {
             reason = status.rejectionReason;
           } else if (status.terminationReason !== undefined) {
             reason = status.terminationReason;
+          } else if (status.attentionReason !== undefined) {
+            reason = status.attentionReason;
           }
-          throw new Error('join_space_' + reason);
+          let detail: string = 'join_space_' + reason;
+          if (status.attentionRecovery !== undefined) {
+            detail += '_recovery_' + status.attentionRecovery;
+          }
+          if (status.nextRetryAtMs !== undefined) {
+            detail += '_retry_at_' + status.nextRetryAtMs.toString();
+          }
+          throw new Error(detail);
         }
         let result: OhJoinedSpace = status.joinedSpace;
         return new EngineSpaceJoined(result.sponsorDeviceId, result.sponsorIdentityFingerprint,
@@ -635,43 +673,41 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
         return new EngineActiveClipboard(result.entryId, result.activatedBy);
       },
       (deviceId: string): Promise<EngineMemberSyncPreferences> => rawHandle.queryMemberSyncPreferences(deviceId).then(
-        (result: OhMemberSyncPreferences) => new EngineMemberSyncPreferences(result.sendEnabled,
-          result.sendContentTypes.text, result.sendContentTypes.image, result.sendContentTypes.file,
-          result.sendContentTypes.link, result.sendContentTypes.codeSnippet, result.sendContentTypes.richText,
-          result.receiveEnabled, result.receiveContentTypes.text, result.receiveContentTypes.image,
-          result.receiveContentTypes.file, result.receiveContentTypes.link,
-          result.receiveContentTypes.codeSnippet, result.receiveContentTypes.richText)),
+        (serialized: string) => normalizeMemberSyncPreferences(JSON.parse(serialized) as LegacyMemberSyncPreferencesPayload)),
       (deviceId: string, sendEnabled: boolean, text: boolean, imageEnabled: boolean, file: boolean,
-        link: boolean, richText: boolean): Promise<EngineMemberSyncPreferences> => rawHandle.updateMemberSyncPreferences(
-        deviceId, {
-          sendEnabled: sendEnabled,
-          sendContentTypes: { text: text, image: imageEnabled, file: file, link: link, richText: richText }
-        }).then((result: OhMemberSyncPreferences) => new EngineMemberSyncPreferences(result.sendEnabled,
-          result.sendContentTypes.text, result.sendContentTypes.image, result.sendContentTypes.file,
-          result.sendContentTypes.link, result.sendContentTypes.codeSnippet, result.sendContentTypes.richText,
-          result.receiveEnabled, result.receiveContentTypes.text, result.receiveContentTypes.image,
-          result.receiveContentTypes.file, result.receiveContentTypes.link,
-          result.receiveContentTypes.codeSnippet, result.receiveContentTypes.richText)),
-      (deviceId: string): Promise<EngineMemberSyncPreferences> => rawHandle.updateMemberSyncPreferences(deviceId, {
-        sendEnabled: true,
-        receiveEnabled: true,
-        sendContentTypes: { text: true, image: true, file: true, link: true, richText: true },
-        receiveContentTypes: { text: true, image: true, file: true, link: true, richText: true }
-      }).then((result: OhMemberSyncPreferences) => new EngineMemberSyncPreferences(result.sendEnabled,
-        result.sendContentTypes.text, result.sendContentTypes.image, result.sendContentTypes.file,
-        result.sendContentTypes.link, result.sendContentTypes.codeSnippet, result.sendContentTypes.richText,
-        result.receiveEnabled, result.receiveContentTypes.text, result.receiveContentTypes.image,
-        result.receiveContentTypes.file, result.receiveContentTypes.link,
-        result.receiveContentTypes.codeSnippet, result.receiveContentTypes.richText)),
-      (entryId: string, mode: string): Promise<string> => rawHandle.restoreClipboard(entryId, mode),
+        link: boolean, richText: boolean): Promise<EngineMemberSyncPreferences> => {
+        let patch: EngineMemberSyncPreferencesPatch = {
+          send_enabled: sendEnabled,
+          send_content_types: { text: text, image: imageEnabled, file: file, link: link, rich_text: richText }
+        };
+        return rawHandle.updateMemberSyncPreferences(deviceId, JSON.stringify(patch)).then(
+          (serialized: string) => normalizeMemberSyncPreferences(JSON.parse(serialized) as LegacyMemberSyncPreferencesPayload));
+      },
+      (deviceId: string): Promise<EngineMemberSyncPreferences> => {
+        let contentTypes: EngineMemberSyncContentTypesPatch = {
+          text: true,
+          image: true,
+          file: true,
+          link: true,
+          code_snippet: true,
+          rich_text: true
+        };
+        let patch: EngineMemberSyncPreferencesPatch = {
+          send_enabled: true,
+          receive_enabled: true,
+          send_content_types: contentTypes,
+          receive_content_types: contentTypes
+        };
+        return rawHandle.updateMemberSyncPreferences(deviceId, JSON.stringify(patch)).then(
+          (serialized: string) => normalizeMemberSyncPreferences(JSON.parse(serialized) as LegacyMemberSyncPreferencesPayload));
+      },      (entryId: string, mode: string): Promise<string> => rawHandle.restoreClipboard(entryId, mode),
       (entryId: string, destinationHandle: string): Promise<void> => rawHandle.exportEntry(entryId,
         destinationHandle),
       async (deviceId: string): Promise<EngineWorkspaceConvergence> => {
-        let result: OhMemberRemoval = await rawHandle.removeMember(deviceId);
-        return new EngineWorkspaceConvergence(result.phase, result.effectiveMemberCount,
-          result.updatedAtMs);
+        let result: OhWorkspaceConvergence = await rawHandle.removeMember(deviceId);
+        return new EngineWorkspaceConvergence(result);
       },
-      (): Promise<string> => rawHandle.queryDeviceGroupChoices(),
+      (): Promise<string> => rawHandle.listDevices(),
       (): Promise<string> => unsupportedEngineOperation('decide_device_trust_change'),
       async (): Promise<EngineNetworkRecoveryStatus> => {
         let result: OhNetworkRecoveryStatus = await rawHandle.queryNetworkRecoveryStatus();
@@ -682,12 +718,7 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
         return new EngineLocalDevice(result.deviceId, result.displayName);
       },
       (): Promise<string> => rawHandle.queryDeviceGroupChoices(),
-      async (): Promise<EngineMembershipConvergence> => {
-        let result: OhMembershipConvergence = await rawHandle.queryMembershipConvergence();
-        return new EngineMembershipConvergence(result.state, result.pendingCount,
-          result.waitingForPeerCount, result.waitingForUpdateCount, result.versionIncompatibleCount,
-          result.blockedCount, result.rejectedCount);
-      },
+      null,
       async (joinId: string): Promise<EngineJoinSpaceStatus> => {
         let result: OhJoinSpaceStatus = await rawHandle.cancelJoinSpace(joinId);
         // 取消本身就会产生 cancelled 终止态，原因在 rc.17 里报在 terminationReason 上。
@@ -696,16 +727,9 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
         return new EngineJoinSpaceStatus(result.status, result.joinId, result.peerUpgradeRequired,
           reason);
       },
-      async (): Promise<string> => (await rawHandle.refreshSharedDevices()).requestId,
-      async (requestId: string): Promise<string | null> => {
-        let result: OhSharedDeviceRefresh | null = await rawHandle.querySharedDeviceRefresh(requestId);
-        return result === null ? null : JSON.stringify(result);
-      },
-      async (): Promise<EngineMemberRemoval> => {
-        let result: OhMemberRemoval = await rawHandle.queryMemberRemoval();
-        return new EngineMemberRemoval(result.phase, result.intentCount, result.effectiveMemberCount,
-          result.convergenceDigest, result.updatedAtMs);
-      });
+      null,
+      null,
+      null);
   }
 }
 
@@ -1364,35 +1388,20 @@ export class EngineRuntimeService implements EngineClipboardObserver {
   }
 
   async queryDevices(): Promise<EngineRuntimeDevice[]> {
-    let serialized: string = await this.executeReadOnly('query_device_trust',
+    let serialized: string = await this.executeReadOnly('list_devices',
       (handle: EngineRuntimeHandle): Promise<string> => handle.queryDeviceTrust());
     if (serialized.trim().length === 0) {
       return [];
     }
-    let decoded: EngineDeviceGroupChoicesPayload = JSON.parse(serialized) as EngineDeviceGroupChoicesPayload;
-    let snapshot: EngineDeviceTrustSnapshotPayload = decoded.device_trust === undefined ?
-      decoded as EngineDeviceTrustSnapshotPayload : decoded.device_trust;
-    let sources: EngineDeviceTrustRelationshipPayload[] = snapshot.devices === undefined ? [] : snapshot.devices;
-    let localDeviceId: string = snapshot.local_device_id === undefined ? '' : snapshot.local_device_id;
-    let actionableSources: EngineDeviceTrustRelationshipPayload[] =
-      projectActionableDeviceTrustRows(sources, localDeviceId);
+    let sources: EngineDeviceSummaryPayload[] = JSON.parse(serialized) as EngineDeviceSummaryPayload[];
     let devices: EngineRuntimeDevice[] = [];
-    let hasLocalDevice: boolean = false;
-    for (let index: number = 0; index < actionableSources.length; index++) {
-      let source: EngineDeviceTrustRelationshipPayload = actionableSources[index];
-      let isLocal: boolean = source.is_local || source.device_id === localDeviceId;
-      let name: string = source.display_name.length > 0 ? source.display_name : source.device_id;
-      let online: boolean = source.reachability === 'online';
-      devices.push(new EngineRuntimeDevice(source.device_id, name, isLocal, online,
-        source.sync_relationship.length > 0 ? source.sync_relationship : source.membership,
-        source.reachability));
-      if (isLocal) {
-        hasLocalDevice = true;
-      }
-    }
-    if (!hasLocalDevice && localDeviceId.length > 0) {
-      devices.push(new EngineRuntimeDevice(localDeviceId, localDeviceId,
-        true, true, 'active', 'local'));
+    for (let index: number = 0; index < sources.length; index++) {
+      let source: EngineDeviceSummaryPayload = sources[index];
+      let name: string = source.displayName.length > 0 ? source.displayName : source.deviceId;
+      let state: string = source.isLocal ? 'local' : (source.online ? 'online' : 'offline');
+      let channel: string = source.isLocal ? 'local' : (source.online ? 'unknown' : 'offline');
+      devices.push(new EngineRuntimeDevice(source.deviceId, name, source.isLocal,
+        source.online, state, channel));
     }
     return devices;
   }
@@ -1441,7 +1450,13 @@ export class EngineRuntimeService implements EngineClipboardObserver {
   }
 
   async queryDeviceGroupChoices(): Promise<string> {
-    return await this.queryDeviceTrust();
+    return await this.executeReadOnly('query_device_group_choices',
+      (handle: EngineRuntimeHandle): Promise<string> => {
+        if (handle.queryDeviceGroupChoices === undefined) {
+          return unsupportedEngineOperation('query_device_group_choices');
+        }
+        return handle.queryDeviceGroupChoices();
+      });
   }
 
   async decideDeviceTrustChange(changeId: string, choice: string,
@@ -1949,6 +1964,17 @@ export class EngineRuntimeService implements EngineClipboardObserver {
     }
     if (error instanceof Error) {
       let nativeError: Error = error as Error;
+      let marker: number = nativeError.message.indexOf('UC_ENGINE:');
+      if (marker >= 0) {
+        let parts: string[] = nativeError.message.substring(marker).split(':');
+        if (parts.length >= 4) {
+          let errorCode: number = Number.parseInt(parts[1]);
+          if (!Number.isNaN(errorCode)) {
+            return new EngineRuntimeError(parts[2], operation, nativeError.message, errorCode,
+              parts[3] === 'true');
+          }
+        }
+      }
       return new EngineRuntimeError('engine_unavailable', operation, nativeError.message);
     }
     return new EngineRuntimeError('engine_unavailable', operation);

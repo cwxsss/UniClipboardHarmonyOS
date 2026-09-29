@@ -1,11 +1,52 @@
 param(
   # 必须与 oh-package.json5 / common-oh-package.json5 里引用的 HAR 版本一致，
   # 否则这个校验会在验一个已经不再发布的旧产物。
-  [string]$ReleaseRoot = (Join-Path $PSScriptRoot '..\third_party\uniclipboard-engine\v1.1.0-rc.17')
+  [string]$ReleaseRoot = (Join-Path $PSScriptRoot '..\third_party\uniclipboard-engine\v1.1.0-rc.20-harmony')
 )
 
 $ErrorActionPreference = 'Stop'
 
+function Read-TarBlock {
+  param([System.IO.Stream]$Stream)
+
+  $bytes = [byte[]]::new(512)
+  $offset = 0
+  while ($offset -lt $bytes.Length) {
+    $read = $Stream.Read($bytes, $offset, $bytes.Length - $offset)
+    if ($read -eq 0) {
+      if ($offset -eq 0) { return $null }
+      throw 'Unexpected end of Engine HAR tar header'
+    }
+    $offset += $read
+  }
+  return ,$bytes
+}
+
+function Consume-TarData {
+  param(
+    [System.IO.Stream]$Stream,
+    [long]$Count,
+    [System.IO.Stream]$Capture
+  )
+
+  $buffer = [byte[]]::new(65536)
+  $remaining = $Count
+  while ($remaining -gt 0) {
+    $requested = [int][Math]::Min([long]$buffer.Length, $remaining)
+    $read = $Stream.Read($buffer, 0, $requested)
+    if ($read -eq 0) { throw 'Unexpected end of Engine HAR tar entry' }
+    if ($null -ne $Capture) { $Capture.Write($buffer, 0, $read) }
+    $remaining -= $read
+  }
+  if ($null -eq $Capture) { return $null }
+  $Capture.Position = 0
+  $sha256 = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    return ([System.BitConverter]::ToString($sha256.ComputeHash($Capture))).Replace('-', '').ToLowerInvariant()
+  } finally {
+    $sha256.Dispose()
+  }
+}
 function Get-Sha256Hex {
   param([string]$Path)
 
@@ -66,55 +107,103 @@ if ($version -ne $release.version -or $sourceCommit -ne $release.sourceCommit) {
 }
 
 $harPath = Join-Path $releaseRootPath 'UniClipboardEngine.har'
-$temporaryBase = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
-$extractionRoot = Join-Path $temporaryBase ("uniclipboard-engine-" + [System.Guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Path $extractionRoot | Out-Null
+$embeddedMetadata = @($release.embeddedLibraries) + @($release.embeddedDeclaration)
+$embeddedByPath = @{}
+foreach ($entryMetadata in $embeddedMetadata) {
+  $embeddedByPath[$entryMetadata.path.Replace('\', '/')] = $entryMetadata
+}
+$embeddedResults = @{}
+$packageJson = $null
+$fileStream = [System.IO.File]::OpenRead($harPath)
+$gzipStream = [System.IO.Compression.GZipStream]::new(
+  $fileStream, [System.IO.Compression.CompressionMode]::Decompress, $true)
+$ascii = [System.Text.Encoding]::ASCII
 try {
-  & tar -xf $harPath -C $extractionRoot
-  if ($LASTEXITCODE -ne 0) {
-    throw "Unable to extract Engine HAR; tar exited with code $LASTEXITCODE"
-  }
-
-  $packagePath = Join-Path $extractionRoot 'package\oh-package.json5'
-  if (-not (Test-Path -LiteralPath $packagePath -PathType Leaf)) {
-    throw 'Engine HAR does not contain package/oh-package.json5'
-  }
-  $package = Get-Content -Raw -LiteralPath $packagePath | ConvertFrom-Json
-  if ($package.name -ne '@uniclipboard/engine' -or $package.version -ne $release.packageVersion) {
-    throw 'Engine HAR package name or version does not match the pinned metadata'
-  }
-  if ($package.compatibleSdkVersion -ne $release.minimumHarmonyOsApi) {
-    throw 'Engine HAR compatibleSdkVersion does not match the pinned metadata'
-  }
-
-  $embeddedLibraries = if ($null -ne $release.embeddedLibraries) {
-    @($release.embeddedLibraries)
-  } else {
-    @($release.embeddedLibrary)
-  }
-  $entriesToCheck = @($embeddedLibraries) + @($release.embeddedDeclaration)
-  foreach ($entryMetadata in $entriesToCheck) {
-    $relativeEntryPath = $entryMetadata.path.Replace('/', [System.IO.Path]::DirectorySeparatorChar)
-    $entryPath = Join-Path $extractionRoot $relativeEntryPath
-    if (-not (Test-Path -LiteralPath $entryPath -PathType Leaf)) {
-      throw "Engine HAR entry not found: $($entryMetadata.path)"
+  while ($null -ne ($header = Read-TarBlock -Stream $gzipStream)) {
+    $isEndBlock = $true
+    foreach ($value in $header) {
+      if ($value -ne 0) { $isEndBlock = $false; break }
     }
-    $entryInfo = Get-Item -LiteralPath $entryPath
-    if ($entryInfo.Length -ne [long]$entryMetadata.size) {
-      throw "Engine HAR entry size mismatch for $($entryMetadata.path)"
+    if ($isEndBlock) { break }
+
+    $name = $ascii.GetString($header, 0, 100).TrimEnd([char]0)
+    $prefix = ''
+    $magic = $ascii.GetString($header, 257, 6).TrimEnd([char]0)
+    if ($magic.StartsWith('ustar')) {
+      $entryName = if ([string]::IsNullOrWhiteSpace($prefix)) { $name } else { "$prefix/$name" }
+    } else {
+      $entryName = $name
     }
-    $entryHash = Get-Sha256Hex -Path $entryPath
-    if ($entryHash -ne $entryMetadata.sha256) {
-      throw "Engine HAR entry SHA-256 mismatch for $($entryMetadata.path)"
+    $sizeText = $ascii.GetString($header, 124, 12).Trim([char[]]@([char]0, [char]32))
+    if ([string]::IsNullOrWhiteSpace($sizeText)) {
+      $entrySize = 0L
+    } elseif ($sizeText -match '^[0-7]+$') {
+      $entrySize = [Convert]::ToInt64($sizeText, 8)
+    } else {
+      throw "Invalid tar entry size for $entryName"
+    }
+
+    $capture = $null
+    if ($entryName -eq 'package/oh-package.json5') {
+      $capture = [System.IO.MemoryStream]::new()
+    } elseif ($embeddedByPath.ContainsKey($entryName)) {
+      $capture = [System.IO.MemoryStream]::new()
+    }
+    if ($null -ne $capture -or $embeddedByPath.ContainsKey($entryName)) {
+      $actualHash = Consume-TarData -Stream $gzipStream -Count $entrySize -Capture $capture
+      if ($embeddedByPath.ContainsKey($entryName)) {
+        $embeddedResults[$entryName] = [pscustomobject]@{ Size = $entrySize; Sha256 = $actualHash }
+      }
+      if ($entryName -eq 'package/oh-package.json5') {
+        $packageJson = [System.Text.Encoding]::UTF8.GetString($capture.ToArray())
+      }
+      if ($null -ne $capture) { $capture.Dispose() }
+    } else {
+      $null = Consume-TarData -Stream $gzipStream -Count $entrySize -Capture $null
+    }
+    $padding = (512 - ($entrySize % 512)) % 512
+    if ($padding -gt 0) {
+      $null = Consume-TarData -Stream $gzipStream -Count $padding -Capture $null
     }
   }
 } finally {
-  $resolvedExtractionRoot = [System.IO.Path]::GetFullPath($extractionRoot)
-  if ($resolvedExtractionRoot.StartsWith($temporaryBase, [System.StringComparison]::OrdinalIgnoreCase)) {
-    Remove-Item -LiteralPath $resolvedExtractionRoot -Recurse -Force -ErrorAction SilentlyContinue
+  $gzipStream.Dispose()
+  $fileStream.Dispose()
+}
+if ([string]::IsNullOrWhiteSpace($packageJson)) {
+  throw 'Engine HAR does not contain package/oh-package.json5'
+}
+$package = $packageJson | ConvertFrom-Json
+if ($package.name -ne '@uniclipboard/engine' -or $package.version -ne $release.packageVersion) {
+  throw 'Engine HAR package name or version does not match the pinned metadata'
+}
+if ($package.compatibleSdkVersion -ne $release.minimumHarmonyOsApi) {
+  throw 'Engine HAR compatibleSdkVersion does not match the pinned metadata'
+}
+foreach ($entryMetadata in $embeddedMetadata) {
+  $entryName = $entryMetadata.path.Replace('\', '/')
+  if (-not $embeddedResults.ContainsKey($entryName)) {
+    throw "Engine HAR entry not found: $($entryMetadata.path)"
+  }
+  $entryResult = $embeddedResults[$entryName]
+  if ($entryResult.Size -ne [long]$entryMetadata.size) {
+    throw "Engine HAR entry size mismatch for $($entryMetadata.path)"
+  }
+  if ($entryResult.Sha256 -ne $entryMetadata.sha256) {
+    throw "Engine HAR entry SHA-256 mismatch for $($entryMetadata.path): expected $($entryMetadata.sha256), got $($entryResult.Sha256)"
   }
 }
 
+if ($null -ne $release.harmonyAdaptation -and -not [string]::IsNullOrWhiteSpace($release.harmonyAdaptation.script)) {
+  $adaptationScriptPath = Join-Path (Split-Path -Parent $PSScriptRoot) $release.harmonyAdaptation.script
+  if (-not (Test-Path -LiteralPath $adaptationScriptPath -PathType Leaf)) {
+    throw "Harmony adaptation script not found: $adaptationScriptPath"
+  }
+  $adaptationScriptHash = Get-Sha256Hex -Path $adaptationScriptPath
+  if ($adaptationScriptHash -ne $release.harmonyAdaptation.scriptSha256) {
+    throw 'Harmony adaptation script SHA-256 does not match the pinned metadata'
+  }
+}
 Write-Output "Verified UniClipboard Engine $($release.version) ($($release.sourceCommit))."
 if ([string]::IsNullOrWhiteSpace($release.releaseUrl)) {
   Write-Output 'Release URL is intentionally unset until the pinned Engine commit is published.'
