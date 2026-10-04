@@ -33,6 +33,129 @@ const ENGINE_PROFILE_SUFFIX: string = '.engine-v1-1';
 const ENGINE_DIAGNOSTIC_DETAIL_MAX_LENGTH: number = 256;
 const logger: Logger = new Logger('EngineRuntime');
 
+interface OhNetworkSettings {
+  allowRelayFallback: boolean;
+  customRelayUrls: string[];
+}
+
+interface OhContentTypes {
+  text: boolean;
+  image: boolean;
+  file: boolean;
+  link: boolean;
+  codeSnippet: boolean;
+  richText: boolean;
+}
+
+interface OhLegacyContentTypes {
+  text: boolean;
+  image: boolean;
+  file: boolean;
+  link: boolean;
+  code_snippet: boolean;
+  rich_text: boolean;
+}
+
+interface OhLegacyMemberSyncPreferencesPatch {
+  send_enabled?: boolean;
+  receive_enabled?: boolean;
+  send_content_types?: OhLegacyContentTypes;
+  receive_content_types?: OhLegacyContentTypes;
+}
+interface OhContentTypesPatch {
+  text?: boolean;
+  image?: boolean;
+  file?: boolean;
+  link?: boolean;
+  codeSnippet?: boolean;
+  richText?: boolean;
+}
+
+interface OhMemberSyncPreferences {
+  sendEnabled: boolean;
+  receiveEnabled: boolean;
+  sendContentTypes: OhContentTypes;
+  receiveContentTypes: OhContentTypes;
+}
+
+interface OhMemberSyncPreferencesPatch {
+  sendEnabled?: boolean;
+  receiveEnabled?: boolean;
+  sendContentTypes?: OhContentTypesPatch;
+  receiveContentTypes?: OhContentTypesPatch;
+}
+
+interface OhIncomingPending {
+  entryId: string;
+  attemptId?: string;
+  fromDevice: string;
+  totalBytes?: number;
+  filenames: string[];
+}
+
+interface OhRelayOverviewEntry {
+  source: string;
+  regionId?: string;
+  url: string;
+  credentialConfigured: boolean;
+  inEffect: boolean;
+}
+
+interface OhRelayOverview {
+  savedMode: string;
+  appliedMode?: string;
+  changePending: boolean;
+  entries: OhRelayOverviewEntry[];
+}
+
+interface OhNativeEngineEvent {
+  kind: string;
+  state?: string;
+  refreshReason?: string;
+  operationId?: string;
+  terminal?: string;
+  lifecycleAction?: string;
+  errorCode?: number;
+  errorCategory?: string;
+  retryable?: boolean;
+  workspaceConvergence?: OhWorkspaceConvergence;
+  deviceTrustRevision?: number;
+  networkRecoveryPhase?: 'idle' | 'recovering' | 'retry_scheduled' | 'failed';
+  nextRetryInMs?: number;
+  rePairingScope?: 'all_devices';
+  memberRemoval?: Object;
+  sharedDeviceRefresh?: Object;
+  incomingPending?: OhIncomingPending;
+}
+
+interface HarmonyCompatibleNativeEngine {
+  queryNetworkSettings(): Promise<string | OhNetworkSettings>;
+  updateNetworkSettings(allowRelayFallback: boolean, customRelayUrls: string[]):
+    Promise<string | OhNetworkSettings>;
+  queryMemberSyncPreferences(deviceId: string): Promise<string | OhMemberSyncPreferences>;
+  updateMemberSyncPreferences(deviceId: string, patch: string | OhMemberSyncPreferencesPatch):
+    Promise<string | OhMemberSyncPreferences>;
+  queryRelayOverview?(): Promise<string | OhRelayOverview>;
+}
+
+class OhEnableAllMemberSyncPreferencesPatch implements OhMemberSyncPreferencesPatch {
+  sendEnabled: boolean = true;
+  receiveEnabled: boolean = true;
+  sendContentTypes: OhContentTypes;
+  receiveContentTypes: OhContentTypes;
+
+  constructor(contentTypes: OhContentTypes) {
+    this.sendContentTypes = contentTypes;
+    this.receiveContentTypes = contentTypes;
+  }
+}
+function parseNativePayload<T>(payload: string | T): T {
+  if (typeof payload === 'string') {
+    return JSON.parse(payload) as T;
+  }
+  return payload;
+}
+
 function diagnosticDetailSummary(detail: string): string {
   let summary: string = detail.replace(/\s+/g, ' ').trim();
   summary = summary.replace(/(passphrase|password|secret|token|authorization)(\s*[:=]\s*)[^\s,;]+/gi,
@@ -102,12 +225,32 @@ export class EngineRuntimeEvent {
   retryable: boolean | undefined = undefined;
   workspaceConvergence: string | undefined = undefined;
   deviceTrustRevision: number | undefined = undefined;
+  memberRemoval: string | undefined = undefined;
+  sharedDeviceRefresh: string | undefined = undefined;
   networkRecoveryPhase: string | undefined = undefined;
   nextRetryInMs: number | undefined = undefined;
   rePairingScope: string | undefined = undefined;
+  incomingPending: EngineIncomingPending | undefined = undefined;
 
   constructor(kind: string) {
     this.kind = kind;
+  }
+}
+
+export class EngineIncomingPending {
+  entryId: string;
+  attemptId: string | undefined;
+  fromDevice: string;
+  totalBytes: number | undefined;
+  filenames: string[];
+
+  constructor(entryId: string, attemptId: string | undefined, fromDevice: string,
+    totalBytes: number | undefined, filenames: string[]) {
+    this.entryId = entryId;
+    this.attemptId = attemptId;
+    this.fromDevice = fromDevice;
+    this.totalBytes = totalBytes;
+    this.filenames = filenames.slice();
   }
 }
 
@@ -251,6 +394,38 @@ export class EngineNetworkSettings {
   constructor(allowRelayFallback: boolean, customRelayUrls: string[]) {
     this.allowRelayFallback = allowRelayFallback;
     this.customRelayUrls = customRelayUrls;
+  }
+}
+
+export class EngineRelayOverviewEntry {
+  source: string;
+  regionId: string | undefined;
+  url: string;
+  credentialConfigured: boolean;
+  inEffect: boolean;
+
+  constructor(source: string, regionId: string | undefined, url: string,
+    credentialConfigured: boolean, inEffect: boolean) {
+    this.source = source;
+    this.regionId = regionId;
+    this.url = url;
+    this.credentialConfigured = credentialConfigured;
+    this.inEffect = inEffect;
+  }
+}
+
+export class EngineRelayOverview {
+  savedMode: string;
+  appliedMode: string | undefined;
+  changePending: boolean;
+  entries: EngineRelayOverviewEntry[];
+
+  constructor(savedMode: string, appliedMode: string | undefined,
+    changePending: boolean, entries: EngineRelayOverviewEntry[]) {
+    this.savedMode = savedMode;
+    this.appliedMode = appliedMode;
+    this.changePending = changePending;
+    this.entries = entries.slice();
   }
 }
 
@@ -517,6 +692,10 @@ export interface EngineRuntimeHandle {
   refreshSharedDevices?(): Promise<string>;
   querySharedDeviceRefresh?(requestId: string): Promise<string | null>;
   queryMemberRemoval?(): Promise<EngineMemberRemoval>;
+  queryRelayOverview?(): Promise<EngineRelayOverview>;
+  changeEncryptionPassphrase?(passphrase: string, confirmation: string): Promise<void>;
+  refreshPeerConnections?(): Promise<void>;
+  notifyConnectivityOpportunity?(reason: 'foreground' | 'system_wake' | 'network_changed'): Promise<void>;
   queryNetworkSettings(): Promise<EngineNetworkSettings>;
   queryPairingDiagnostics(): Promise<EnginePairingDiagnostics>;
   updateNetworkSettings(allowRelayFallback: boolean, customRelayUrls: string[]): Promise<EngineNetworkSettings>;
@@ -573,20 +752,28 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
   async startEngine(config: EngineRuntimeStartConfig, preparedHost: PreparedHost): Promise<EngineRuntimeHandle> {
     let lifecycle: OhStartupLifecycle = engine.createStartupLifecycle();
     let rawHandle: OhEngine = await engine.startEngine(config, preparedHost, lifecycle);
+    let compatibleHandle: HarmonyCompatibleNativeEngine = rawHandle as Object as HarmonyCompatibleNativeEngine;
     return new CallbackEngineRuntimeHandle(
       (): Promise<string> => rawHandle.lifecycleState(),
       (): Promise<void> => rawHandle.suspend(),
       (): Promise<void> => rawHandle.resume(),
       (): Promise<void> => rawHandle.recoverNetwork(),
-      (): Promise<EngineNetworkSettings> => rawHandle.queryNetworkSettings().then((serialized: string) =>
-        JSON.parse(serialized) as EngineNetworkSettings),
+      (): Promise<EngineNetworkSettings> => compatibleHandle.queryNetworkSettings().then(
+        (payload: string | OhNetworkSettings) => {
+          let result: OhNetworkSettings = parseNativePayload<OhNetworkSettings>(payload);
+          return new EngineNetworkSettings(result.allowRelayFallback, result.customRelayUrls);
+        }),
       (): Promise<EnginePairingDiagnostics> => unsupportedEngineOperation('query_pairing_diagnostics'),
       (allowRelayFallback: boolean, customRelayUrls: string[]): Promise<EngineNetworkSettings> =>
-        rawHandle.updateNetworkSettings(allowRelayFallback, customRelayUrls).then((serialized: string) =>
-          JSON.parse(serialized) as EngineNetworkSettings),
+        compatibleHandle.updateNetworkSettings(allowRelayFallback, customRelayUrls).then(
+          (payload: string | OhNetworkSettings) => {
+            let result: OhNetworkSettings = parseNativePayload<OhNetworkSettings>(payload);
+            return new EngineNetworkSettings(result.allowRelayFallback, result.customRelayUrls);
+          }),
       (url: string): Promise<number> => rawHandle.probeRelayUrl(url),
       async (timeoutMs: number): Promise<EngineRuntimeEvent | null> => {
-        let rawEvent: OhEngineEvent | null = await rawHandle.nextEvent(timeoutMs);
+        let rawEventValue: OhEngineEvent | null = await rawHandle.nextEvent(timeoutMs);
+        let rawEvent: OhNativeEngineEvent | null = rawEventValue as OhNativeEngineEvent | null;
         if (rawEvent === null) {
           return null;
         }
@@ -601,6 +788,14 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
         event.retryable = rawEvent.retryable;
         event.workspaceConvergence = rawEvent.workspaceConvergence === undefined ?
           undefined : JSON.stringify(rawEvent.workspaceConvergence);
+        event.memberRemoval = rawEvent.memberRemoval === undefined ? undefined : JSON.stringify(rawEvent.memberRemoval);
+        event.sharedDeviceRefresh = rawEvent.sharedDeviceRefresh === undefined ?
+          undefined : JSON.stringify(rawEvent.sharedDeviceRefresh);
+        if (rawEvent.incomingPending !== undefined) {
+          event.incomingPending = new EngineIncomingPending(rawEvent.incomingPending.entryId,
+            rawEvent.incomingPending.attemptId, rawEvent.incomingPending.fromDevice,
+            rawEvent.incomingPending.totalBytes, rawEvent.incomingPending.filenames);
+        }
         event.deviceTrustRevision = rawEvent.deviceTrustRevision;
         event.networkRecoveryPhase = rawEvent.networkRecoveryPhase;
         event.nextRetryInMs = rawEvent.nextRetryInMs;
@@ -634,16 +829,8 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
             reason = status.rejectionReason;
           } else if (status.terminationReason !== undefined) {
             reason = status.terminationReason;
-          } else if (status.attentionReason !== undefined) {
-            reason = status.attentionReason;
           }
           let detail: string = 'join_space_' + reason;
-          if (status.attentionRecovery !== undefined) {
-            detail += '_recovery_' + status.attentionRecovery;
-          }
-          if (status.nextRetryAtMs !== undefined) {
-            detail += '_retry_at_' + status.nextRetryAtMs.toString();
-          }
           throw new Error(detail);
         }
         let result: OhJoinedSpace = status.joinedSpace;
@@ -672,34 +859,101 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
         }
         return new EngineActiveClipboard(result.entryId, result.activatedBy);
       },
-      (deviceId: string): Promise<EngineMemberSyncPreferences> => rawHandle.queryMemberSyncPreferences(deviceId).then(
-        (serialized: string) => normalizeMemberSyncPreferences(JSON.parse(serialized) as LegacyMemberSyncPreferencesPayload)),
+      async (deviceId: string): Promise<EngineMemberSyncPreferences> => {
+        let payload: string | OhMemberSyncPreferences = await compatibleHandle.queryMemberSyncPreferences(deviceId);
+        let result: OhMemberSyncPreferences = parseNativePayload<OhMemberSyncPreferences>(payload);
+        return new EngineMemberSyncPreferences(result.sendEnabled,
+          result.sendContentTypes.text, result.sendContentTypes.image, result.sendContentTypes.file,
+          result.sendContentTypes.link, result.sendContentTypes.codeSnippet, result.sendContentTypes.richText,
+          result.receiveEnabled, result.receiveContentTypes.text, result.receiveContentTypes.image,
+          result.receiveContentTypes.file, result.receiveContentTypes.link,
+          result.receiveContentTypes.codeSnippet, result.receiveContentTypes.richText);
+      },
       (deviceId: string, sendEnabled: boolean, text: boolean, imageEnabled: boolean, file: boolean,
         link: boolean, richText: boolean): Promise<EngineMemberSyncPreferences> => {
-        let patch: EngineMemberSyncPreferencesPatch = {
-          send_enabled: sendEnabled,
-          send_content_types: { text: text, image: imageEnabled, file: file, link: link, rich_text: richText }
+        let patch: OhMemberSyncPreferencesPatch = {
+          sendEnabled: sendEnabled,
+          sendContentTypes: {
+            text: text,
+            image: imageEnabled,
+            file: file,
+            link: link,
+            codeSnippet: true,
+            richText: richText
+          }
         };
-        return rawHandle.updateMemberSyncPreferences(deviceId, JSON.stringify(patch)).then(
-          (serialized: string) => normalizeMemberSyncPreferences(JSON.parse(serialized) as LegacyMemberSyncPreferencesPayload));
+        return compatibleHandle.queryMemberSyncPreferences(deviceId).then((currentPayload: string |
+          OhMemberSyncPreferences) => {
+          let nativePatch: string | OhMemberSyncPreferencesPatch = patch;
+          if (typeof currentPayload === 'string') {
+            let legacyPatch: OhLegacyMemberSyncPreferencesPatch = {
+              send_enabled: patch.sendEnabled,
+              send_content_types: {
+                text: text,
+                image: imageEnabled,
+                file: file,
+                link: link,
+                code_snippet: true,
+                rich_text: richText
+              }
+            };
+            nativePatch = JSON.stringify(legacyPatch);
+          }
+          return compatibleHandle.updateMemberSyncPreferences(deviceId, nativePatch);
+        }).then((payload: string | OhMemberSyncPreferences) => {
+          let result: OhMemberSyncPreferences = parseNativePayload<OhMemberSyncPreferences>(payload);
+          return new EngineMemberSyncPreferences(result.sendEnabled, result.sendContentTypes.text,
+            result.sendContentTypes.image, result.sendContentTypes.file, result.sendContentTypes.link,
+            result.sendContentTypes.codeSnippet, result.sendContentTypes.richText, result.receiveEnabled,
+            result.receiveContentTypes.text, result.receiveContentTypes.image, result.receiveContentTypes.file,
+            result.receiveContentTypes.link, result.receiveContentTypes.codeSnippet,
+            result.receiveContentTypes.richText);
+        });
       },
       (deviceId: string): Promise<EngineMemberSyncPreferences> => {
-        let contentTypes: EngineMemberSyncContentTypesPatch = {
+        let contentTypes: OhContentTypes = {
           text: true,
           image: true,
           file: true,
           link: true,
-          code_snippet: true,
-          rich_text: true
+          codeSnippet: true,
+          richText: true
         };
-        let patch: EngineMemberSyncPreferencesPatch = {
-          send_enabled: true,
-          receive_enabled: true,
-          send_content_types: contentTypes,
-          receive_content_types: contentTypes
-        };
-        return rawHandle.updateMemberSyncPreferences(deviceId, JSON.stringify(patch)).then(
-          (serialized: string) => normalizeMemberSyncPreferences(JSON.parse(serialized) as LegacyMemberSyncPreferencesPayload));
+        let patch: OhMemberSyncPreferencesPatch = new OhEnableAllMemberSyncPreferencesPatch(contentTypes);
+        return compatibleHandle.queryMemberSyncPreferences(deviceId).then((currentPayload: string |
+          OhMemberSyncPreferences) => {
+          let legacyPatch: OhLegacyMemberSyncPreferencesPatch = {
+            send_enabled: true,
+            receive_enabled: true,
+            send_content_types: {
+              text: true,
+              image: true,
+              file: true,
+              link: true,
+              code_snippet: true,
+              rich_text: true
+            },
+            receive_content_types: {
+              text: true,
+              image: true,
+              file: true,
+              link: true,
+              code_snippet: true,
+              rich_text: true
+            }
+          };
+          let nativePatch: string | OhMemberSyncPreferencesPatch = typeof currentPayload === 'string' ?
+            JSON.stringify(legacyPatch) : patch;
+          return compatibleHandle.updateMemberSyncPreferences(deviceId, nativePatch);
+        }).then((payload: string | OhMemberSyncPreferences) => {
+          let result: OhMemberSyncPreferences = parseNativePayload<OhMemberSyncPreferences>(payload);
+          return new EngineMemberSyncPreferences(result.sendEnabled, result.sendContentTypes.text,
+            result.sendContentTypes.image, result.sendContentTypes.file, result.sendContentTypes.link,
+            result.sendContentTypes.codeSnippet, result.sendContentTypes.richText, result.receiveEnabled,
+            result.receiveContentTypes.text, result.receiveContentTypes.image, result.receiveContentTypes.file,
+            result.receiveContentTypes.link, result.receiveContentTypes.codeSnippet,
+            result.receiveContentTypes.richText);
+        });
       },      (entryId: string, mode: string): Promise<string> => rawHandle.restoreClipboard(entryId, mode),
       (entryId: string, destinationHandle: string): Promise<void> => rawHandle.exportEntry(entryId,
         destinationHandle),
@@ -729,7 +983,29 @@ class OfficialEngineRuntimeBackend implements EngineRuntimeBackend {
       },
       null,
       null,
-      null);
+      null,
+      async (): Promise<EngineRelayOverview> => {
+        if (compatibleHandle.queryRelayOverview === undefined) {
+          return await unsupportedEngineOperation('query_relay_overview');
+        }
+        let payload: string | OhRelayOverview = await compatibleHandle.queryRelayOverview();
+        let overview: OhRelayOverview = parseNativePayload<OhRelayOverview>(payload);
+        let entries: EngineRelayOverviewEntry[] = [];
+        for (let index: number = 0; index < overview.entries.length; index += 1) {
+          let entry = overview.entries[index];
+          entries.push(new EngineRelayOverviewEntry(entry.source, entry.regionId, entry.url,
+            entry.credentialConfigured, entry.inEffect));
+        }
+        return new EngineRelayOverview(overview.savedMode, overview.appliedMode,
+          overview.changePending, entries);
+      },
+      (passphrase: string, confirmation: string): Promise<void> =>
+        rawHandle.changeEncryptionPassphrase(passphrase, confirmation),
+      async (): Promise<void> => {
+        await rawHandle.refreshPeerConnections();
+      },
+      (reason: 'foreground' | 'system_wake' | 'network_changed'): Promise<void> =>
+        rawHandle.notifyConnectivityOpportunity(reason));
   }
 }
 
@@ -774,6 +1050,11 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
   private refreshSharedDevicesCallback: (() => Promise<string>) | null = null;
   private querySharedDeviceRefreshCallback: ((requestId: string) => Promise<string | null>) | null = null;
   private queryMemberRemovalCallback: (() => Promise<EngineMemberRemoval>) | null = null;
+  private queryRelayOverviewCallback: (() => Promise<EngineRelayOverview>) | null = null;
+  private changeEncryptionPassphraseCallback: ((passphrase: string, confirmation: string) => Promise<void>) | null = null;
+  private refreshPeerConnectionsCallback: (() => Promise<void>) | null = null;
+  private notifyConnectivityOpportunityCallback:
+    ((reason: 'foreground' | 'system_wake' | 'network_changed') => Promise<void>) | null = null;
 
   constructor(lifecycleStateCallback: () => Promise<string>, suspendCallback: () => Promise<void>,
     resumeCallback: () => Promise<void>,
@@ -812,7 +1093,12 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
     cancelJoinSpaceCallback: ((joinId: string) => Promise<EngineJoinSpaceStatus>) | null = null,
     refreshSharedDevicesCallback: (() => Promise<string>) | null = null,
     querySharedDeviceRefreshCallback: ((requestId: string) => Promise<string | null>) | null = null,
-    queryMemberRemovalCallback: (() => Promise<EngineMemberRemoval>) | null = null) {
+    queryMemberRemovalCallback: (() => Promise<EngineMemberRemoval>) | null = null,
+    queryRelayOverviewCallback: (() => Promise<EngineRelayOverview>) | null = null,
+    changeEncryptionPassphraseCallback: ((passphrase: string, confirmation: string) => Promise<void>) | null = null,
+    refreshPeerConnectionsCallback: (() => Promise<void>) | null = null,
+    notifyConnectivityOpportunityCallback:
+      ((reason: 'foreground' | 'system_wake' | 'network_changed') => Promise<void>) | null = null) {
     this.lifecycleStateCallback = lifecycleStateCallback;
     this.suspendCallback = suspendCallback;
     this.resumeCallback = resumeCallback;
@@ -848,6 +1134,10 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
     this.refreshSharedDevicesCallback = refreshSharedDevicesCallback;
     this.querySharedDeviceRefreshCallback = querySharedDeviceRefreshCallback;
     this.queryMemberRemovalCallback = queryMemberRemovalCallback;
+    this.queryRelayOverviewCallback = queryRelayOverviewCallback;
+    this.changeEncryptionPassphraseCallback = changeEncryptionPassphraseCallback;
+    this.refreshPeerConnectionsCallback = refreshPeerConnectionsCallback;
+    this.notifyConnectivityOpportunityCallback = notifyConnectivityOpportunityCallback;
   }
 
   async lifecycleState(): Promise<string> {
@@ -864,6 +1154,34 @@ class CallbackEngineRuntimeHandle implements EngineRuntimeHandle {
 
   async recoverNetwork(): Promise<void> {
     await this.recoverNetworkCallback();
+  }
+
+  async queryRelayOverview(): Promise<EngineRelayOverview> {
+    if (this.queryRelayOverviewCallback === null) {
+      return await unsupportedEngineOperation('query_relay_overview');
+    }
+    return await this.queryRelayOverviewCallback();
+  }
+
+  async changeEncryptionPassphrase(passphrase: string, confirmation: string): Promise<void> {
+    if (this.changeEncryptionPassphraseCallback === null) {
+      return await unsupportedEngineOperation('change_encryption_passphrase');
+    }
+    await this.changeEncryptionPassphraseCallback(passphrase, confirmation);
+  }
+
+  async refreshPeerConnections(): Promise<void> {
+    if (this.refreshPeerConnectionsCallback === null) {
+      return await unsupportedEngineOperation('refresh_peer_connections');
+    }
+    await this.refreshPeerConnectionsCallback();
+  }
+
+  async notifyConnectivityOpportunity(reason: 'foreground' | 'system_wake' | 'network_changed'): Promise<void> {
+    if (this.notifyConnectivityOpportunityCallback === null) {
+      return await unsupportedEngineOperation('notify_connectivity_opportunity');
+    }
+    await this.notifyConnectivityOpportunityCallback(reason);
   }
 
   async queryNetworkSettings(): Promise<EngineNetworkSettings> {
@@ -1285,9 +1603,49 @@ export class EngineRuntimeService implements EngineClipboardObserver {
       (handle: EngineRuntimeHandle): Promise<void> => handle.recoverNetwork());
   }
 
+  async notifyConnectivityOpportunity(reason: 'foreground' | 'system_wake' | 'network_changed'): Promise<void> {
+    await this.executeFeature('notify_connectivity_opportunity',
+      (handle: EngineRuntimeHandle): Promise<void> => {
+        if (handle.notifyConnectivityOpportunity === undefined) {
+          return unsupportedEngineOperation('notify_connectivity_opportunity');
+        }
+        return handle.notifyConnectivityOpportunity(reason);
+      });
+  }
+
   async queryNetworkSettings(): Promise<EngineNetworkSettings> {
     return await this.executeReadOnly('query_network_settings',
       (handle: EngineRuntimeHandle): Promise<EngineNetworkSettings> => handle.queryNetworkSettings());
+  }
+
+  async queryRelayOverview(): Promise<EngineRelayOverview> {
+    return await this.executeReadOnly('query_relay_overview',
+      (handle: EngineRuntimeHandle): Promise<EngineRelayOverview> => {
+        if (handle.queryRelayOverview === undefined) {
+          return unsupportedEngineOperation('query_relay_overview');
+        }
+        return handle.queryRelayOverview();
+      });
+  }
+
+  async changeEncryptionPassphrase(passphrase: string, confirmation: string): Promise<void> {
+    await this.executeFeature('change_encryption_passphrase',
+      (handle: EngineRuntimeHandle): Promise<void> => {
+        if (handle.changeEncryptionPassphrase === undefined) {
+          return unsupportedEngineOperation('change_encryption_passphrase');
+        }
+        return handle.changeEncryptionPassphrase(passphrase, confirmation);
+      });
+  }
+
+  async refreshPeerConnections(): Promise<void> {
+    await this.executeFeature('refresh_peer_connections',
+      (handle: EngineRuntimeHandle): Promise<void> => {
+        if (handle.refreshPeerConnections === undefined) {
+          return unsupportedEngineOperation('refresh_peer_connections');
+        }
+        return handle.refreshPeerConnections();
+      });
   }
 
   async queryPairingDiagnostics(): Promise<EnginePairingDiagnostics> {

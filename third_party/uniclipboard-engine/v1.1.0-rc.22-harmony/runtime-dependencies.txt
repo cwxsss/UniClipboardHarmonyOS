@@ -1,0 +1,2 @@
+net.java.dev.jna:jna:5.14.0@aar
+org.jetbrains.kotlin:kotlin-stdlib:2.1.20

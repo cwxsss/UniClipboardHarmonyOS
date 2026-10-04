@@ -1,7 +1,10 @@
 import { describe, expect, it } from '@ohos/hypium';
 import {
+  ClipboardHistoryItem,
   EngineMemberSyncPreferences,
   EngineNetworkSettings,
+  EngineRelayOverview,
+  EngineRelayOverviewEntry,
   EngineRuntimeDevice,
   EngineRuntimeError,
   EngineRuntimeSnapshot,
@@ -21,6 +24,7 @@ class FakeControllerRuntime implements ClipboardFeatureControllerRuntime {
   autoSendTargets: string[] = [];
   snapshotRows: EngineRuntimeDevice[] = [];
   removeError: EngineRuntimeError | null = null;
+  passphraseChangeCount: number = 0;
 
   getSnapshot(): EngineRuntimeSnapshot {
     return new EngineRuntimeSnapshot(EngineRuntimeState.RUNNING);
@@ -76,6 +80,15 @@ class FakeControllerRuntime implements ClipboardFeatureControllerRuntime {
   async probeRelayUrl(url: string): Promise<number> {
     return 1;
   }
+
+  async queryRelayOverview(): Promise<EngineRelayOverview> {
+    return new EngineRelayOverview('custom', 'custom', false,
+      [new EngineRelayOverviewEntry('custom', undefined, 'https://relay.example.com', true, true)]);
+  }
+
+  async changeEncryptionPassphrase(passphrase: string, confirmation: string): Promise<void> {
+    this.passphraseChangeCount += 1;
+  }
 }
 
 class FakeRemovalInteraction implements SpaceDeviceRemovalInteraction {
@@ -129,6 +142,38 @@ export default function clipboardFeatureControllerTest(): void {
         controller.pauseRealtimePolling();
 
         expect(controller.sseTimerId).assertEqual(-1);
+      });
+  });
+
+  describe('ClipboardFeatureController Engine alignment', (): void => {
+    it('searches received file history by every preserved original filename', 0,
+      async (): Promise<void> => {
+        let controller: ClipboardFeatureController = new ClipboardFeatureController();
+        controller.history = [new ClipboardHistoryItem('incoming-file', 'Quarterly report', 'received', '12:00',
+          'File', null, null, '', 1, false, [], false, 'Desktop', 1, 'Quarterly report.pdf',
+          ['Quarterly report.pdf', 'Appendix.csv'])];
+        controller.historySearchText = 'appendix.CSV';
+
+        expect(controller.compactFilteredHistory().length).assertEqual(1);
+        controller.historySearchText = 'no-match';
+        expect(controller.compactFilteredHistory().length).assertEqual(0);
+      });
+
+    it('loads native relay overview and validates passphrase confirmation before Engine call', 0,
+      async (): Promise<void> => {
+        let runtime: FakeControllerRuntime = new FakeControllerRuntime();
+        let controller: ClipboardFeatureController = new ClipboardFeatureController(runtime);
+
+        await controller.refreshSpaceRelayOverview();
+        expect(controller.spaceRelayOverview?.savedMode).assertEqual('custom');
+        expect(controller.spaceRelayOverview?.entries.length).assertEqual(1);
+
+        let mismatched: boolean = await controller.changeSpaceEncryptionPassphrase('one', 'two');
+        expect(mismatched).assertFalse();
+        expect(runtime.passphraseChangeCount).assertEqual(0);
+        let updated: boolean = await controller.changeSpaceEncryptionPassphrase('new phrase', 'new phrase');
+        expect(updated).assertTrue();
+        expect(runtime.passphraseChangeCount).assertEqual(1);
       });
   });
 

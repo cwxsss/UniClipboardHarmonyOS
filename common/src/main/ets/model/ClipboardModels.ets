@@ -28,6 +28,8 @@ export class ClipboardHistoryItem {
   imagePreview: image.PixelMap | null = null;
   fileData: Uint8Array | null = null;
   filePath: string = '';
+  fileName: string = '';
+  fileNames: string[] = [];
   timestampMs: number = 0;
   starred: boolean = false;
   tags: string[] = [];
@@ -38,7 +40,7 @@ export class ClipboardHistoryItem {
   constructor(id: string, text: string, direction: string, time: string, kind: string = 'Text',
     imagePreview: image.PixelMap | null = null, fileData: Uint8Array | null = null, filePath: string = '',
     timestampMs: number = 0, starred: boolean = false, tags: string[] = [], isSnippet: boolean = false,
-    sourceDevice: string = '', occurrenceCount: number = 1) {
+    sourceDevice: string = '', occurrenceCount: number = 1, fileName: string = '', fileNames: string[] = []) {
     this.id = id;
     this.text = text;
     this.direction = direction;
@@ -47,6 +49,8 @@ export class ClipboardHistoryItem {
     this.imagePreview = imagePreview;
     this.fileData = fileData;
     this.filePath = filePath;
+    this.fileName = fileName;
+    this.fileNames = fileNames.slice();
     this.timestampMs = timestampMs;
     this.starred = starred;
     this.tags = tags;

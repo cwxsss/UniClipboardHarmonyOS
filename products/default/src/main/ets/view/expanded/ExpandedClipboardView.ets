@@ -29,6 +29,7 @@ import {
   APPEARANCE_MODE_SYSTEM,
   APPEARANCE_THEME_DEFAULT,
   EngineRuntimeDevice,
+  EngineRelayOverviewEntry,
   SpaceProfileRecord
 } from 'common';
 
@@ -55,6 +56,9 @@ export struct ExpandedClipboardView {
   @State showConnectionDiagnosticsSheet: boolean = false;
   @State showHistoryTagSheet: boolean = false;
   @State showOpticalTransferSheet: boolean = false;
+  @State showPassphraseChangeSheet: boolean = false;
+  @State newSpacePassphrase: string = '';
+  @State confirmSpacePassphrase: string = '';
   @State historyTagItemId: string = '';
   @State historyTagDraft: string = '';
   @State connectionDetailVisible: boolean = false;
@@ -135,6 +139,32 @@ export struct ExpandedClipboardView {
     if (shouldClose) {
       this.showFeedbackSheet = false;
     }
+  }
+
+  private async submitSpacePassphraseChange(): Promise<void> {
+    let changed: boolean = await this.controller.changeSpaceEncryptionPassphrase(
+      this.newSpacePassphrase, this.confirmSpacePassphrase);
+    if (changed) {
+      this.newSpacePassphrase = '';
+      this.confirmSpacePassphrase = '';
+    }
+  }
+
+  private closePassphraseChangeSheet(): void {
+    this.showPassphraseChangeSheet = false;
+    this.newSpacePassphrase = '';
+    this.confirmSpacePassphrase = '';
+    this.controller.spacePassphraseChangeState = 0;
+  }
+
+  private spaceRelayModeLabel(mode: string): Resource {
+    if (mode === 'built_in') {
+      return $r('app.string.space_relay_mode_builtin');
+    }
+    if (mode === 'custom') {
+      return $r('app.string.space_relay_mode_custom');
+    }
+    return $r('app.string.space_relay_mode_disabled');
   }
 
   @Builder
@@ -1470,7 +1500,7 @@ export struct ExpandedClipboardView {
           .fontSize(18)
           .fontWeight(FontWeight.Medium)
           .fontColor([$r('app.color.text_secondary')])
-        TextInput({ placeholder: $r('app.string.server_history_search_placeholder'),
+        TextInput({ placeholder: $r('app.string.history_search_placeholder'),
           text: this.controller.historySearchText })
           .layoutWeight(1)
           .height(42)
@@ -3893,8 +3923,186 @@ export struct ExpandedClipboardView {
 
 
   @Builder
+  private passphraseChangeSheet() {
+    Column({ space: 14 }) {
+      Text($r('app.string.space_passphrase_change_title'))
+        .fontSize(20)
+        .fontWeight(FontWeight.Bold)
+        .fontColor($r('app.color.text_primary'))
+        .width('100%')
+      Text($r('app.string.space_passphrase_change_note'))
+        .fontSize(13)
+        .lineHeight(19)
+        .fontColor($r('app.color.text_secondary'))
+        .width('100%')
+      TextInput({ placeholder: $r('app.string.space_passphrase_change_placeholder'),
+        text: this.newSpacePassphrase })
+        .type(InputType.Password)
+        .height(48)
+        .backgroundColor($r('app.color.surface_muted'))
+        .borderRadius($r('app.float.corner_radius_level10'))
+        .attributeModifier(Api26Material.input())
+        .onChange((value: string): void => {
+          this.newSpacePassphrase = value;
+          this.controller.spacePassphraseChangeState = 0;
+        })
+      TextInput({ placeholder: $r('app.string.space_passphrase_change_confirm_placeholder'),
+        text: this.confirmSpacePassphrase })
+        .type(InputType.Password)
+        .height(48)
+        .backgroundColor($r('app.color.surface_muted'))
+        .borderRadius($r('app.float.corner_radius_level10'))
+        .attributeModifier(Api26Material.input())
+        .onChange((value: string): void => {
+          this.confirmSpacePassphrase = value;
+          this.controller.spacePassphraseChangeState = 0;
+        })
+      if (this.controller.spacePassphraseChangeState === 1) {
+        Text($r('app.string.space_passphrase_change_success'))
+          .fontSize(12)
+          .fontColor($r('app.color.success'))
+          .width('100%')
+      } else if (this.controller.spacePassphraseChangeState === 2) {
+        Text($r('app.string.space_passphrase_change_failed'))
+          .fontSize(12)
+          .fontColor($r('app.color.danger'))
+          .width('100%')
+      } else if (this.controller.spacePassphraseChangeState === 3) {
+        Text($r('app.string.space_passphrase_change_mismatch'))
+          .fontSize(12)
+          .fontColor($r('app.color.danger'))
+          .width('100%')
+      }
+      Row({ space: 10 }) {
+        Button($r('app.string.cancel_action'), { type: ButtonType.Normal })
+          .layoutWeight(1)
+          .height(44)
+          .backgroundColor($r('app.color.surface_muted'))
+          .fontColor($r('app.color.text_primary'))
+          .borderRadius($r('app.float.corner_radius_level10'))
+          .attributeModifier(Api26Material.interactive())
+          .onClick((): void => this.closePassphraseChangeSheet())
+        Button(this.controller.spacePassphraseChangeBusy ?
+          $r('app.string.space_passphrase_changing_action') :
+          $r('app.string.space_passphrase_change_action'), { type: ButtonType.Normal })
+          .layoutWeight(1)
+          .height(44)
+          .backgroundColor(this.controller.accentColor())
+          .fontColor(Api26Material.accentTextColor())
+          .borderRadius($r('app.float.corner_radius_level10'))
+          .enabled(!this.controller.spacePassphraseChangeBusy)
+          .attributeModifier(Api26Material.accent())
+          .onClick((): void => {
+            this.submitSpacePassphraseChange();
+          })
+      }
+      .width('100%')
+    }
+    .width('100%')
+    .padding(24)
+    .backgroundColor($r('app.color.page_background'))
+  }
+
+  @Builder
   private desktopSpaceRelaySettings() {
     Column({ space: 12 }) {
+      Row({ space: 10 }) {
+        Text($r('app.string.space_relay_overview_title'))
+          .fontSize(16)
+          .fontWeight(FontWeight.Medium)
+          .fontColor($r('app.color.text_primary'))
+        Blank()
+        Button($r('app.string.space_relay_refresh_action'), { type: ButtonType.Normal })
+          .height(34)
+          .fontSize(12)
+          .fontColor(this.controller.accentColor())
+          .backgroundColor(this.controller.accentSoftColor())
+          .borderRadius($r('app.float.corner_radius_level10'))
+          .enabled(!this.controller.spaceRelayOverviewBusy)
+          .attributeModifier(Api26Material.accent())
+          .onClick((): void => {
+            this.controller.refreshSpaceRelayOverview();
+          })
+      }
+      .width('100%')
+      if (this.controller.spaceRelayOverview !== null) {
+        Row({ space: 8 }) {
+          Text($r('app.string.space_relay_saved_mode'))
+            .fontSize(12)
+            .fontColor($r('app.color.text_secondary'))
+          Text(this.spaceRelayModeLabel(this.controller.spaceRelayOverview.savedMode))
+            .fontSize(12)
+            .fontColor($r('app.color.text_primary'))
+          Text($r('app.string.space_relay_applied_mode'))
+            .fontSize(12)
+            .fontColor($r('app.color.text_secondary'))
+          if (this.controller.spaceRelayOverview.appliedMode === undefined) {
+            Text($r('app.string.space_relay_not_applied'))
+              .fontSize(12)
+              .fontColor($r('app.color.text_primary'))
+          } else {
+            Text(this.spaceRelayModeLabel(this.controller.spaceRelayOverview.appliedMode))
+              .fontSize(12)
+              .fontColor($r('app.color.text_primary'))
+          }
+        }
+        .width('100%')
+        if (this.controller.spaceRelayOverview.changePending) {
+          Text($r('app.string.space_relay_change_pending'))
+            .fontSize(12)
+            .fontColor($r('app.color.text_secondary'))
+            .width('100%')
+        }
+        ForEach(this.controller.spaceRelayOverview.entries, (entry: EngineRelayOverviewEntry) => {
+          Column({ space: 4 }) {
+            Text(entry.url)
+              .fontSize(12)
+              .fontColor($r('app.color.text_primary'))
+              .width('100%')
+              .copyOption(CopyOptions.LocalDevice)
+            Row({ space: 8 }) {
+              Text(entry.source === 'built_in' ? $r('app.string.space_relay_source_builtin') :
+                $r('app.string.space_relay_source_custom'))
+                .fontSize(11)
+                .fontColor($r('app.color.text_secondary'))
+              if (entry.regionId !== undefined) {
+                Text(entry.regionId)
+                  .fontSize(11)
+                  .fontColor($r('app.color.text_secondary'))
+              }
+              Text(entry.inEffect ? $r('app.string.space_relay_in_effect') :
+                $r('app.string.space_relay_not_in_effect'))
+                .fontSize(11)
+                .fontColor($r('app.color.text_secondary'))
+              Text(entry.credentialConfigured ? $r('app.string.space_relay_credential_ready') :
+                $r('app.string.space_relay_credential_missing'))
+                .fontSize(11)
+                .fontColor($r('app.color.text_secondary'))
+            }
+            .width('100%')
+          }
+          .width('100%')
+          .padding(10)
+          .borderRadius($r('app.float.corner_radius_level10'))
+          .backgroundColor($r('app.color.surface_muted'))
+        }, (entry: EngineRelayOverviewEntry): string => entry.source + '|' + entry.url)
+      } else if (this.controller.spaceRelayOverviewState === 1) {
+        Text($r('app.string.space_relay_overview_failed'))
+          .fontSize(12)
+          .fontColor($r('app.color.danger'))
+          .width('100%')
+      }
+      Button($r('app.string.space_passphrase_change_title'), { type: ButtonType.Normal })
+        .height(40)
+        .fontSize(13)
+        .fontColor(this.controller.accentColor())
+        .backgroundColor(this.controller.accentSoftColor())
+        .borderRadius($r('app.float.corner_radius_level10'))
+        .attributeModifier(Api26Material.accent())
+        .onClick((): void => {
+          this.controller.spacePassphraseChangeState = 0;
+          this.showPassphraseChangeSheet = true;
+        })
       Row({ space: 16 }) {
         Column({ space: 4 }) {
           Text($r('app.string.space_relay_settings_title'))
@@ -4435,6 +4643,17 @@ export struct ExpandedClipboardView {
           dragBar: false,
           showClose: false,
           backgroundColor: $r('app.color.page_background')
+        })
+        .bindSheet($$this.showPassphraseChangeSheet, this.passphraseChangeSheet(), {
+          detents: [SheetSize.MEDIUM],
+          preferType: SheetType.CENTER,
+          dragBar: false,
+          showClose: false,
+          backgroundColor: $r('app.color.page_background'),
+          blurStyle: BlurStyle.Regular,
+          onWillDisappear: (): void => {
+            this.closePassphraseChangeSheet();
+          }
         })
       Stack() {
         Stack() {

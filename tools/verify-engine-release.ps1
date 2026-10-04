@@ -1,7 +1,7 @@
 param(
   # 必须与 oh-package.json5 / common-oh-package.json5 里引用的 HAR 版本一致，
   # 否则这个校验会在验一个已经不再发布的旧产物。
-  [string]$ReleaseRoot = (Join-Path $PSScriptRoot '..\third_party\uniclipboard-engine\v1.1.0-rc.20-harmony')
+  [string]$ReleaseRoot = (Join-Path $PSScriptRoot '..\third_party\uniclipboard-engine\v1.1.0-rc.22-harmony')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -43,6 +43,20 @@ function Consume-TarData {
   $sha256 = [System.Security.Cryptography.SHA256]::Create()
   try {
     return ([System.BitConverter]::ToString($sha256.ComputeHash($Capture))).Replace('-', '').ToLowerInvariant()
+  } finally {
+    $sha256.Dispose()
+  }
+}
+function Get-NormalizedTextSha256Hex {
+  param([string]$Path)
+
+  $content = [System.IO.File]::ReadAllText($Path)
+  $normalizedContent = $content.Replace("`r`n", "`n").Replace("`r", "`n")
+  $encoding = [System.Text.UTF8Encoding]::new($false)
+  $sha256 = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $bytes = $sha256.ComputeHash($encoding.GetBytes($normalizedContent))
+    return ([System.BitConverter]::ToString($bytes)).Replace([string][char]45, [string]::Empty).ToLowerInvariant()
   } finally {
     $sha256.Dispose()
   }
@@ -194,12 +208,23 @@ foreach ($entryMetadata in $embeddedMetadata) {
   }
 }
 
+if ($null -ne $release.harmonyAdaptation -and -not [string]::IsNullOrWhiteSpace($release.harmonyAdaptation.patch)) {
+  $patchPath = Join-Path $releaseRootPath $release.harmonyAdaptation.patch
+  if (-not (Test-Path -LiteralPath $patchPath -PathType Leaf)) {
+    throw "Harmony adapter patch not found: $patchPath"
+  }
+  $patchHash = Get-Sha256Hex -Path $patchPath
+  if ($patchHash -ne $release.harmonyAdaptation.patchSha256) {
+    throw 'Harmony adapter patch SHA-256 does not match the pinned metadata'
+  }
+}
+
 if ($null -ne $release.harmonyAdaptation -and -not [string]::IsNullOrWhiteSpace($release.harmonyAdaptation.script)) {
   $adaptationScriptPath = Join-Path (Split-Path -Parent $PSScriptRoot) $release.harmonyAdaptation.script
   if (-not (Test-Path -LiteralPath $adaptationScriptPath -PathType Leaf)) {
     throw "Harmony adaptation script not found: $adaptationScriptPath"
   }
-  $adaptationScriptHash = Get-Sha256Hex -Path $adaptationScriptPath
+  $adaptationScriptHash = Get-NormalizedTextSha256Hex -Path $adaptationScriptPath
   if ($adaptationScriptHash -ne $release.harmonyAdaptation.scriptSha256) {
     throw 'Harmony adaptation script SHA-256 does not match the pinned metadata'
   }

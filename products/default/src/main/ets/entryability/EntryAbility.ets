@@ -17,6 +17,7 @@ import { AbilityConstant, ConfigurationConstant, UIAbility, Want } from '@kit.Ab
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
+import { connection } from '@kit.NetworkKit';
 import { systemShare } from '@kit.ShareKit';
 import { ClipboardFeatureController } from 'clipboard_feature';
 import {
@@ -38,6 +39,13 @@ export default class EntryAbility extends UIAbility {
     new BackgroundSyncPreferenceService();
   private backgroundSyncTaskService: BackgroundSyncTaskService = new BackgroundSyncTaskService();
   private engineStartupTask: Promise<void> | null = null;
+  private networkConnection: connection.NetConnection | null = null;
+
+  private networkOpportunityCallback = (): void => {
+    engineRuntimeService.notifyConnectivityOpportunity('network_changed').catch((): void => {
+      // Network callbacks may arrive while the Engine is intentionally suspended.
+    });
+  };
 
   private avoidAreaChangeCallback = (data: window.AvoidAreaOptions): void => {
     if (this.mainWindow === null) {
@@ -63,6 +71,7 @@ export default class EntryAbility extends UIAbility {
       let detail: string = error instanceof Error ? (error as Error).message : JSON.stringify(error);
       hilog.warn(DOMAIN, 'testTag', 'Official Engine startup did not complete cleanly: %{public}s', detail);
     });
+    this.registerNetworkRecoveryListener();
     try {
       let appearanceMode: string = this.appearanceStorageService.load(this.context);
       this.context.getApplicationContext().setColorMode(
@@ -109,6 +118,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   onDestroy(): void {
+    this.unregisterNetworkRecoveryListener();
     engineRuntimeService.setClipboardPollingEnabled(false);
     this.backgroundSyncTaskService.stop(this.context).catch((): void => {
       hilog.warn(DOMAIN, 'testTag', 'Background sync task shutdown did not complete cleanly.');
@@ -206,6 +216,9 @@ export default class EntryAbility extends UIAbility {
     this.startEngineRuntime().then((): void => {
       this.updateClipboardMonitoring();
       clipboardController.resumeRealtimePolling();
+      engineRuntimeService.notifyConnectivityOpportunity('foreground').catch((): void => {
+        hilog.warn(DOMAIN, 'testTag', 'Connectivity recovery hint was not accepted by the Engine.');
+      });
     }).catch((error: Object): void => {
       clipboardController.resumeRealtimePolling();
       let detail: string = error instanceof Error ? (error as Error).message : JSON.stringify(error);
@@ -242,5 +255,44 @@ export default class EntryAbility extends UIAbility {
     let backgroundSyncEnabled: boolean | undefined = AppStorage.get<boolean>('backgroundSyncEnabled');
     let spaceJoined: boolean | undefined = AppStorage.get<boolean>('spaceJoined');
     engineRuntimeService.setClipboardPollingEnabled(backgroundSyncEnabled === true && spaceJoined === true);
+  }
+
+  private registerNetworkRecoveryListener(): void {
+    if (this.networkConnection !== null) {
+      return;
+    }
+    try {
+      let networkConnection: connection.NetConnection = connection.createNetConnection();
+      networkConnection.on('netAvailable', this.networkOpportunityCallback);
+      networkConnection.on('netLost', this.networkOpportunityCallback);
+      networkConnection.on('netCapabilitiesChange', this.networkOpportunityCallback);
+      networkConnection.register((error: BusinessError): void => {
+        if (error) {
+          hilog.warn(DOMAIN, 'testTag', 'Network recovery listener registration failed: %{public}s',
+            JSON.stringify(error));
+        }
+      });
+      this.networkConnection = networkConnection;
+    } catch (error) {
+      hilog.warn(DOMAIN, 'testTag', 'Network recovery listener setup failed: %{public}s', JSON.stringify(error));
+    }
+  }
+
+  private unregisterNetworkRecoveryListener(): void {
+    let networkConnection: connection.NetConnection | null = this.networkConnection;
+    this.networkConnection = null;
+    if (networkConnection === null) {
+      return;
+    }
+    try {
+      networkConnection.unregister((error: BusinessError): void => {
+        if (error) {
+          hilog.warn(DOMAIN, 'testTag', 'Network recovery listener cleanup failed: %{public}s',
+            JSON.stringify(error));
+        }
+      });
+    } catch (error) {
+      hilog.warn(DOMAIN, 'testTag', 'Network recovery listener cleanup failed: %{public}s', JSON.stringify(error));
+    }
   }
 }

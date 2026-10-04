@@ -1240,6 +1240,19 @@ export struct CompactClipboardView {
               })
           }
           .width('100%')
+          TextInput({ placeholder: $r('app.string.history_search_placeholder'),
+            text: this.controller.historySearchText })
+            .height(40)
+            .fontSize(13)
+            .backgroundColor($r('app.color.surface_muted'))
+            .borderRadius($r('app.float.corner_radius_level10'))
+            .attributeModifier(Api26Material.input())
+            .onChange((value: string): void => {
+              this.controller.scheduleDesktopHistorySearch(value);
+            })
+            .onSubmit((): void => {
+              this.controller.submitDesktopHistorySearch();
+            })
           Scroll() {
             Row({ space: 8 }) {
               Button($r('app.string.filter_chip_all'), { type: ButtonType.Normal })

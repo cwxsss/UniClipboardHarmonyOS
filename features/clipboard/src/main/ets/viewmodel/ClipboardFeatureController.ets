@@ -57,6 +57,7 @@ import {
   EnginePairingCandidateDiagnostic,
   EnginePairingDiagnostics,
   EngineMemberSyncPreferences,
+  EngineRelayOverview,
   EngineSendReport,
   EngineSpaceCreated,
   EngineSpaceJoined,
@@ -179,6 +180,8 @@ export interface ClipboardFeatureControllerRuntime {
   queryNetworkSettings(): Promise<EngineNetworkSettings>;
   updateNetworkSettings(allowRelayFallback: boolean, customRelayUrls: string[]): Promise<EngineNetworkSettings>;
   probeRelayUrl(url: string): Promise<number>;
+  queryRelayOverview?(): Promise<EngineRelayOverview>;
+  changeEncryptionPassphrase?(passphrase: string, confirmation: string): Promise<void>;
 }
 
 export interface SpaceDeviceRemovalInteraction {
@@ -269,6 +272,11 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   public spaceRelaySettingsBusy: boolean = false;
   // 0 = 无状态，1 = 保存成功，2 = 中继不可达或地址格式有误，3 = 引擎未就绪（与中继无关）。
   public spaceRelaySettingsState: number = 0;
+  public spaceRelayOverview: EngineRelayOverview | null = null;
+  public spaceRelayOverviewBusy: boolean = false;
+  public spaceRelayOverviewState: number = 0;
+  public spacePassphraseChangeBusy: boolean = false;
+  public spacePassphraseChangeState: number = 0;
   public connectionDiagnosticBusy: boolean = false;
   public connectionDiagnosticExportState: number = 0;
   public connectionDiagnosticDirectCount: number = 0;
@@ -402,6 +410,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   public pendingFileTransferId: string = '';
   public linkPreviewRequestId: number = 0;
   private lastOfficialActiveEntryId: string = '';
+  private incomingFileNamesByEntry: Map<string, string[]> = new Map<string, string[]>();
   private officialEngineInboundRefreshBusy: boolean = false;
   private officialEngineInboundRefreshQueued: boolean = false;
   private officialEngineInboundRefreshRetryCount: number = 0;
@@ -1133,9 +1142,57 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       this.spaceRelayFallbackEnabled = settings.allowRelayFallback;
       this.spaceRelayUrlsText = settings.customRelayUrls.join('\n');
       this.spaceRelaySettingsState = 0;
+      await this.refreshSpaceRelayOverview();
     } catch (error) {
       this.reportError('space-relay', 'failed to load relay settings: ' + this.errorDetail(error));
       this.spaceRelaySettingsState = 2;
+    }
+  }
+
+  public async refreshSpaceRelayOverview(): Promise<void> {
+    if (this.spaceRelayOverviewBusy) {
+      return;
+    }
+    this.spaceRelayOverviewBusy = true;
+    this.spaceRelayOverviewState = 0;
+    try {
+      await this.ensureOfficialEngineRunning();
+      if (this.engineRuntime.queryRelayOverview === undefined) {
+        throw new Error('relay overview is unavailable in the current Engine binding');
+      }
+      this.spaceRelayOverview = await this.engineRuntime.queryRelayOverview();
+    } catch (error) {
+      this.spaceRelayOverviewState = 1;
+      this.reportError('space-relay', 'failed to load relay overview: ' + this.errorDetail(error));
+    } finally {
+      this.spaceRelayOverviewBusy = false;
+    }
+  }
+
+  public async changeSpaceEncryptionPassphrase(passphrase: string, confirmation: string): Promise<boolean> {
+    if (this.spacePassphraseChangeBusy) {
+      return false;
+    }
+    this.spacePassphraseChangeState = 0;
+    if (passphrase.trim().length === 0 || passphrase !== confirmation) {
+      this.spacePassphraseChangeState = 3;
+      return false;
+    }
+    this.spacePassphraseChangeBusy = true;
+    try {
+      await this.ensureOfficialEngineRunning();
+      if (this.engineRuntime.changeEncryptionPassphrase === undefined) {
+        throw new Error('passphrase change is unavailable in the current Engine binding');
+      }
+      await this.engineRuntime.changeEncryptionPassphrase(passphrase, confirmation);
+      this.spacePassphraseChangeState = 1;
+      return true;
+    } catch (error) {
+      this.spacePassphraseChangeState = 2;
+      this.reportError('space-passphrase', 'failed to change encryption passphrase: ' + this.errorDetail(error));
+      return false;
+    } finally {
+      this.spacePassphraseChangeBusy = false;
     }
   }
 
@@ -1187,6 +1244,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       this.spaceRelayFallbackEnabled = settings.allowRelayFallback;
       this.spaceRelayUrlsText = settings.customRelayUrls.join('\n');
       this.spaceRelaySettingsState = 1;
+      await this.refreshSpaceRelayOverview();
     } catch (error) {
       let detail: string = this.errorDetail(error);
       if (engineReady) {
@@ -2439,6 +2497,20 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     return query.length === 0 || text.toLowerCase().indexOf(query) >= 0;
   }
 
+  public historySearchMatchesItem(item: ClipboardHistoryItem): boolean {
+    let query: string = this.historySearchText.trim().toLowerCase();
+    if (query.length === 0 || item.text.toLowerCase().indexOf(query) >= 0 ||
+      item.fileName.toLowerCase().indexOf(query) >= 0) {
+      return true;
+    }
+    for (let index: number = 0; index < item.fileNames.length; index++) {
+      if (item.fileNames[index].toLowerCase().indexOf(query) >= 0) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   public scheduleDesktopHistorySearch(value: string): void {
     this.historySearchText = value;
     if (this.historySearchTimerId >= 0) {
@@ -2855,7 +2927,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     for (let index: number = 0; index < this.history.length; index++) {
       let item: ClipboardHistoryItem = this.history[index];
       let starredMatches: boolean = !this.desktopStarredOnly || item.starred;
-      if (starredMatches && this.desktopSearchMatches(item.text) && this.desktopSourceMatchesFilter(false) &&
+      if (starredMatches && this.historySearchMatchesItem(item) && this.desktopSourceMatchesFilter(false) &&
         this.desktopTypeMatchesFilter(item.kind, item.text) && this.desktopTagMatchesFilter(item.kind, item.text) &&
         this.desktopTimeMatchesFilter(item.timestampMs) && this.desktopExtensionMatchesFilter(item.text) &&
         this.historyItemMatchesLibraryFilters(item)) {
@@ -2896,7 +2968,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     let items: ClipboardHistoryItem[] = [];
     for (let index: number = 0; index < this.history.length; index++) {
       let item: ClipboardHistoryItem = this.history[index];
-      if (this.desktopSearchMatches(item.text) &&
+      if (this.historySearchMatchesItem(item) &&
         this.desktopTypeMatchesFilter(item.kind, item.text) &&
         this.historyItemMatchesLibraryFilters(item)) {
         items.push(item);
@@ -4576,7 +4648,8 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
 
   public addHistory(text: string, direction: string, kind: string = 'Text',
     imagePreview: image.PixelMap | null = null, fileData: Uint8Array | null = null,
-    filePath: string = '', historyId: string = '', sourceDevice: string = ''): void {
+    filePath: string = '', historyId: string = '', sourceDevice: string = '',
+    fileName: string = '', fileNames: string[] = []): void {
     let timestampMs: number = Date.now();
     let itemId: string = historyId.length > 0 ? historyId : timestampMs.toString();
     let resolvedSource: string = sourceDevice;
@@ -4586,9 +4659,15 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
         resolvedSource = deviceInfo.deviceType;
       }
     }
+    let resolvedFileName: string = kind === 'File' ?
+      (fileName.length > 0 ? fileName : text) : '';
+    let resolvedFileNames: string[] = kind === 'File' ? fileNames.slice() : [];
+    if (resolvedFileName.length > 0 && resolvedFileNames.indexOf(resolvedFileName) < 0) {
+      resolvedFileNames.unshift(resolvedFileName);
+    }
     let item: ClipboardHistoryItem = new ClipboardHistoryItem(
       itemId, text, direction, this.currentTime(), kind, imagePreview, fileData, filePath, timestampMs,
-      false, [], false, resolvedSource, 1);
+      false, [], false, resolvedSource, 1, resolvedFileName, resolvedFileNames);
     let items: ClipboardHistoryItem[] = [item];
     let merged: boolean = false;
     for (let index: number = 0; index < this.history.length; index++) {
@@ -4610,6 +4689,10 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
         }
         if (filePath.length > 0) {
           current.filePath = filePath;
+        }
+        if (resolvedFileName.length > 0) {
+          current.fileName = resolvedFileName;
+          current.fileNames = resolvedFileNames.slice();
         }
         items[0] = current;
         merged = true;
@@ -5047,6 +5130,9 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   }
 
   public onEngineRuntimeEvent(event: EngineRuntimeEvent): void {
+    if (event.incomingPending !== undefined && event.incomingPending.filenames.length > 0) {
+      this.incomingFileNamesByEntry.set(event.incomingPending.entryId, event.incomingPending.filenames.slice());
+    }
     if (event.kind === 'active_clipboard_changed' || event.kind === 'incoming_entry' ||
       event.kind === 'inbound_notice' || event.kind === 'incoming_pending' ||
       event.kind === 'receive_attempt_state_changed') {
@@ -5150,15 +5236,17 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       let exportedPath: string = await this.exportOfficialEngineEntry(active.entryId);
       let payload: ClipboardFilePayload = this.clipboardService.readFile(exportedPath);
       let imagePayload: image.PixelMap | null = await this.tryDecodeOfficialEngineImage(payload.data);
+      let incomingFileNames: string[] = this.incomingFileNamesByEntry.get(active.entryId) ?? [];
       this.lastOfficialActiveEntryId = active.entryId;
       this.latestContentId = active.entryId;
       if (imagePayload !== null) {
         this.applyOfficialEngineImage(active, payload, imagePayload, exportedPath);
-      } else if (this.isLikelyOfficialEngineText(payload.data)) {
+      } else if (incomingFileNames.length === 0 && this.isLikelyOfficialEngineText(payload.data)) {
         this.applyOfficialEngineText(active, payload.data);
       } else {
-        this.applyOfficialEngineFile(active, payload, exportedPath);
+        this.applyOfficialEngineFile(active, payload, exportedPath, incomingFileNames);
       }
+      this.incomingFileNamesByEntry.delete(active.entryId);
     } catch (error) {
       return false;
     }
@@ -5296,8 +5384,10 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     this.notifyReceivedContent('Image', this.latestText, pixelMap, payload.data.length, active.activatedBy);
   }
 
-  private applyOfficialEngineFile(active: EngineActiveClipboard, payload: ClipboardFilePayload, path: string): void {
-    let fileName: string = this.fileNameForOfficialEnginePayload(payload.data);
+  private applyOfficialEngineFile(active: EngineActiveClipboard, payload: ClipboardFilePayload, path: string,
+    incomingFileNames: string[] = []): void {
+    let fileNames: string[] = incomingFileNames.filter((value: string): boolean => value.trim().length > 0);
+    let fileName: string = fileNames.length > 0 ? fileNames[0] : this.fileNameForOfficialEnginePayload(payload.data);
     this.latestKind = 'File';
     this.latestText = fileName;
     this.latestFileName = fileName;
@@ -5311,7 +5401,8 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       this.clearLinkPreview();
     }
     this.latestImage = null;
-    this.addHistory(fileName, 'received', 'File', null, null, path, active.entryId, active.activatedBy);
+    this.addHistory(fileName, 'received', 'File', null, null, path, active.entryId, active.activatedBy,
+      fileName, fileNames);
     this.notifyReceivedContent('File', fileName, null, payload.data.length, active.activatedBy);
   }
 

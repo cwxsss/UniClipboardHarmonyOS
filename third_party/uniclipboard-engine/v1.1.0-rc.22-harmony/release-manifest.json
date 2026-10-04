@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 1,
+  "release": {
+    "version": "v1.1.0-rc.22",
+    "commit": "18415aa83a47bd3870c2a1f114b268fc3ed0495a",
+    "upstreamReleaseUrl": "https://github.com/UniClipboard/Engine/releases/tag/v1.1.0-rc.22",
+    "upstreamHarSha256": "df65472233da55754e7108b6dcef30ad777faab1efe0504c706411c19a461cb7",
+    "rustToolchain": "1.95.0",
+    "cargoLockSha256": "ec0f38f78911f9cd9ee3cf77cd8e34f6ff93cbecf344f2e5c11ffafc3116b027",
+    "localOhosAdapterPatchSha256": "a6f1fad2f34e6558dbb2e91f2f567167263455a823ea3f899ad8ae5c6bd49876"
+  },
+  "compatibility": {
+    "minimumHarmonyOsApi": 24,
+    "architectures": [
+      "arm64-v8a"
+    ],
+    "deviceAcceptance": "not_run",
+    "minimumSystems": {
+      "harmonyosApi": 24
+    }
+  },
+  "build": {
+    "cargoProfile": "release",
+    "target": "aarch64-unknown-linux-ohos",
+    "devecoStudio": "26.0.0.821",
+    "harmonySdk": "26.0.0.105"
+  },
+  "artifacts": [
+    {
+      "name": "UniClipboardEngine.har",
+      "sha256": "79a6d745c2310964ef130af88101f70126da31b4f0743858fe06a63b82fb3109",
+      "size": 12731964
+    },
+    {
+      "name": "UniClipboardEngine.har.checksum.txt",
+      "sha256": "4eff5aab42c45e80ff3f444a5f97c82afdc44df26b6e2a07f3b0a171fd7053bc",
+      "size": 65
+    },
+    {
+      "name": "libuc_ohos_napi.so",
+      "sha256": "55c724312b2ab5e6722a4de83d8940f43b3478ab90cbe6f8e65ec8f6116b811e",
+      "size": 27202024
+    },
+    {
+      "name": "uc-ohos-napi.checksum.txt",
+      "sha256": "ed054aa3a75b67e1c1ac36049c8401625ab902f4a862ac605683bdf8a9288de9",
+      "size": 65
+    },
+    {
+      "name": "index.d.ts",
+      "sha256": "352e15d69012e67f59f07fa28c5dc3f5dc0d48cdb30b88f56baa4a5b58033dbe",
+      "size": 15085
+    },
+    {
+      "name": "upstream-index.d.ts",
+      "sha256": "0b1edae4e73fca4a3ab9c808d0e467fd525becc43b29dad3b5dafcf864b52043",
+      "size": 11433
+    },
+    {
+      "name": "upstream-release-manifest.json",
+      "sha256": "8c2b4f514f6d09a5c2ce3e36ef6c765eba7c616d7d475c930e1039d3b8cb44de",
+      "size": 6385
+    },
+    {
+      "name": "dependency-licenses.json",
+      "sha256": "6d86d0ffcc29f479cc4c2b65ec3057396b938f1c48c4d10f453c20dd335c5577",
+      "size": 138191
+    },
+    {
+      "name": "LICENSE",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "size": 11358
+    },
+    {
+      "name": "Cargo.lock",
+      "sha256": "ec0f38f78911f9cd9ee3cf77cd8e34f6ff93cbecf344f2e5c11ffafc3116b027",
+      "size": 206229
+    },
+    {
+      "name": "runtime-dependencies.txt",
+      "sha256": "b9e41a3759a188241696301e4595be76bb660bd5c0734ed852198baa70873403",
+      "size": 74
+    },
+    {
+      "name": "source-commit.txt",
+      "sha256": "fafbffec4081e05233ca793895fa30e173a2a08c3701ad9772d4da5aed8faded",
+      "size": 41
+    },
+    {
+      "name": "version.txt",
+      "sha256": "d83803910f28d6dac1b5211e8fde9ab6896c93af10243cf0a3d8d0905f944586",
+      "size": 13
+    },
+    {
+      "name": "upstream-uc-ohos-napi.checksum.txt",
+      "sha256": "e080efc746ea4caaba6b02552367126215ba76b9d9eb395791b72b18e263dc95",
+      "size": 65
+    },
+    {
+      "name": "harmony-adaptation.json",
+      "sha256": "e4390cdd21ab8528b757c33075ac61445283b2a69a174b9b54c014a8b421ef22",
+      "size": 1993
+    },
+    {
+      "name": "engine-ohos-rc22-adaptation.patch",
+      "sha256": "a6f1fad2f34e6558dbb2e91f2f567167263455a823ea3f899ad8ae5c6bd49876",
+      "size": 39582
+    }
+  ]
+}

@@ -517,6 +517,110 @@
       "value": "保存失败，同步引擎尚未就绪（与中继地址无关）。请完全退出并重新打开应用后重试；若仍然如此，请查看诊断日志中的“升级前备份”失败原因。"
     },
     {
+      "name": "space_relay_overview_title",
+      "value": "中继运行状态"
+    },
+    {
+      "name": "space_relay_refresh_action",
+      "value": "刷新状态"
+    },
+    {
+      "name": "space_relay_saved_mode",
+      "value": "已保存"
+    },
+    {
+      "name": "space_relay_applied_mode",
+      "value": "当前运行"
+    },
+    {
+      "name": "space_relay_not_applied",
+      "value": "尚未应用"
+    },
+    {
+      "name": "space_relay_change_pending",
+      "value": "设置待应用；重新启动空间引擎后生效。"
+    },
+    {
+      "name": "space_relay_mode_builtin",
+      "value": "官方中继"
+    },
+    {
+      "name": "space_relay_mode_custom",
+      "value": "自定义中继"
+    },
+    {
+      "name": "space_relay_mode_disabled",
+      "value": "仅直连"
+    },
+    {
+      "name": "space_relay_source_builtin",
+      "value": "官方"
+    },
+    {
+      "name": "space_relay_source_custom",
+      "value": "自定义"
+    },
+    {
+      "name": "space_relay_in_effect",
+      "value": "已配置到当前引擎"
+    },
+    {
+      "name": "space_relay_not_in_effect",
+      "value": "未配置到当前引擎"
+    },
+    {
+      "name": "space_relay_credential_ready",
+      "value": "凭据已配置"
+    },
+    {
+      "name": "space_relay_credential_missing",
+      "value": "未配置凭据"
+    },
+    {
+      "name": "space_relay_overview_failed",
+      "value": "读取中继状态失败，请稍后重试。"
+    },
+    {
+      "name": "space_passphrase_change_title",
+      "value": "更改空间口令"
+    },
+    {
+      "name": "space_passphrase_change_note",
+      "value": "输入新的空间口令并再次确认。"
+    },
+    {
+      "name": "space_passphrase_change_placeholder",
+      "value": "新空间口令"
+    },
+    {
+      "name": "space_passphrase_change_confirm_placeholder",
+      "value": "再次输入新空间口令"
+    },
+    {
+      "name": "space_passphrase_change_action",
+      "value": "更改口令"
+    },
+    {
+      "name": "space_passphrase_changing_action",
+      "value": "正在更改…"
+    },
+    {
+      "name": "space_passphrase_change_success",
+      "value": "空间口令已更新。"
+    },
+    {
+      "name": "space_passphrase_change_failed",
+      "value": "更改失败，请检查空间状态后重试。"
+    },
+    {
+      "name": "space_passphrase_change_mismatch",
+      "value": "请填写新口令，并确保两次输入一致。"
+    },
+    {
+      "name": "history_search_placeholder",
+      "value": "搜索历史内容或文件名"
+    },
+    {
       "name": "space_invitation_code_label",
       "value": "空间邀请码（可复制）"
     },

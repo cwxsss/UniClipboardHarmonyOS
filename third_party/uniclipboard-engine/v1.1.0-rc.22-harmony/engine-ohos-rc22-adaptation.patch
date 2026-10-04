@@ -1,0 +1,1050 @@
+diff --git a/bindings/uc-ohos-napi/ohos/index.d.ts b/bindings/uc-ohos-napi/ohos/index.d.ts
+index 7ff27ea0..96e7cdad 100644
+--- a/bindings/uc-ohos-napi/ohos/index.d.ts
++++ b/bindings/uc-ohos-napi/ohos/index.d.ts
+@@ -107,6 +107,11 @@ export interface OhNetworkRecoveryStatus {
+   nextRetryInMs?: number
+ }
+ 
++export interface OhNetworkSettings {
++  allowRelayFallback: boolean
++  customRelayUrls: string[]
++}
++
+ export type OhRelayMode = 'built_in' | 'custom' | 'disabled'
+ 
+ export interface OhRelayOverviewEntry {
+@@ -130,34 +135,69 @@ export interface OhLocalDevice {
+   displayName: string
+ }
+ 
+-export interface OhInvitationIssued {
+-  invitationCode: string
+-  fullInvitation: string
+-  expiresAtMs: number
+-  availability: string
++export interface OhContentTypes {
++  text: boolean
++  image: boolean
++  link: boolean
++  file: boolean
++  codeSnippet: boolean
++  richText: boolean
+ }
+ 
+-export interface OhJoinedSpace {
+-  sponsorDeviceId: string
+-  sponsorIdentityFingerprint: string
+-  spaceId: string
+-  selfDeviceId: string
+-  selfIdentityFingerprint: string
+-  migratedRecords?: string
+-  preservedUnreadableRecords?: string
++export interface OhContentTypesPatch {
++  text?: boolean
++  image?: boolean
++  link?: boolean
++  file?: boolean
++  codeSnippet?: boolean
++  richText?: boolean
+ }
+ 
+-export interface OhJoinSpaceStatus {
+-  status: 'active' | 'pending' | 'processing' | 'rejected' | 'terminated'
+-  joinId: string
+-  joinedSpace?: OhJoinedSpace
+-  targetSpaceId?: string
+-  sponsorDeviceId?: string
+-  sponsorIdentityFingerprint?: string
+-  cancelRequested?: boolean
+-  peerUpgradeRequired: boolean
+-  rejectionReason?: string
+-  terminationReason?: 'cancelled' | 'expired' | 'superseded'
++export interface OhMemberSyncPreferences {
++  sendEnabled: boolean
++  receiveEnabled: boolean
++  sendContentTypes: OhContentTypes
++  receiveContentTypes: OhContentTypes
++}
++
++export interface OhMemberSyncPreferencesPatch {
++  sendEnabled?: boolean
++  receiveEnabled?: boolean
++  sendContentTypes?: OhContentTypesPatch
++  receiveContentTypes?: OhContentTypesPatch
++}
++
++export interface OhPeerConnection {
++  peerId: string
++  deviceName?: string
++  addresses: string[]
++  isPaired: boolean
++  connected: boolean
++  pairingState: string
++  channel: 'direct' | 'relay' | 'offline' | 'unknown'
++  connectionAddress?: string
++}
++
++export interface OhPeerConnectionRefresh {
++  total: number
++  online: number
++  offline: number
++  errors: number
++}
++
++export interface OhWorkspaceConvergence {
++  phase: 'locally_applied' | 'converging' | 'complete' | 'recovery_required'
++  revision: number
++  historyEventCount: number
++  effectiveMemberCount: number
++  pendingRemovalDecisionDeviceIds: string[]
++  pendingRemovalDecisionEventId?: string
++  divergedPeerDeviceIds: string[]
++  upgradeRequiredPeerDeviceIds: string[]
++  convergenceDigest?: string
++  removed: boolean
++  updatedAtMs: number
++  failureCategory?: string
+ }
+ 
+ export interface OhMembershipConvergence {
+@@ -212,6 +252,44 @@ export interface OhMemberRemoval {
+   updatedAtMs: number
+ }
+ 
++export interface OhInvitationIssued {
++  invitationCode: string
++  fullInvitation: string
++  expiresAtMs: number
++  availability: string
++}
++
++export interface OhJoinedSpace {
++  sponsorDeviceId: string
++  sponsorIdentityFingerprint: string
++  spaceId: string
++  selfDeviceId: string
++  selfIdentityFingerprint: string
++  migratedRecords?: string
++  preservedUnreadableRecords?: string
++}
++
++export interface OhJoinSpaceStatus {
++  status: 'active' | 'pending' | 'processing' | 'rejected' | 'terminated'
++  joinId: string
++  joinedSpace?: OhJoinedSpace
++  targetSpaceId?: string
++  sponsorDeviceId?: string
++  sponsorIdentityFingerprint?: string
++  cancelRequested?: boolean
++  peerUpgradeRequired: boolean
++  rejectionReason?: string
++  terminationReason?: 'cancelled' | 'expired' | 'superseded'
++}
++
++export interface OhIncomingPending {
++  entryId: string
++  attemptId?: string
++  fromDevice: string
++  totalBytes?: number
++  filenames: string[]
++}
++
+ export interface OhEngineEvent {
+   kind: string
+   state?: string
+@@ -222,6 +300,8 @@ export interface OhEngineEvent {
+   errorCode?: number
+   errorCategory?: string
+   retryable?: boolean
++  workspaceConvergence?: OhWorkspaceConvergence
++  incomingPending?: OhIncomingPending
+   memberRemoval?: OhMemberRemoval
+   sharedDeviceRefresh?: OhSharedDeviceRefresh
+   networkRecoveryPhase?: 'idle' | 'recovering' | 'retry_scheduled' | 'failed'
+@@ -245,10 +325,20 @@ export interface OhEngine {
+   recoverSession(allowSecureStorageUnlock: boolean): Promise<OhSessionRecovery>
+   recoverNetwork(): Promise<void>
+   queryNetworkRecoveryStatus(): Promise<OhNetworkRecoveryStatus>
++  queryNetworkSettings(): Promise<OhNetworkSettings>
++  updateNetworkSettings(allowRelayFallback: boolean, customRelayUrls: string[]): Promise<OhNetworkSettings>
++  probeRelayUrl(url: string): Promise<number>
+   queryRelayOverview(): Promise<OhRelayOverview>
+   queryLocalDevice(): Promise<OhLocalDevice>
++  /** Serialized camelCase DeviceSummary entries for compatibility with Harmony history UI. */
++  listDevices(): Promise<string>
++  queryPeerConnections(): Promise<OhPeerConnection[]>
++  refreshPeerConnections(): Promise<OhPeerConnectionRefresh>
++  queryMemberSyncPreferences(deviceId: string): Promise<OhMemberSyncPreferences>
++  updateMemberSyncPreferences(deviceId: string, patch: OhMemberSyncPreferencesPatch): Promise<OhMemberSyncPreferences>
++  notifyConnectivityOpportunity(reason: 'foreground' | 'system_wake' | 'network_changed'): Promise<void>
+   queryDeviceGroupChoices(): Promise<string>
+-  queryMembershipConvergence(): Promise<OhMembershipConvergence>
++  chooseDeviceGroup(issueId: string, choiceId: string, expectedRevision: number, confirmLocalRemoval: boolean): Promise<string>
+   issueInvitation(): Promise<OhInvitationIssued>
+   changeEncryptionPassphrase(passphrase: string, passphraseConfirmation: string): Promise<void>
+   joinSpace(
+@@ -258,16 +348,17 @@ export interface OhEngine {
+     preserveUnreadableHistory: boolean
+   ): Promise<OhJoinSpaceStatus>
+   cancelJoinSpace(joinId: string): Promise<OhJoinSpaceStatus>
+-  refreshSharedDevices(): Promise<OhSharedDeviceRefreshStarted>
+-  querySharedDeviceRefresh(requestId: string): Promise<OhSharedDeviceRefresh | null>
+-  removeMember(deviceId: string): Promise<OhMemberRemoval>
+-  queryMemberRemoval(): Promise<OhMemberRemoval>
++  removeMember(deviceId: string): Promise<OhWorkspaceConvergence>
+   queryActiveClipboard(): Promise<OhActiveClipboard | null>
+   lifecycleState(): Promise<string>
+   suspend(): Promise<void>
+   suspendWithDeadline(deadlineMs: number): Promise<void>
+   resume(): Promise<void>
+   sendText(text: string, targetDevices: string[]): Promise<OhSendReport>
++  sendImage(bytes: Uint8Array, mimeType: string, targetDevices: string[]): Promise<OhSendReport>
++  sendFiles(fileHandles: string[], targetDevices: string[]): Promise<OhSendReport>
++  captureCurrentClipboard(): Promise<string | null>
++  restoreClipboard(entryId: string, mode: 'standard' | 'plain_text' | 'file_paths'): Promise<string>
+   exportEntry(entryId: string, destinationHandle: string): Promise<void>
+   nextEvent(timeoutMs: number): Promise<OhEngineEvent | null>
+   shutdown(deadlineMs: number): Promise<void>
+diff --git a/bindings/uc-ohos-napi/src/lib.rs b/bindings/uc-ohos-napi/src/lib.rs
+index ad543a66..28bdfb0a 100644
+--- a/bindings/uc-ohos-napi/src/lib.rs
++++ b/bindings/uc-ohos-napi/src/lib.rs
+@@ -138,6 +138,12 @@ pub struct OhNetworkRecoveryStatus {
+     pub next_retry_in_ms: Option<f64>,
+ }
+ 
++#[napi(object)]
++pub struct OhNetworkSettings {
++    pub allow_relay_fallback: bool,
++    pub custom_relay_urls: Vec<String>,
++}
++
+ /// `source` 为 `built_in` 或 `custom`；`in_effect` 表示运行中的节点按此地址配置，不代表已连通。
+ #[napi(object)]
+ pub struct OhRelayOverviewEntry {
+@@ -163,6 +169,71 @@ pub struct OhLocalDevice {
+     pub display_name: String,
+ }
+ 
++#[napi(object)]
++pub struct OhContentTypes {
++    pub text: bool,
++    pub image: bool,
++    pub link: bool,
++    pub file: bool,
++    pub code_snippet: bool,
++    pub rich_text: bool,
++}
++
++#[napi(object)]
++pub struct OhContentTypesPatch {
++    pub text: Option<bool>,
++    pub image: Option<bool>,
++    pub link: Option<bool>,
++    pub file: Option<bool>,
++    pub code_snippet: Option<bool>,
++    pub rich_text: Option<bool>,
++}
++
++#[napi(object)]
++pub struct OhMemberSyncPreferences {
++    pub send_enabled: bool,
++    pub receive_enabled: bool,
++    pub send_content_types: OhContentTypes,
++    pub receive_content_types: OhContentTypes,
++}
++
++#[napi(object)]
++pub struct OhMemberSyncPreferencesPatch {
++    pub send_enabled: Option<bool>,
++    pub receive_enabled: Option<bool>,
++    pub send_content_types: Option<OhContentTypesPatch>,
++    pub receive_content_types: Option<OhContentTypesPatch>,
++}
++
++#[napi(object)]
++pub struct OhPeerConnection {
++    pub peer_id: String,
++    pub device_name: Option<String>,
++    pub addresses: Vec<String>,
++    pub is_paired: bool,
++    pub connected: bool,
++    pub pairing_state: String,
++    pub channel: String,
++    pub connection_address: Option<String>,
++}
++
++#[napi(object)]
++pub struct OhPeerConnectionRefresh {
++    pub total: u32,
++    pub online: u32,
++    pub offline: u32,
++    pub errors: u32,
++}
++
++#[napi(object)]
++pub struct OhIncomingPending {
++    pub entry_id: String,
++    pub attempt_id: Option<String>,
++    pub from_device: String,
++    pub total_bytes: Option<f64>,
++    pub filenames: Vec<String>,
++}
++
+ #[napi(object)]
+ pub struct OhWorkspaceConvergence {
+     pub phase: String,
+@@ -179,6 +250,55 @@ pub struct OhWorkspaceConvergence {
+     pub failure_category: Option<String>,
+ }
+ 
++#[napi(object)]
++pub struct OhMembershipConvergence {
++    pub state: String,
++    pub pending_count: u32,
++    pub waiting_for_peer_count: u32,
++    pub waiting_for_update_count: u32,
++    pub version_incompatible_count: u32,
++    pub blocked_count: u32,
++    pub rejected_count: u32,
++}
++
++#[napi(object)]
++pub struct OhSharedDeviceRefreshStarted {
++    pub request_id: String,
++}
++
++#[napi(object)]
++pub struct OhSharedDeviceRefreshDevice {
++    pub device_id: String,
++    pub display_name: String,
++    pub state: String,
++}
++
++#[napi(object)]
++pub struct OhSharedDeviceRefresh {
++    pub request_id: String,
++    pub phase: String,
++    pub devices: Vec<OhSharedDeviceRefreshDevice>,
++    pub total_count: u32,
++    pub discovered_count: u32,
++    pub connecting_count: u32,
++    pub connected_count: u32,
++    pub already_present_count: u32,
++    pub waiting_for_peer_count: u32,
++    pub waiting_for_update_count: u32,
++    pub version_incompatible_count: u32,
++    pub rejected_count: u32,
++    pub unavailable_source_count: u32,
++}
++
++#[napi(object)]
++pub struct OhMemberRemoval {
++    pub phase: String,
++    pub intent_count: u32,
++    pub effective_member_count: u32,
++    pub convergence_digest: Option<String>,
++    pub updated_at_ms: f64,
++}
++
+ #[napi(object)]
+ pub struct OhActiveClipboard {
+     pub entry_id: String,
+@@ -248,6 +368,9 @@ pub struct OhEngineEvent {
+     pub network_recovery_phase: Option<String>,
+     pub next_retry_in_ms: Option<f64>,
+     pub re_pairing_scope: Option<String>,
++    pub incoming_pending: Option<OhIncomingPending>,
++    pub member_removal: Option<OhMemberRemoval>,
++    pub shared_device_refresh: Option<OhSharedDeviceRefresh>,
+ }
+ 
+ pub struct PreparedHost {
+diff --git a/bindings/uc-ohos-napi/src/runtime.rs b/bindings/uc-ohos-napi/src/runtime.rs
+index 4489f677..ad01fb25 100644
+--- a/bindings/uc-ohos-napi/src/runtime.rs
++++ b/bindings/uc-ohos-napi/src/runtime.rs
+@@ -8,18 +8,23 @@ use napi_derive::napi;
+ use uc_engine::observability::uc_warn;
+ use uc_engine::{
+     CancelJoinSpaceInput, ChangeEncryptionPassphraseInput, ChooseDeviceGroupInput,
+-    ClipboardRestoreMode, ClipboardRestoreOutcome, CreateSpaceInput, Engine, EngineConfig,
+-    EngineError, EngineEvent, EngineState, EventStream, ExportEntryInput, HostFileHandle,
+-    InvitationAvailability, JoinSpaceInput, Operation, OperationResult, OperationTerminal,
+-    RecoverSessionInput, RefreshReason, RemoveMemberInput, RestoreClipboardInput, SecretString,
+-    SendFilesInput, SendImageInput, SendReportSummary, SendTextInput, StartupLifecycle,
+-    StartupLifecycleInput, StartupProgress,
++    ClipboardRestoreMode, ClipboardRestoreOutcome, ContentTypesPatch, ContentTypesSummary,
++    CreateSpaceInput, Engine, EngineConfig, EngineError, EngineEvent, EngineState, EventStream,
++    ExportEntryInput, HostFileHandle, InvitationAvailability, JoinSpaceInput,
++    MemberSyncPreferencesPatch, MemberSyncPreferencesSummary, NetworkSettingsPatch, Operation,
++    OperationResult, OperationTerminal, QueryMemberSyncPreferencesInput, RecoverSessionInput,
++    RefreshReason, RelayProbeCredential, RelayProbeInput, RelayProbeOutcome, RemoveMemberInput,
++    RestoreClipboardInput, SecretString, SendFilesInput, SendImageInput, SendReportSummary,
++    SendTextInput, SettingsPatch, SettingsUpdateOutcome, StartupLifecycle, StartupLifecycleInput,
++    StartupProgress, UpdateMemberSyncPreferencesInput,
+ };
+ use zeroize::Zeroizing;
+ 
+ use crate::{
+-    host, OhActiveClipboard, OhEngineConfig, OhEngineEvent, OhHost, OhInvitationIssued,
+-    OhJoinSpaceStatus, OhJoinedSpace, OhLocalDevice, OhNetworkRecoveryStatus, OhRelayOverview,
++    host, OhActiveClipboard, OhContentTypes, OhContentTypesPatch, OhEngineConfig, OhEngineEvent,
++    OhHost, OhIncomingPending, OhInvitationIssued, OhJoinSpaceStatus, OhJoinedSpace, OhLocalDevice,
++    OhMemberSyncPreferences, OhMemberSyncPreferencesPatch, OhNetworkRecoveryStatus,
++    OhNetworkSettings, OhPeerConnection, OhPeerConnectionRefresh, OhRelayOverview,
+     OhRelayOverviewEntry, OhSendReport, OhSessionRecovery, OhSpaceCreated, OhWorkspaceConvergence,
+ };
+ 
+@@ -200,6 +205,67 @@ impl OhEngine {
+         }
+     }
+ 
++    #[napi]
++    pub async fn query_network_settings(&self) -> napi::Result<OhNetworkSettings> {
++        match self
++            .engine
++            .execute(Operation::QuerySettings)
++            .await
++            .map_err(engine_error)?
++        {
++            OperationResult::Settings(settings) => Ok(network_settings(&settings)),
++            _ => Err(unexpected_result()),
++        }
++    }
++
++    #[napi]
++    pub async fn update_network_settings(
++        &self,
++        allow_relay_fallback: bool,
++        custom_relay_urls: Vec<String>,
++    ) -> napi::Result<OhNetworkSettings> {
++        let result = self
++            .engine
++            .execute(Operation::UpdateSettings(Box::new(SettingsPatch {
++                network: Some(NetworkSettingsPatch {
++                    allow_relay_fallback: Some(allow_relay_fallback),
++                    custom_relay_urls: Some(custom_relay_urls),
++                    ..NetworkSettingsPatch::default()
++                }),
++                ..SettingsPatch::default()
++            })))
++            .await
++            .map_err(engine_error)?;
++        match result {
++            OperationResult::SettingsUpdated(SettingsUpdateOutcome::Updated(settings)) => {
++                Ok(network_settings(&settings))
++            }
++            OperationResult::SettingsUpdated(SettingsUpdateOutcome::Rejected { reason }) => {
++                Err(napi::Error::new(Status::InvalidArg, reason))
++            }
++            _ => Err(unexpected_result()),
++        }
++    }
++
++    #[napi]
++    pub async fn probe_relay_url(&self, url: String) -> napi::Result<u32> {
++        let result = self
++            .engine
++            .execute(Operation::ProbeRelay(RelayProbeInput {
++                url,
++                credential: RelayProbeCredential::None,
++            }))
++            .await
++            .map_err(engine_error)?;
++        match result {
++            OperationResult::RelayProbed(RelayProbeOutcome::Success { latency_ms }) => {
++                Ok(latency_ms)
++            }
++            OperationResult::RelayProbed(outcome) => Err(relay_probe_error(outcome)),
++            _ => Err(unexpected_result()),
++        }
++    }
++
+     #[napi]
+     pub async fn query_relay_overview(&self) -> napi::Result<OhRelayOverview> {
+         match self
+@@ -250,6 +316,119 @@ impl OhEngine {
+         }
+     }
+ 
++    #[napi]
++    pub async fn query_peer_connections(&self) -> napi::Result<Vec<OhPeerConnection>> {
++        match self
++            .engine
++            .execute(Operation::QueryPeerConnections)
++            .await
++            .map_err(engine_error)?
++        {
++            OperationResult::PeerConnections(peers) => Ok(peers
++                .into_iter()
++                .map(|peer| OhPeerConnection {
++                    peer_id: peer.peer_id,
++                    device_name: peer.device_name,
++                    addresses: peer.addresses,
++                    is_paired: peer.is_paired,
++                    connected: peer.connected,
++                    pairing_state: peer.pairing_state,
++                    channel: peer_connection_channel(peer.channel).to_owned(),
++                    connection_address: peer.connection_address,
++                })
++                .collect()),
++            _ => Err(unexpected_result()),
++        }
++    }
++
++    #[napi]
++    pub async fn list_devices(&self) -> napi::Result<String> {
++        match self
++            .engine
++            .execute(Operation::ListDevices)
++            .await
++            .map_err(engine_error)?
++        {
++            OperationResult::Devices(devices) => {
++                let payload = devices
++                    .into_iter()
++                    .map(|device| {
++                        serde_json::json!({
++                            "deviceId": device.device_id,
++                            "displayName": device.display_name,
++                            "isLocal": device.is_local,
++                            "online": device.online,
++                        })
++                    })
++                    .collect::<Vec<_>>();
++                serde_json::to_string(&payload).map_err(|_| unexpected_result())
++            }
++            _ => Err(unexpected_result()),
++        }
++    }
++
++    #[napi]
++    pub async fn refresh_peer_connections(&self) -> napi::Result<OhPeerConnectionRefresh> {
++        match self
++            .engine
++            .execute(Operation::RefreshPeerConnections)
++            .await
++            .map_err(engine_error)?
++        {
++            OperationResult::PeerConnectionsRefreshed(report) => Ok(OhPeerConnectionRefresh {
++                total: report.total,
++                online: report.online,
++                offline: report.offline,
++                errors: report.errors,
++            }),
++            _ => Err(unexpected_result()),
++        }
++    }
++
++    #[napi]
++    pub async fn query_member_sync_preferences(
++        &self,
++        device_id: String,
++    ) -> napi::Result<OhMemberSyncPreferences> {
++        match self
++            .engine
++            .execute(Operation::QueryMemberSyncPreferences(
++                QueryMemberSyncPreferencesInput { device_id },
++            ))
++            .await
++            .map_err(engine_error)?
++        {
++            OperationResult::MemberSyncPreferences(preferences) => {
++                Ok(member_sync_preferences(preferences))
++            }
++            _ => Err(unexpected_result()),
++        }
++    }
++
++    #[napi]
++    pub async fn update_member_sync_preferences(
++        &self,
++        device_id: String,
++        patch: crate::OhMemberSyncPreferencesPatch,
++    ) -> napi::Result<OhMemberSyncPreferences> {
++        match self
++            .engine
++            .execute(Operation::UpdateMemberSyncPreferences(
++                UpdateMemberSyncPreferencesInput {
++                    device_id,
++                    patch: member_sync_preferences_patch(patch),
++                },
++            ))
++            .await
++            .map_err(engine_error)?
++        {
++            OperationResult::MemberSyncPreferences(preferences) => {
++                Ok(member_sync_preferences(preferences))
++            }
++            _ => Err(unexpected_result()),
++        }
++    }
++
+     #[napi]
+     pub async fn query_device_group_choices(&self) -> napi::Result<String> {
+         match self
+@@ -600,6 +779,80 @@ impl OhEngine {
+     }
+ }
+ 
++fn network_settings(summary: &uc_engine::SettingsSummary) -> OhNetworkSettings {
++    OhNetworkSettings {
++        allow_relay_fallback: summary.network.allow_relay_fallback,
++        custom_relay_urls: summary.network.custom_relay_urls.clone(),
++    }
++}
++
++fn relay_probe_error(outcome: RelayProbeOutcome) -> napi::Error {
++    let message = match outcome {
++        RelayProbeOutcome::InvalidUrl { message }
++        | RelayProbeOutcome::Dns { message }
++        | RelayProbeOutcome::Tls { message }
++        | RelayProbeOutcome::Handshake { message }
++        | RelayProbeOutcome::Other { message } => message,
++        RelayProbeOutcome::Timeout => "relay probe timed out".to_owned(),
++        RelayProbeOutcome::Success { .. } => "unexpected successful relay probe".to_owned(),
++    };
++    napi::Error::new(
++        Status::GenericFailure,
++        format!("relay probe failed: {message}"),
++    )
++}
++
++fn peer_connection_channel(channel: uc_engine::PeerConnectionChannelSummary) -> &'static str {
++    match channel {
++        uc_engine::PeerConnectionChannelSummary::Direct => "direct",
++        uc_engine::PeerConnectionChannelSummary::Relay => "relay",
++        uc_engine::PeerConnectionChannelSummary::Offline => "offline",
++        uc_engine::PeerConnectionChannelSummary::Unknown => "unknown",
++    }
++}
++
++fn member_sync_preferences(summary: MemberSyncPreferencesSummary) -> OhMemberSyncPreferences {
++    OhMemberSyncPreferences {
++        send_enabled: summary.send_enabled,
++        receive_enabled: summary.receive_enabled,
++        send_content_types: content_types(summary.send_content_types),
++        receive_content_types: content_types(summary.receive_content_types),
++    }
++}
++
++fn content_types(summary: ContentTypesSummary) -> OhContentTypes {
++    OhContentTypes {
++        text: summary.text,
++        image: summary.image,
++        link: summary.link,
++        file: summary.file,
++        code_snippet: summary.code_snippet,
++        rich_text: summary.rich_text,
++    }
++}
++
++fn member_sync_preferences_patch(
++    patch: OhMemberSyncPreferencesPatch,
++) -> MemberSyncPreferencesPatch {
++    MemberSyncPreferencesPatch {
++        send_enabled: patch.send_enabled,
++        receive_enabled: patch.receive_enabled,
++        send_content_types: patch.send_content_types.map(content_types_patch),
++        receive_content_types: patch.receive_content_types.map(content_types_patch),
++    }
++}
++
++fn content_types_patch(patch: OhContentTypesPatch) -> ContentTypesPatch {
++    ContentTypesPatch {
++        text: patch.text,
++        image: patch.image,
++        link: patch.link,
++        file: patch.file,
++        code_snippet: patch.code_snippet,
++        rich_text: patch.rich_text,
++    }
++}
++
+ fn workspace_convergence(
+     summary: uc_engine::WorkspaceConvergenceSummary,
+ ) -> napi::Result<OhWorkspaceConvergence> {
+@@ -907,9 +1160,21 @@ fn map_event(event: EngineEvent) -> OhEngineEvent {
+         network_recovery_phase: None,
+         next_retry_in_ms: None,
+         re_pairing_scope: None,
++        incoming_pending: None,
++        member_removal: None,
++        shared_device_refresh: None,
+     };
+     match event {
+         EngineEvent::StateChanged { state } => mapped.state = Some(engine_state(state).to_owned()),
++        EngineEvent::IncomingPending(event) => {
++            mapped.incoming_pending = Some(OhIncomingPending {
++                entry_id: event.entry_id,
++                attempt_id: event.attempt_id,
++                from_device: event.from_device,
++                total_bytes: event.total_bytes.map(|value| value as f64),
++                filenames: event.filenames,
++            });
++        }
+         EngineEvent::RefreshRequired { reason } => {
+             mapped.refresh_reason = Some(refresh_reason(reason).to_owned());
+         }
+@@ -1020,11 +1285,12 @@ fn invalid_restore_mode() -> napi::Error {
+ #[cfg(test)]
+ mod tests {
+     use super::{
+-        count, device_trust_json, engine_error, join_space_status, map_event, workspace_convergence,
++        count, device_trust_json, engine_error, join_space_status, map_event,
++        member_sync_preferences, workspace_convergence,
+     };
+     use uc_engine::{
+-        EngineError, EngineErrorCategory, EngineEvent, OperationResult, OperationTerminal,
+-        RefreshReason,
++        ContentTypesSummary, EngineError, EngineErrorCategory, EngineEvent,
++        MemberSyncPreferencesSummary, OperationResult, OperationTerminal, RefreshReason,
+     };
+ 
+     #[test]
+@@ -1039,6 +1305,63 @@ mod tests {
+         assert_eq!(event.error_code, None);
+     }
+ 
++    #[test]
++    fn incoming_pending_event_keeps_transfer_file_names() {
++        let event = map_event(EngineEvent::IncomingPending(
++            uc_engine::IncomingPendingEvent {
++                entry_id: "entry-1".to_owned(),
++                attempt_id: Some("attempt-1".to_owned()),
++                from_device: "device-a".to_owned(),
++                total_bytes: Some(42),
++                filenames: vec!["report.pdf".to_owned(), "notes.txt".to_owned()],
++            },
++        ));
++
++        assert_eq!(event.kind, "incoming_pending");
++        let pending = event.incoming_pending.expect("pending transfer");
++        assert_eq!(pending.entry_id, "entry-1");
++        assert_eq!(pending.attempt_id.as_deref(), Some("attempt-1"));
++        assert_eq!(pending.from_device, "device-a");
++        assert_eq!(pending.total_bytes, Some(42.0));
++        assert_eq!(
++            pending.filenames,
++            vec!["report.pdf".to_owned(), "notes.txt".to_owned()]
++        );
++    }
++
++    #[test]
++    fn member_sync_preferences_mapping_keeps_all_content_types() {
++        let preferences = member_sync_preferences(MemberSyncPreferencesSummary {
++            send_enabled: false,
++            receive_enabled: true,
++            send_content_types: ContentTypesSummary {
++                text: false,
++                image: true,
++                link: false,
++                file: true,
++                code_snippet: false,
++                rich_text: true,
++            },
++            receive_content_types: ContentTypesSummary {
++                text: true,
++                image: false,
++                link: true,
++                file: false,
++                code_snippet: true,
++                rich_text: false,
++            },
++        });
++
++        assert!(!preferences.send_enabled);
++        assert!(preferences.receive_enabled);
++        assert!(preferences.send_content_types.image);
++        assert!(preferences.send_content_types.file);
++        assert!(preferences.send_content_types.rich_text);
++        assert!(preferences.receive_content_types.text);
++        assert!(preferences.receive_content_types.link);
++        assert!(preferences.receive_content_types.code_snippet);
++    }
++
+     #[test]
+     fn network_recovery_event_keeps_the_stable_status() {
+         let event = map_event(EngineEvent::NetworkRecoveryChanged(
+diff --git a/bindings/uc-ohos-napi/tests/app_project_contract.rs b/bindings/uc-ohos-napi/tests/app_project_contract.rs
+index 4f92f2a5..97e472e1 100644
+--- a/bindings/uc-ohos-napi/tests/app_project_contract.rs
++++ b/bindings/uc-ohos-napi/tests/app_project_contract.rs
+@@ -115,47 +115,43 @@ fn ohos_probe_page_loads_the_engine_version_from_napi() {
+ }
+ 
+ #[test]
+-fn ohos_probe_exposes_membership_convergence_from_the_engine() {
++fn ohos_probe_observes_workspace_convergence_from_the_engine() {
+     let declarations = read("bindings/uc-ohos-napi/ohos/index.d.ts");
+     let runtime = read("tests/hosts/ohos/entry/src/main/ets/host/EngineRuntime.ets");
+     let page = read("tests/hosts/ohos/entry/src/main/ets/pages/Index.ets");
+ 
+-    assert!(declarations.contains("queryMembershipConvergence(): Promise<OhMembershipConvergence>"));
+-    assert!(runtime.contains("active.queryMembershipConvergence()"));
+-    assert!(runtime.contains("convergenceState"));
++    assert!(
++        declarations.contains("removeMember(deviceId: string): Promise<OhWorkspaceConvergence>")
++    );
++    assert!(declarations.contains("workspaceConvergence?: OhWorkspaceConvergence"));
++    assert!(runtime.contains("active.nextEvent(0)"));
++    assert!(runtime.contains("event.workspaceConvergence.phase"));
+     assert!(page.contains("snapshot.convergenceState"));
++    assert!(page.contains("snapshot.workspaceConvergenceState"));
+ }
+ 
+ #[test]
+-fn ohos_probe_exposes_the_complete_member_removal_contract() {
++fn ohos_probe_exposes_the_rc22_member_removal_contract_without_a_stale_query_api() {
+     let declarations = read("bindings/uc-ohos-napi/ohos/index.d.ts");
+     let runtime = read("tests/hosts/ohos/entry/src/main/ets/host/EngineRuntime.ets");
+     let page = read("tests/hosts/ohos/entry/src/main/ets/pages/Index.ets");
++    let native = read("bindings/uc-ohos-napi/src/runtime.rs");
+ 
+-    for method in [
+-        "removeMember(deviceId: string): Promise<OhMemberRemoval>",
+-        "queryMemberRemoval(): Promise<OhMemberRemoval>",
+-        "nextEvent(timeoutMs: number): Promise<OhEngineEvent | null>",
+-    ] {
+-        assert!(declarations.contains(method), "missing method: {method}");
+-    }
+-    for field in [
+-        "phase: 'applied' | 'converging' | 'complete' | 'recovery_required'",
+-        "intentCount: number",
+-        "effectiveMemberCount: number",
+-        "convergenceDigest?: string",
+-        "updatedAtMs: number",
+-        "memberRemoval?: OhMemberRemoval",
+-    ] {
+-        assert!(declarations.contains(field), "missing field: {field}");
+-    }
+-    assert!(runtime.contains("active.queryMemberRemoval()"));
+-    assert!(runtime.contains("effectiveMemberCount: removal.effectiveMemberCount"));
+-    assert!(runtime.contains("updatedAtMs: removal.updatedAtMs"));
+-    assert!(page.contains("snapshot.memberRemovalState"));
+-    assert!(page.contains("Button('Member removal')"));
+-    assert!(page.contains("Member removal query failed"));
+-    assert!(page.contains("void this.queryCurrentMemberRemoval();"));
++    assert!(
++        declarations.contains("removeMember(deviceId: string): Promise<OhWorkspaceConvergence>")
++    );
++    assert!(declarations
++        .contains("phase: 'locally_applied' | 'converging' | 'complete' | 'recovery_required'"));
++    assert!(declarations.contains("historyEventCount: number"));
++    assert!(declarations.contains("effectiveMemberCount: number"));
++    assert!(declarations.contains("workspaceConvergence?: OhWorkspaceConvergence"));
++    assert!(native.contains("Operation::RemoveMember(RemoveMemberInput { device_id })"));
++    assert!(runtime.contains("active.nextEvent(0)"));
++    assert!(runtime.contains("applyWorkspaceConvergence(event.workspaceConvergence)"));
++    assert!(page.contains("Button('Next engine event')"));
++    assert!(page.contains("Engine event poll failed"));
++    assert!(!runtime.contains("queryMembershipConvergence"));
++    assert!(!runtime.contains("queryMemberRemoval"));
+ }
+ 
+ #[test]
+diff --git a/bindings/uc-ohos-napi/tests/public_contract.rs b/bindings/uc-ohos-napi/tests/public_contract.rs
+index 105d56ab..a4fbec21 100644
+--- a/bindings/uc-ohos-napi/tests/public_contract.rs
++++ b/bindings/uc-ohos-napi/tests/public_contract.rs
+@@ -1,10 +1,7 @@
+ use std::fs;
+ use std::path::Path;
+ 
+-use uc_ohos_napi::{
+-    core_version, install_process_observability, query_process_observability_health,
+-    shutdown_process_observability, OhHostDirectories, OhObservabilityConfig,
+-};
++use uc_ohos_napi::core_version;
+ 
+ #[test]
+ fn core_version_uses_the_binding_package_version() {
+@@ -126,3 +123,31 @@ fn typescript_contract_exposes_join_upgrade_status() {
+         );
+     }
+ }
++
++#[test]
++fn typescript_contract_matches_rc22_media_network_and_membership_exports() {
++    let declarations = include_str!("../ohos/index.d.ts");
++    for required in [
++        "queryRelayOverview(): Promise<OhRelayOverview>",
++        "queryNetworkSettings(): Promise<OhNetworkSettings>",
++        "updateNetworkSettings(allowRelayFallback: boolean, customRelayUrls: string[]): Promise<OhNetworkSettings>",
++        "probeRelayUrl(url: string): Promise<number>",
++        "queryMemberSyncPreferences(deviceId: string): Promise<OhMemberSyncPreferences>",
++        "updateMemberSyncPreferences(deviceId: string, patch: OhMemberSyncPreferencesPatch): Promise<OhMemberSyncPreferences>",
++        "sendImage(bytes: Uint8Array, mimeType: string, targetDevices: string[]): Promise<OhSendReport>",
++        "sendFiles(fileHandles: string[], targetDevices: string[]): Promise<OhSendReport>",
++        "captureCurrentClipboard(): Promise<string | null>",
++        "restoreClipboard(entryId: string, mode: 'standard' | 'plain_text' | 'file_paths'): Promise<string>",
++        "incomingPending?: OhIncomingPending",
++        "filenames: string[]",
++        "listDevices(): Promise<string>",
++        "removeMember(deviceId: string): Promise<OhWorkspaceConvergence>",
++        "startEngine(",
++        "lifecycle: OhStartupLifecycle",
++    ] {
++        assert!(
++            declarations.contains(required),
++            "OHOS declarations missing {required}"
++        );
++    }
++}
+diff --git a/tests/hosts/ohos/entry/src/main/ets/host/EngineRuntime.ets b/tests/hosts/ohos/entry/src/main/ets/host/EngineRuntime.ets
+index 57c7b669..6b652445 100644
+--- a/tests/hosts/ohos/entry/src/main/ets/host/EngineRuntime.ets
++++ b/tests/hosts/ohos/entry/src/main/ets/host/EngineRuntime.ets
+@@ -1,5 +1,5 @@
+ import engine from 'libuc_ohos_napi.so';
+-import type { OhEngine, OhMemberRemoval, OhStartupLifecycle } from 'libuc_ohos_napi.so';
++import type { OhEngine, OhStartupLifecycle, OhWorkspaceConvergence } from 'libuc_ohos_napi.so';
+ import { common } from '@kit.AbilityKit';
+ import { util } from '@kit.ArkTS';
+ import { picker } from '@kit.CoreFileKit';
+@@ -17,7 +17,7 @@ export interface EngineRuntimeSnapshot {
+   details: string;
+   ready: boolean;
+   convergenceState: string;
+-  memberRemovalState: string;
++  workspaceConvergenceState: string;
+ }
+ 
+ class EngineRuntime {
+@@ -31,8 +31,8 @@ class EngineRuntime {
+   private version: string = 'Loading';
+   private status: string = 'Checking unified core';
+   private details: string = '';
+-  private convergenceState: string = 'complete';
+-  private memberRemovalState: string = 'none';
++  private convergenceState: string = 'not_observed';
++  private workspaceConvergenceState: string = 'none';
+ 
+   async start(context: common.UIAbilityContext): Promise<EngineRuntimeSnapshot> {
+     if (this.activeEngine !== undefined || this.startupLifecycle !== undefined) {
+@@ -78,8 +78,7 @@ class EngineRuntime {
+           'system-host-acceptance'
+         )).selfDeviceId;
+       }
+-      this.convergenceState = (await active.queryMembershipConvergence()).state;
+-      this.applyMemberRemoval(await active.queryMemberRemoval());
++
+       this.activeEngine = active;
+       this.startupLifecycle = undefined;
+       this.status = 'Ready';
+@@ -161,12 +160,16 @@ class EngineRuntime {
+     }
+   }
+ 
+-  async queryCurrentMemberRemoval(): Promise<EngineRuntimeSnapshot> {
++  async pollNextEvent(): Promise<EngineRuntimeSnapshot> {
+     const active = this.activeEngine;
+     if (active === undefined) {
+       throw new Error('OHOS_ENGINE_NOT_READY');
+     }
+-    this.applyMemberRemoval(await active.queryMemberRemoval());
++    const event = await active.nextEvent(0);
++    if (event !== null && event.workspaceConvergence !== undefined) {
++      this.convergenceState = event.workspaceConvergence.phase;
++      this.applyWorkspaceConvergence(event.workspaceConvergence);
++    }
+     return this.snapshot();
+   }
+ 
+@@ -177,7 +180,7 @@ class EngineRuntime {
+       details: this.details,
+       ready: this.activeEngine !== undefined && this.status === 'Ready',
+       convergenceState: this.convergenceState,
+-      memberRemovalState: this.memberRemovalState
++      workspaceConvergenceState: this.workspaceConvergenceState
+     };
+   }
+ 
+@@ -207,19 +210,18 @@ class EngineRuntime {
+     if (recoveredIdentity !== this.identityDeviceId) {
+       throw new Error('OHOS_IDENTITY_CHANGED');
+     }
+-    this.convergenceState = (await active.queryMembershipConvergence()).state;
+-    this.applyMemberRemoval(await active.queryMemberRemoval());
++
+     this.status = 'Ready';
+     this.details = '';
+   }
+ 
+-  private applyMemberRemoval(removal: OhMemberRemoval): void {
+-    this.memberRemovalState = JSON.stringify({
+-      phase: removal.phase,
+-      intentCount: removal.intentCount,
+-      effectiveMemberCount: removal.effectiveMemberCount,
+-      convergenceDigest: removal.convergenceDigest,
+-      updatedAtMs: removal.updatedAtMs
++  private applyWorkspaceConvergence(summary: OhWorkspaceConvergence): void {
++    this.workspaceConvergenceState = JSON.stringify({
++      phase: summary.phase,
++      revision: summary.revision,
++      historyEventCount: summary.historyEventCount,
++      effectiveMemberCount: summary.effectiveMemberCount,
++      updatedAtMs: summary.updatedAtMs
+     });
+   }
+ 
+diff --git a/tests/hosts/ohos/entry/src/main/ets/pages/Index.ets b/tests/hosts/ohos/entry/src/main/ets/pages/Index.ets
+index 00478639..8aedeb95 100644
+--- a/tests/hosts/ohos/entry/src/main/ets/pages/Index.ets
++++ b/tests/hosts/ohos/entry/src/main/ets/pages/Index.ets
+@@ -13,7 +13,7 @@ struct Index {
+   @State private ready: boolean = false;
+   @State private exporting: boolean = false;
+   @State private convergenceState: string = 'complete';
+-  @State private memberRemovalState: string = 'none';
++  @State private workspaceConvergenceState: string = 'none';
+ 
+   aboutToAppear(): void {
+     this.start().catch((error: Object) => this.fail(error));
+@@ -30,7 +30,7 @@ struct Index {
+     this.details = snapshot.details;
+     this.ready = snapshot.ready;
+     this.convergenceState = snapshot.convergenceState;
+-    this.memberRemovalState = snapshot.memberRemovalState;
++    this.workspaceConvergenceState = snapshot.workspaceConvergenceState;
+   }
+ 
+   private fail(error: Object): void {
+@@ -54,16 +54,16 @@ struct Index {
+     }
+   }
+ 
+-  private async queryCurrentMemberRemoval(): Promise<void> {
++  private async pollNextEvent(): Promise<void> {
+     if (!this.ready) {
+       return;
+     }
+     try {
+-      this.applySnapshot(await engineRuntime.queryCurrentMemberRemoval());
++      this.applySnapshot(await engineRuntime.pollNextEvent());
+     } catch (error) {
+       this.applySnapshot(engineRuntime.snapshot());
+       this.details = String(error);
+-      hilog.error(DOMAIN, 'EngineProbe', 'Member removal query failed: %{public}s', JSON.stringify(error));
++      hilog.error(DOMAIN, 'EngineProbe', 'Engine event poll failed: %{public}s', JSON.stringify(error));
+     }
+   }
+ 
+@@ -84,12 +84,12 @@ struct Index {
+       Text(this.convergenceState)
+         .fontSize(14)
+         .fontColor('#5B6570')
+-      Text(this.memberRemovalState)
++      Text(this.workspaceConvergenceState)
+         .fontSize(12)
+         .fontColor('#5B6570')
+       if (this.ready) {
+-        Button('Member removal')
+-          .onClick(() => { void this.queryCurrentMemberRemoval(); })
++        Button('Next engine event')
++          .onClick(() => { void this.pollNextEvent(); })
+         Button(this.exporting ? 'Exporting' : 'Export sample')
+           .enabled(!this.exporting)
+           .onClick(() => { void this.exportSample(); })

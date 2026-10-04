@@ -20,6 +20,8 @@ class PersistedHistoryRecord {
   direction: string = '';
   time: string = '';
   kind: string = 'Text';
+  fileName: string = '';
+  fileNames: string[] = [];
   payloadPath: string = '';
   timestampMs: number = 0;
   starred: boolean = false;
@@ -30,12 +32,14 @@ class PersistedHistoryRecord {
 
   constructor(id: string, text: string, direction: string, time: string, kind: string,
     payloadPath: string, timestampMs: number, starred: boolean, tags: string[], isSnippet: boolean,
-    sourceDevice: string, occurrenceCount: number) {
+    sourceDevice: string, occurrenceCount: number, fileName: string = '', fileNames: string[] = []) {
     this.id = id;
     this.text = text;
     this.direction = direction;
     this.time = time;
     this.kind = kind;
+    this.fileName = fileName;
+    this.fileNames = fileNames.slice();
     this.payloadPath = payloadPath;
     this.timestampMs = timestampMs;
     this.starred = starred;
@@ -83,6 +87,14 @@ export class HistoryStorageService {
       }
       let pixelMap: image.PixelMap | null = null;
       let filePath: string = '';
+      let fileName: string = record.fileName === undefined ? '' : record.fileName;
+      let fileNames: string[] = record.fileNames === undefined ? [] : record.fileNames;
+      if (record.kind === 'File' && fileName.length === 0) {
+        fileName = record.text;
+      }
+      if (record.kind === 'File' && fileNames.length === 0 && fileName.length > 0) {
+        fileNames = [fileName];
+      }
       if (record.kind === 'Image' && record.payloadPath.length > 0) {
         pixelMap = await this.loadImage(record.payloadPath);
       } else if (record.kind === 'File') {
@@ -94,7 +106,8 @@ export class HistoryStorageService {
       }
       items.push(new ClipboardHistoryItem(record.id, record.text, record.direction, record.time,
         record.kind, pixelMap, null, filePath, record.timestampMs, record.starred === true,
-        record.tags, record.isSnippet === true, record.sourceDevice, Math.max(1, record.occurrenceCount)));
+        record.tags, record.isSnippet === true, record.sourceDevice, Math.max(1, record.occurrenceCount),
+        fileName, fileNames));
       retainedRecords.push(record);
       if (record.payloadPath.length > 0 && this.isManagedPath(context, record.payloadPath)) {
         activePaths.add(record.payloadPath);
@@ -124,7 +137,7 @@ export class HistoryStorageService {
       }
       records.push(new PersistedHistoryRecord(item.id, item.text, item.direction, item.time,
         item.kind, payloadPath, item.timestampMs, item.starred, item.tags, item.isSnippet,
-        item.sourceDevice, item.occurrenceCount));
+        item.sourceDevice, item.occurrenceCount, item.fileName, item.fileNames));
     }
     this.writeRecords(context, records);
     this.removeUnusedPayloads(context, oldRecords, activePaths);
@@ -280,7 +293,8 @@ export class HistoryStorageService {
       this.fileExists(item.filePath)) {
       return item.filePath;
     }
-    let targetPath: string = this.filePath(context, item.id, item.text);
+    let targetPath: string = this.filePath(context, item.id,
+      item.fileName.length > 0 ? item.fileName : item.text);
     try {
       if (item.fileData !== null && item.fileData.length > 0) {
         let file: fileIo.File = fileIo.openSync(targetPath,
@@ -315,7 +329,8 @@ export class HistoryStorageService {
     if (this.isManagedPath(context, sourcePath)) {
       return this.fileExists(sourcePath) ? sourcePath : '';
     }
-    let targetPath: string = this.filePath(context, record.id, record.text);
+    let fileName: string = record.fileName === undefined || record.fileName.length === 0 ? record.text : record.fileName;
+    let targetPath: string = this.filePath(context, record.id, fileName);
     let source: fileIo.File | null = null;
     try {
       source = fileIo.openSync(sourcePath, fileIo.OpenMode.READ_ONLY);

@@ -1,0 +1,227 @@
+{
+  "schemaVersion": 1,
+  "release": {
+    "version": "v1.1.0-rc.22",
+    "commit": "18415aa83a47bd3870c2a1f114b268fc3ed0495a",
+    "rustToolchain": "1.95.0",
+    "cargoLockSha256": "ec0f38f78911f9cd9ee3cf77cd8e34f6ff93cbecf344f2e5c11ffafc3116b027"
+  },
+  "generators": {
+    "uniffi": "0.31.1",
+    "napi": "2.16.17",
+    "napiBuild": "2.3.2",
+    "napiDerive": "2.16.13",
+    "kotlin": "2.1.20",
+    "swift": "UniFFI 0.31.1",
+    "arkts": "napi-rs 2.16.17"
+  },
+  "compatibility": {
+    "p2pProtocols": [
+      "pairing/1",
+      "presence/0",
+      "clipboard/0",
+      "active-clipboard/0",
+      "active-clipboard-pull/0",
+      "transfer-progress/0",
+      "iroh-blobs"
+    ],
+    "database": "Diesel SQLite embedded migrations",
+    "latestMigration": "2026-09-13-000003_group_update_delivery",
+    "minimumSystems": {
+      "ios": "16.4",
+      "androidApi": 24,
+      "harmonyosApi": 24
+    }
+  },
+  "deviceMatrix": {
+    "ios": {
+      "status": "skipped",
+      "reason": "No physical-device acceptance was run for this build"
+    },
+    "android": {
+      "status": "skipped",
+      "reason": "No physical-device acceptance was run for this build"
+    },
+    "harmonyos": {
+      "status": "skipped",
+      "reason": "No physical-device acceptance was run for this build"
+    }
+  },
+  "artifacts": [
+    {
+      "name": "Cargo.lock",
+      "platform": "source",
+      "architectures": [],
+      "sha256": "ec0f38f78911f9cd9ee3cf77cd8e34f6ff93cbecf344f2e5c11ffafc3116b027",
+      "size": 206229
+    },
+    {
+      "name": "LICENSE",
+      "platform": "source",
+      "architectures": [],
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "size": 11358
+    },
+    {
+      "name": "UniClipboardEngine-source.tar.gz",
+      "platform": "source",
+      "architectures": [],
+      "sha256": "30706ca30cf85c8943d09ca87ae8bf7c820b5f14b484ed658357c5af4f90358b",
+      "size": 5395834
+    },
+    {
+      "name": "UniClipboardEngine.aar",
+      "platform": "android",
+      "architectures": [
+        "arm64-v8a",
+        "x86_64"
+      ],
+      "sha256": "786305a656b3a5dc3c5da0f4b7e8d49b72e3dff8f0ecbf912b28ba10cfb49d35",
+      "size": 12425351
+    },
+    {
+      "name": "UniClipboardEngine.aar.checksum.txt",
+      "platform": "source",
+      "architectures": [],
+      "sha256": "e2f11def0db8aaad1dd472404f8ef648d27e2f8e71c7acf301562a9e330cb0e3",
+      "size": 65
+    },
+    {
+      "name": "UniClipboardEngine.har",
+      "platform": "harmonyos",
+      "architectures": [
+        "arm64-v8a"
+      ],
+      "sha256": "df65472233da55754e7108b6dcef30ad777faab1efe0504c706411c19a461cb7",
+      "size": 30451988
+    },
+    {
+      "name": "UniClipboardEngine.har.checksum.txt",
+      "platform": "harmonyos",
+      "architectures": [
+        "arm64-v8a"
+      ],
+      "sha256": "25483e52d6e0ec0fb249efc4033eb2f3e8894019864775547d1a1fe960e6176e",
+      "size": 65
+    },
+    {
+      "name": "UniClipboardEngine.pom",
+      "platform": "android",
+      "architectures": [],
+      "sha256": "955a4cc2d54f47dd8d3c1a18a1c780b3688f3271abefcb753f455c8000044c4c",
+      "size": 704
+    },
+    {
+      "name": "UniClipboardEngine.xcframework.checksum.txt",
+      "platform": "ios",
+      "architectures": [
+        "arm64-device",
+        "arm64-simulator",
+        "x86_64-simulator"
+      ],
+      "sha256": "0944bd640adc8e19af98f291a532c0fdcd29352af753f525668cf884a6d3c510",
+      "size": 65
+    },
+    {
+      "name": "UniClipboardEngine.xcframework.zip",
+      "platform": "ios",
+      "architectures": [
+        "arm64-device",
+        "arm64-simulator",
+        "x86_64-simulator"
+      ],
+      "sha256": "f217c7443e20af09ca03b6569a9a2d0d749eb83f63ee1fc57a82fc0c005e2dc2",
+      "size": 258136990
+    },
+    {
+      "name": "UniClipboardEngineProbe.checksum.txt",
+      "platform": "source",
+      "architectures": [],
+      "sha256": "facb31fb7556d04dc5b2b3dc7a1c80d4d1822cd586e9dbe80e7d8637890166c5",
+      "size": 65
+    },
+    {
+      "name": "UniClipboardEngineProbe.hap",
+      "platform": "harmonyos",
+      "architectures": [
+        "arm64-v8a"
+      ],
+      "sha256": "1b142b9dc76124655f8a9961134f575a6fd9b62575b622ff633ff5b49672cb10",
+      "size": 101341004
+    },
+    {
+      "name": "debug-symbols.tar.gz",
+      "platform": "multi-platform",
+      "architectures": [],
+      "sha256": "963aa6615d019827d71495f8d7a3000c3ea51b1d35667050be3f4dd341e9f32e",
+      "size": 336233557
+    },
+    {
+      "name": "dependency-licenses.json",
+      "platform": "source",
+      "architectures": [],
+      "sha256": "6d86d0ffcc29f479cc4c2b65ec3057396b938f1c48c4d10f453c20dd335c5577",
+      "size": 138191
+    },
+    {
+      "name": "index.d.ts",
+      "platform": "harmonyos",
+      "architectures": [],
+      "sha256": "0b1edae4e73fca4a3ab9c808d0e467fd525becc43b29dad3b5dafcf864b52043",
+      "size": 11433
+    },
+    {
+      "name": "libuc_ohos_napi.so",
+      "platform": "harmonyos",
+      "architectures": [
+        "arm64-v8a"
+      ],
+      "sha256": "40c04409e15db5a4945ce069fb8eb3b2fc6fb39aa229769ffc1a4bbf3e0e9b81",
+      "size": 268527296
+    },
+    {
+      "name": "runtime-dependencies.txt",
+      "platform": "android",
+      "architectures": [],
+      "sha256": "b9e41a3759a188241696301e4595be76bb660bd5c0734ed852198baa70873403",
+      "size": 74
+    },
+    {
+      "name": "source-commit.txt",
+      "platform": "source",
+      "architectures": [],
+      "sha256": "fafbffec4081e05233ca793895fa30e173a2a08c3701ad9772d4da5aed8faded",
+      "size": 41
+    },
+    {
+      "name": "uc-ohos-napi.checksum.txt",
+      "platform": "harmonyos",
+      "architectures": [
+        "arm64-v8a"
+      ],
+      "sha256": "e080efc746ea4caaba6b02552367126215ba76b9d9eb395791b72b18e263dc95",
+      "size": 65
+    },
+    {
+      "name": "uc_engine_uniffi.kt",
+      "platform": "android",
+      "architectures": [],
+      "sha256": "c56c1f92231a893b06fa46d9282c1590392b98513081ecd1c436da61dbd0e2a9",
+      "size": 360506
+    },
+    {
+      "name": "uc_engine_uniffi.swift",
+      "platform": "ios",
+      "architectures": [],
+      "sha256": "db0b96c90a59b89802f54ccf49f5d6fc10357fc8a8de710a80ad8602941321cd",
+      "size": 325250
+    },
+    {
+      "name": "version.txt",
+      "platform": "source",
+      "architectures": [],
+      "sha256": "d83803910f28d6dac1b5211e8fde9ab6896c93af10243cf0a3d8d0905f944586",
+      "size": 13
+    }
+  ]
+}
