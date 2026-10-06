@@ -1,435 +1,461 @@
 export interface OhFileMetadata {
-    displayName: string;
-    sizeBytes: string;
-    mimeType?: string;
+  displayName: string
+  sizeBytes: string
+  mimeType?: string
 }
+
 export interface OhClipboardRepresentation {
-    kind: string;
-    format: string;
-    mimeType?: string;
-    bytes?: Uint8Array;
-    handle?: string;
-    displayName?: string;
-    sizeBytes?: string;
+  kind: string
+  format: string
+  mimeType?: string
+  bytes?: Uint8Array
+  handle?: string
+  displayName?: string
+  sizeBytes?: string
 }
+
 export interface OhClipboardSnapshot {
-    observedAtMs: number;
-    representations: OhClipboardRepresentation[];
+  observedAtMs: number
+  representations: OhClipboardRepresentation[]
 }
+
 export interface OhHost {
-    privateDataDirectory: string;
-    cacheDirectory: string;
-    temporaryDirectory: string;
-    secureStorageGet(key: string): OhHostResult<Uint8Array | null>;
-    secureStorageSet(key: string, value: Uint8Array): OhHostResult<void>;
-    secureStorageDelete(key: string): OhHostResult<void>;
-    fileMetadata(handle: string): OhHostResult<OhFileMetadata>;
-    fileReadChunk(handle: string, offset: string, maxBytes: number): OhHostResult<Uint8Array>;
-    fileWriteChunk(handle: string, offset: string, bytes: Uint8Array): OhHostResult<void>;
-    fileFinishWrite(handle: string): OhHostResult<void>;
-    clipboardRead(): OhHostResult<OhClipboardSnapshot>;
-    clipboardWrite(snapshot: OhClipboardSnapshot): OhHostResult<void>;
+  privateDataDirectory: string
+  cacheDirectory: string
+  temporaryDirectory: string
+  secureStorageGet(key: string): OhHostResult<Uint8Array | null>
+  secureStorageSet(key: string, value: Uint8Array): OhHostResult<void>
+  secureStorageDelete(key: string): OhHostResult<void>
+  fileMetadata(handle: string): OhHostResult<OhFileMetadata>
+  fileReadChunk(handle: string, offset: string, maxBytes: number): OhHostResult<Uint8Array>
+  fileWriteChunk(handle: string, offset: string, bytes: Uint8Array): OhHostResult<void>
+  fileFinishWrite(handle: string): OhHostResult<void>
+  clipboardRead(): OhHostResult<OhClipboardSnapshot>
+  clipboardWrite(snapshot: OhClipboardSnapshot): OhHostResult<void>
 }
+
 export interface OhHostResult<T> {
-    ok: boolean;
-    value?: T;
-    errorCategory?: string;
+  ok: boolean
+  value?: T
+  errorCategory?: string
 }
-export type PreparedHost = object;
+
+export type PreparedHost = object
+
 export interface OhHostDirectories {
-    privateDataDirectory: string;
-    cacheDirectory: string;
-    temporaryDirectory: string;
+  privateDataDirectory: string
+  cacheDirectory: string
+  temporaryDirectory: string
 }
+
 export interface OhCollectorConfig {
-    traceEndpoint: string;
-    logEndpoint: string;
-    authHeaderName?: string;
-    authHeaderValue?: string;
+  traceEndpoint: string
+  logEndpoint: string
+  authHeaderName?: string
+  authHeaderValue?: string
 }
+
 export interface OhObservabilityConfig {
-    serviceVersion: string;
-    environment: 'development' | 'test' | 'staging' | 'production';
-    appChannel: string;
-    remoteDiagnosticsEnabled: boolean;
-    collector?: OhCollectorConfig;
+  serviceVersion: string
+  environment: 'development' | 'test' | 'staging' | 'production'
+  appChannel: string
+  remoteDiagnosticsEnabled: boolean
+  collector?: OhCollectorConfig
 }
+
 export interface OhObservabilitySetup {
-    reused: boolean;
-    remote: 'disabled' | 'ready' | 'unavailable';
-    localFile: 'disabled' | 'ready' | 'unavailable';
-    droppedLocalRecords: number;
+  reused: boolean
+  remote: 'disabled' | 'ready' | 'unavailable'
+  localFile: 'disabled' | 'ready' | 'unavailable'
+  droppedLocalRecords: number
 }
+
 export interface OhObservabilityHealth {
-    remote: 'disabled' | 'ready' | 'unavailable';
-    remoteSetupFailure?: 'http_client' | 'trace_exporter' | 'log_exporter';
-    localFile: 'disabled' | 'ready' | 'unavailable';
-    droppedLocalRecords: number;
-    droppedRemoteSpans: number;
-    droppedRemoteLogs: number;
-    failedRemoteSpanBatches: number;
-    failedRemoteLogBatches: number;
+  remote: 'disabled' | 'ready' | 'unavailable'
+  remoteSetupFailure?: 'http_client' | 'trace_exporter' | 'log_exporter'
+  localFile: 'disabled' | 'ready' | 'unavailable'
+  droppedLocalRecords: number
+  droppedRemoteSpans: number
+  droppedRemoteLogs: number
+  failedRemoteSpanBatches: number
+  failedRemoteLogBatches: number
 }
+
 export interface OhObservabilitySignalSummary {
-    traces: 'completed' | 'failed' | 'timed_out' | 'already_shutdown';
-    logs: 'completed' | 'failed' | 'timed_out' | 'already_shutdown';
+  traces: 'completed' | 'failed' | 'timed_out' | 'already_shutdown'
+  logs: 'completed' | 'failed' | 'timed_out' | 'already_shutdown'
 }
+
 export interface OhSendReport {
-    entryId: string;
-    atMs: number;
-    totalAccepted: number;
-    totalDuplicate: number;
-    totalOffline: number;
-    totalErrored: number;
-    totalPending: number;
+  entryId: string
+  atMs: number
+  totalAccepted: number
+  totalDuplicate: number
+  totalOffline: number
+  totalErrored: number
+  totalPending: number
 }
+
 export interface OhSessionRecovery {
-    unlocked: boolean;
-    resumed: boolean;
+  unlocked: boolean
+  resumed: boolean
 }
+
 export interface OhNetworkRecoveryStatus {
-    phase: 'idle' | 'recovering' | 'retry_scheduled' | 'failed';
-    retryable: boolean;
-    nextRetryInMs?: number;
+  phase: 'idle' | 'recovering' | 'retry_scheduled' | 'failed'
+  retryable: boolean
+  nextRetryInMs?: number
 }
+
 export interface OhNetworkSettings {
-    allowRelayFallback: boolean;
-    customRelayUrls: string[];
+  allowRelayFallback: boolean
+  customRelayUrls: string[]
 }
-export type OhRelayMode = 'built_in' | 'custom' | 'disabled';
+
+export type OhRelayMode = 'built_in' | 'custom' | 'disabled'
+
 export interface OhRelayOverviewEntry {
-    source: 'built_in' | 'custom';
-    regionId?: string;
-    url: string;
-    credentialConfigured: boolean;
-    /** The running node is configured with this relay. It does not mean the relay is connected. */
-    inEffect: boolean;
+  source: 'built_in' | 'custom'
+  regionId?: string
+  url: string
+  credentialConfigured: boolean
+  /** The running node is configured with this relay. It does not mean the relay is connected. */
+  inEffect: boolean
 }
+
 export interface OhRelayOverview {
-    savedMode: OhRelayMode;
-    appliedMode?: OhRelayMode;
-    changePending: boolean;
-    entries: OhRelayOverviewEntry[];
+  savedMode: OhRelayMode
+  appliedMode?: OhRelayMode
+  changePending: boolean
+  entries: OhRelayOverviewEntry[]
 }
+
 export interface OhLocalDevice {
-    deviceId: string;
-    displayName: string;
+  deviceId: string
+  displayName: string
 }
+
 export interface OhContentTypes {
-    text: boolean;
-    image: boolean;
-    link: boolean;
-    file: boolean;
-    codeSnippet: boolean;
-    richText: boolean;
+  text: boolean
+  image: boolean
+  link: boolean
+  file: boolean
+  codeSnippet: boolean
+  richText: boolean
 }
+
 export interface OhContentTypesPatch {
-    text?: boolean;
-    image?: boolean;
-    link?: boolean;
-    file?: boolean;
-    codeSnippet?: boolean;
-    richText?: boolean;
+  text?: boolean
+  image?: boolean
+  link?: boolean
+  file?: boolean
+  codeSnippet?: boolean
+  richText?: boolean
 }
+
 export interface OhMemberSyncPreferences {
-    sendEnabled: boolean;
-    receiveEnabled: boolean;
-    sendContentTypes: OhContentTypes;
-    receiveContentTypes: OhContentTypes;
+  sendEnabled: boolean
+  receiveEnabled: boolean
+  sendContentTypes: OhContentTypes
+  receiveContentTypes: OhContentTypes
 }
+
 export interface OhMemberSyncPreferencesPatch {
-    sendEnabled?: boolean;
-    receiveEnabled?: boolean;
-    sendContentTypes?: OhContentTypesPatch;
-    receiveContentTypes?: OhContentTypesPatch;
+  sendEnabled?: boolean
+  receiveEnabled?: boolean
+  sendContentTypes?: OhContentTypesPatch
+  receiveContentTypes?: OhContentTypesPatch
 }
+
 export interface OhPeerConnection {
-    peerId: string;
-    deviceName?: string;
-    addresses: string[];
-    isPaired: boolean;
-    connected: boolean;
-    pairingState: string;
-    channel: 'direct' | 'relay' | 'offline' | 'unknown';
-    connectionAddress?: string;
+  peerId: string
+  deviceName?: string
+  addresses: string[]
+  isPaired: boolean
+  connected: boolean
+  pairingState: string
+  channel: 'direct' | 'relay' | 'offline' | 'unknown'
+  connectionAddress?: string
 }
+
 export interface OhPeerConnectionRefresh {
-    total: number;
-    online: number;
-    offline: number;
-    errors: number;
+  total: number
+  online: number
+  offline: number
+  errors: number
 }
+
 export interface OhWorkspaceConvergence {
-    phase: 'locally_applied' | 'converging' | 'complete' | 'recovery_required';
-    revision: number;
-    historyEventCount: number;
-    effectiveMemberCount: number;
-    pendingRemovalDecisionDeviceIds: string[];
-    pendingRemovalDecisionEventId?: string;
-    divergedPeerDeviceIds: string[];
-    upgradeRequiredPeerDeviceIds: string[];
-    convergenceDigest?: string;
-    removed: boolean;
-    updatedAtMs: number;
-    failureCategory?: string;
+  phase: 'locally_applied' | 'converging' | 'complete' | 'recovery_required'
+  revision: number
+  historyEventCount: number
+  effectiveMemberCount: number
+  pendingRemovalDecisionDeviceIds: string[]
+  pendingRemovalDecisionEventId?: string
+  divergedPeerDeviceIds: string[]
+  upgradeRequiredPeerDeviceIds: string[]
+  convergenceDigest?: string
+  removed: boolean
+  updatedAtMs: number
+  failureCategory?: string
 }
+
 export interface OhMembershipConvergence {
-    state: 'complete' | 'converging' | 'waiting_for_upgrade' | 'blocked';
-    pendingCount: number;
-    waitingForPeerCount: number;
-    waitingForUpdateCount: number;
-    versionIncompatibleCount: number;
-    blockedCount: number;
-    rejectedCount: number;
+  state: 'complete' | 'converging' | 'waiting_for_upgrade' | 'blocked'
+  pendingCount: number
+  waitingForPeerCount: number
+  waitingForUpdateCount: number
+  versionIncompatibleCount: number
+  blockedCount: number
+  rejectedCount: number
 }
+
 export interface OhSharedDeviceRefreshStarted {
-    requestId: string;
+  requestId: string
 }
+
 export interface OhSharedDeviceRefreshDevice {
-    deviceId: string;
-    displayName: string;
-    state: 'discovered' | 'connecting' | 'connected' | 'already_present' | 'waiting_for_peer' | 'waiting_for_update' | 'version_incompatible' | 'rejected';
+  deviceId: string
+  displayName: string
+  state:
+    | 'discovered'
+    | 'connecting'
+    | 'connected'
+    | 'already_present'
+    | 'waiting_for_peer'
+    | 'waiting_for_update'
+    | 'version_incompatible'
+    | 'rejected'
 }
+
 export interface OhSharedDeviceRefresh {
-    requestId: string;
-    phase: 'started' | 'discovering' | 'connecting' | 'round_completed';
-    devices: OhSharedDeviceRefreshDevice[];
-    totalCount: number;
-    discoveredCount: number;
-    connectingCount: number;
-    connectedCount: number;
-    alreadyPresentCount: number;
-    waitingForPeerCount: number;
-    waitingForUpdateCount: number;
-    versionIncompatibleCount: number;
-    rejectedCount: number;
-    unavailableSourceCount: number;
+  requestId: string
+  phase: 'started' | 'discovering' | 'connecting' | 'round_completed'
+  devices: OhSharedDeviceRefreshDevice[]
+  totalCount: number
+  discoveredCount: number
+  connectingCount: number
+  connectedCount: number
+  alreadyPresentCount: number
+  waitingForPeerCount: number
+  waitingForUpdateCount: number
+  versionIncompatibleCount: number
+  rejectedCount: number
+  unavailableSourceCount: number
 }
+
 export interface OhMemberRemoval {
-    phase: 'applied' | 'converging' | 'complete' | 'recovery_required';
-    intentCount: number;
-    effectiveMemberCount: number;
-    convergenceDigest?: string;
-    updatedAtMs: number;
+  phase: 'applied' | 'converging' | 'complete' | 'recovery_required'
+  intentCount: number
+  effectiveMemberCount: number
+  convergenceDigest?: string
+  updatedAtMs: number
 }
+
 export interface OhInvitationIssued {
-    invitationCode: string;
-    fullInvitation: string;
-    expiresAtMs: number;
-    availability: string;
+  invitationCode: string
+  fullInvitation: string
+  expiresAtMs: number
+  availability: string
 }
+
 export interface OhJoinedSpace {
-    sponsorDeviceId: string;
-    sponsorIdentityFingerprint: string;
-    spaceId: string;
-    selfDeviceId: string;
-    selfIdentityFingerprint: string;
-    migratedRecords?: string;
-    preservedUnreadableRecords?: string;
+  sponsorDeviceId: string
+  sponsorIdentityFingerprint: string
+  spaceId: string
+  selfDeviceId: string
+  selfIdentityFingerprint: string
+  migratedRecords?: string
+  preservedUnreadableRecords?: string
 }
+
 export interface OhJoinSpaceStatus {
-    status: 'active' | 'pending' | 'processing' | 'rejected' | 'terminated';
-    joinId: string;
-    joinedSpace?: OhJoinedSpace;
-    targetSpaceId?: string;
-    sponsorDeviceId?: string;
-    sponsorIdentityFingerprint?: string;
-    cancelRequested?: boolean;
-    peerUpgradeRequired: boolean;
-    rejectionReason?: string;
-    terminationReason?: 'cancelled' | 'expired' | 'superseded';
+  status: 'active' | 'pending' | 'processing' | 'rejected' | 'terminated'
+  joinId: string
+  joinedSpace?: OhJoinedSpace
+  targetSpaceId?: string
+  sponsorDeviceId?: string
+  sponsorIdentityFingerprint?: string
+  cancelRequested?: boolean
+  peerUpgradeRequired: boolean
+  rejectionReason?: string
+  terminationReason?: 'cancelled' | 'expired' | 'superseded'
 }
+
 export interface OhIncomingPending {
-    entryId: string;
-    attemptId?: string;
-    fromDevice: string;
-    totalBytes?: number;
-    filenames: string[];
+  entryId: string
+  attemptId?: string
+  fromDevice: string
+  totalBytes?: number
+  filenames: string[]
 }
+
 export interface OhEngineEvent {
-    kind: string;
-    state?: string;
-    refreshReason?: string;
-    operationId?: string;
-    terminal?: string;
-    lifecycleAction?: string;
-    errorCode?: number;
-    errorCategory?: string;
-    retryable?: boolean;
-    workspaceConvergence?: OhWorkspaceConvergence;
-    incomingPending?: OhIncomingPending;
-    memberRemoval?: OhMemberRemoval;
-    sharedDeviceRefresh?: OhSharedDeviceRefresh;
-    networkRecoveryPhase?: 'idle' | 'recovering' | 'retry_scheduled' | 'failed';
-    nextRetryInMs?: number;
-    rePairingScope?: 'all_devices';
+  kind: string
+  state?: string
+  refreshReason?: string
+  operationId?: string
+  terminal?: string
+  lifecycleAction?: string
+  errorCode?: number
+  errorCategory?: string
+  retryable?: boolean
+  workspaceConvergence?: OhWorkspaceConvergence
+  incomingPending?: OhIncomingPending
+  memberRemoval?: OhMemberRemoval
+  sharedDeviceRefresh?: OhSharedDeviceRefresh
+  networkRecoveryPhase?: 'idle' | 'recovering' | 'retry_scheduled' | 'failed'
+  nextRetryInMs?: number
+  rePairingScope?: 'all_devices'
 }
+
 export interface OhSpaceCreated {
-    spaceId: string;
-    selfDeviceId: string;
-    identityFingerprint: string;
+  spaceId: string
+  selfDeviceId: string
+  identityFingerprint: string
 }
+
 export interface OhActiveClipboard {
-    entryId: string;
-    activatedBy: string;
+  entryId: string
+  activatedBy: string
 }
+
 export interface OhEngine {
-    createSpace(deviceName: string | null, passphrase: string): Promise<OhSpaceCreated>;
-    recoverSession(allowSecureStorageUnlock: boolean): Promise<OhSessionRecovery>;
-    recoverNetwork(): Promise<void>;
-    queryNetworkRecoveryStatus(): Promise<OhNetworkRecoveryStatus>;
-    queryNetworkSettings(): Promise<OhNetworkSettings>;
-    updateNetworkSettings(allowRelayFallback: boolean, customRelayUrls: string[]): Promise<OhNetworkSettings>;
-    probeRelayUrl(url: string): Promise<number>;
-    queryRelayOverview(): Promise<OhRelayOverview>;
-    queryLocalDevice(): Promise<OhLocalDevice>;
-    /** Serialized camelCase DeviceSummary entries for compatibility with Harmony history UI. */
-    listDevices(): Promise<string>;
-    queryPeerConnections(): Promise<OhPeerConnection[]>;
-    refreshPeerConnections(): Promise<OhPeerConnectionRefresh>;
-    queryMemberSyncPreferences(deviceId: string): Promise<OhMemberSyncPreferences>;
-    updateMemberSyncPreferences(deviceId: string, patch: OhMemberSyncPreferencesPatch): Promise<OhMemberSyncPreferences>;
-    notifyConnectivityOpportunity(reason: 'foreground' | 'system_wake' | 'network_changed'): Promise<void>;
-    queryDeviceGroupChoices(): Promise<string>;
-    chooseDeviceGroup(issueId: string, choiceId: string, expectedRevision: number, confirmLocalRemoval: boolean): Promise<string>;
-    issueInvitation(): Promise<OhInvitationIssued>;
-    changeEncryptionPassphrase(passphrase: string, passphraseConfirmation: string): Promise<void>;
-    joinSpace(invitationCode: string, deviceName: string | null, passphrase: string, preserveUnreadableHistory: boolean): Promise<OhJoinSpaceStatus>;
-    cancelJoinSpace(joinId: string): Promise<OhJoinSpaceStatus>;
-    removeMember(deviceId: string): Promise<OhWorkspaceConvergence>;
-    queryActiveClipboard(): Promise<OhActiveClipboard | null>;
-    lifecycleState(): Promise<string>;
-    suspend(): Promise<void>;
-    suspendWithDeadline(deadlineMs: number): Promise<void>;
-    resume(): Promise<void>;
-    sendText(text: string, targetDevices: string[]): Promise<OhSendReport>;
-    sendImage(bytes: Uint8Array, mimeType: string, targetDevices: string[]): Promise<OhSendReport>;
-    sendFiles(fileHandles: string[], targetDevices: string[]): Promise<OhSendReport>;
-    captureCurrentClipboard(): Promise<string | null>;
-    restoreClipboard(entryId: string, mode: 'standard' | 'plain_text' | 'file_paths'): Promise<string>;
-    exportEntry(entryId: string, destinationHandle: string): Promise<void>;
-    nextEvent(timeoutMs: number): Promise<OhEngineEvent | null>;
-    shutdown(deadlineMs: number): Promise<void>;
-    shutdownUntilComplete(): Promise<void>;
+  createSpace(deviceName: string | null, passphrase: string): Promise<OhSpaceCreated>
+  recoverSession(allowSecureStorageUnlock: boolean): Promise<OhSessionRecovery>
+  recoverNetwork(): Promise<void>
+  queryNetworkRecoveryStatus(): Promise<OhNetworkRecoveryStatus>
+  queryNetworkSettings(): Promise<OhNetworkSettings>
+  updateNetworkSettings(allowRelayFallback: boolean, customRelayUrls: string[]): Promise<OhNetworkSettings>
+  probeRelayUrl(url: string): Promise<number>
+  queryRelayOverview(): Promise<OhRelayOverview>
+  queryLocalDevice(): Promise<OhLocalDevice>
+  /** Serialized camelCase DeviceSummary entries for compatibility with Harmony history UI. */
+  listDevices(): Promise<string>
+  queryPeerConnections(): Promise<OhPeerConnection[]>
+  refreshPeerConnections(): Promise<OhPeerConnectionRefresh>
+  queryMemberSyncPreferences(deviceId: string): Promise<OhMemberSyncPreferences>
+  updateMemberSyncPreferences(deviceId: string, patch: OhMemberSyncPreferencesPatch): Promise<OhMemberSyncPreferences>
+  notifyConnectivityOpportunity(reason: 'foreground' | 'system_wake' | 'network_changed'): Promise<void>
+  queryDeviceGroupChoices(): Promise<string>
+  chooseDeviceGroup(issueId: string, choiceId: string, expectedRevision: number, confirmLocalRemoval: boolean): Promise<string>
+  issueInvitation(): Promise<OhInvitationIssued>
+  changeEncryptionPassphrase(passphrase: string, passphraseConfirmation: string): Promise<void>
+  joinSpace(
+    invitationCode: string,
+    deviceName: string | null,
+    passphrase: string,
+    preserveUnreadableHistory: boolean
+  ): Promise<OhJoinSpaceStatus>
+  cancelJoinSpace(joinId: string): Promise<OhJoinSpaceStatus>
+  removeMember(deviceId: string): Promise<OhWorkspaceConvergence>
+  queryActiveClipboard(): Promise<OhActiveClipboard | null>
+  lifecycleState(): Promise<string>
+  suspend(): Promise<void>
+  suspendWithDeadline(deadlineMs: number): Promise<void>
+  resume(): Promise<void>
+  sendText(text: string, targetDevices: string[]): Promise<OhSendReport>
+  sendImage(bytes: Uint8Array, mimeType: string, targetDevices: string[]): Promise<OhSendReport>
+  sendFiles(fileHandles: string[], targetDevices: string[]): Promise<OhSendReport>
+  captureCurrentClipboard(): Promise<string | null>
+  restoreClipboard(entryId: string, mode: 'standard' | 'plain_text' | 'file_paths'): Promise<string>
+  exportEntry(entryId: string, destinationHandle: string): Promise<void>
+  nextEvent(timeoutMs: number): Promise<OhEngineEvent | null>
+  shutdown(deadlineMs: number): Promise<void>
+  shutdownUntilComplete(): Promise<void>
 }
+
 export interface OhStartupLifecycle {
-    suspendWithDeadline(deadlineMs: number): Promise<void>;
-    resume(): Promise<void>;
+  suspendWithDeadline(deadlineMs: number): Promise<void>
+  resume(): Promise<void>
 }
+
 // 本地诊断计数使用十进制字符串；只有当前进程的刷新得到确认。
-export enum OhHostDiagnosticSource {
-    Application,
-    ShareExtension,
-    KeyboardExtension,
-    BackgroundService
-}
-export enum OhHostDiagnosticAction {
-    RuntimeStart,
-    RuntimeStop,
-    OwnershipAcquire,
-    SecurityPrepare
-}
-export enum OhHostDiagnosticFailure {
-    Unavailable,
-    PermissionDenied,
-    Locked,
-    Busy,
-    Unknown
-}
-export enum OhHostLifecycleState {
-    Foreground,
-    Background
-}
-export enum OhHostNetworkKind {
-    Wifi,
-    Cellular,
-    Ethernet,
-    Other,
-    Unknown
-}
-export enum OhSourceCapability {
-    Supported,
-    Partial,
-    Unsupported,
-    Unknown
-}
-export enum OhHostDiagnosticOutcome {
-    Completed,
-    Failed,
-    Interrupted
-}
+export enum OhHostDiagnosticSource { Application, ShareExtension, KeyboardExtension, BackgroundService }
+export enum OhHostDiagnosticAction { RuntimeStart, RuntimeStop, OwnershipAcquire, SecurityPrepare }
+export enum OhHostDiagnosticFailure { Unavailable, PermissionDenied, Locked, Busy, Unknown }
+export enum OhHostLifecycleState { Foreground, Background }
+export enum OhHostNetworkKind { Wifi, Cellular, Ethernet, Other, Unknown }
+export enum OhSourceCapability { Supported, Partial, Unsupported, Unknown }
+export enum OhHostDiagnosticOutcome { Completed, Failed, Interrupted }
 export interface OhLocalCaptureStatus {
-    mode: string;
-    captureId?: string;
-    remainingMs: number;
-    startedAtUtc?: string;
-    endReason?: string;
-    lastCaptureId?: string;
-    revision: string;
+  mode: string
+  captureId?: string
+  remainingMs: number
+  startedAtUtc?: string
+  endReason?: string
+  lastCaptureId?: string
+  revision: string
 }
 export interface OhSourceCoverage {
-    source: string;
-    capability: string;
-    collection: string;
-    observedCount: string;
-    policyFilteredCount: string;
+  source: string
+  capability: string
+  collection: string
+  observedCount: string
+  policyFilteredCount: string
 }
 export interface OhFileSourceCounts {
-    source: string;
-    acceptedCount: string;
-    writtenCount: string;
-    queueDroppedCount: string;
-    quotaDroppedCount: string;
-    writeFailedCount: string;
-    lastWrittenAtMs?: string;
+  source: string
+  acceptedCount: string
+  writtenCount: string
+  queueDroppedCount: string
+  quotaDroppedCount: string
+  writeFailedCount: string
+  lastWrittenAtMs?: string
 }
 export interface OhLocalDiagnosticStatus {
-    runId: string;
-    capture: OhLocalCaptureStatus;
-    observedRecords: string;
-    policyFilteredRecords: string;
-    schemaRejectedRecords: string;
-    correlationLimitedRecords: string;
-    engineVersion: string;
-    sourceCommit: string;
-    counterScope: string;
-    sources: OhSourceCoverage[];
-    localFile: string;
-    closed: boolean;
+  runId: string
+  capture: OhLocalCaptureStatus
+  observedRecords: string
+  policyFilteredRecords: string
+  schemaRejectedRecords: string
+  correlationLimitedRecords: string
+  engineVersion: string
+  sourceCommit: string
+  counterScope: string
+  sources: OhSourceCoverage[]
+  localFile: string
+  closed: boolean
 }
 export interface OhLocalDiagnosticExportReport {
-    flush: string;
-    status: OhLocalDiagnosticStatus;
-    requestedAtUtc: string;
-    completedAtUtc: string;
-    otherProcessesFlushed: boolean;
-    files: OhFileSourceCounts[];
+  flush: string
+  status: OhLocalDiagnosticStatus
+  requestedAtUtc: string
+  completedAtUtc: string
+  otherProcessesFlushed: boolean
+  files: OhFileSourceCounts[]
 }
 export interface OhHostDiagnosticReceipt {
-    status: string;
-    token?: string;
+  status: string
+  token?: string
 }
+
 declare const engine: {
-    startLocalDiagnosticCapture(durationMs: number): OhLocalCaptureStatus;
-    stopLocalDiagnosticCapture(captureId: string): string;
-    queryLocalDiagnosticStatus(): OhLocalDiagnosticStatus;
-    prepareLocalDiagnosticExport(deadlineMs: number): Promise<OhLocalDiagnosticExportReport>;
-    registerHostDiagnosticSource(source: OhHostDiagnosticSource, capability: OhSourceCapability): void;
-    beginHostDiagnostic(source: OhHostDiagnosticSource, action: OhHostDiagnosticAction): OhHostDiagnosticReceipt;
-    finishHostDiagnostic(source: OhHostDiagnosticSource, token: string, outcome: OhHostDiagnosticOutcome, reason?: OhHostDiagnosticFailure): OhHostDiagnosticReceipt;
-    recordHostLifecycle(source: OhHostDiagnosticSource, state: OhHostLifecycleState): OhHostDiagnosticReceipt;
-    recordHostNetworkChange(source: OhHostDiagnosticSource, kind: OhHostNetworkKind, available: boolean): OhHostDiagnosticReceipt;
-    recordHostOwnershipReleased(source: OhHostDiagnosticSource): OhHostDiagnosticReceipt;
-    coreVersion(): string;
-    installProcessObservability(config: OhObservabilityConfig, directories: OhHostDirectories): OhObservabilitySetup;
-    queryProcessObservabilityHealth(): OhObservabilityHealth;
-    flushProcessObservability(deadlineMs: number): Promise<OhObservabilitySignalSummary>;
-    shutdownProcessObservability(deadlineMs: number): Promise<OhObservabilitySignalSummary>;
-    prepareHost(host: OhHost): PreparedHost;
-    createStartupLifecycle(): OhStartupLifecycle;
-    startEngine(config: {
-        appVersion: string;
-        profileId: string;
-    }, preparedHost: PreparedHost, lifecycle: OhStartupLifecycle): Promise<OhEngine>;
-};
-export default engine;
+  startLocalDiagnosticCapture(durationMs: number): OhLocalCaptureStatus
+  stopLocalDiagnosticCapture(captureId: string): string
+  queryLocalDiagnosticStatus(): OhLocalDiagnosticStatus
+  prepareLocalDiagnosticExport(deadlineMs: number): Promise<OhLocalDiagnosticExportReport>
+  registerHostDiagnosticSource(source: OhHostDiagnosticSource, capability: OhSourceCapability): void
+  beginHostDiagnostic(source: OhHostDiagnosticSource, action: OhHostDiagnosticAction): OhHostDiagnosticReceipt
+  finishHostDiagnostic(source: OhHostDiagnosticSource, token: string, outcome: OhHostDiagnosticOutcome, reason?: OhHostDiagnosticFailure): OhHostDiagnosticReceipt
+  recordHostLifecycle(source: OhHostDiagnosticSource, state: OhHostLifecycleState): OhHostDiagnosticReceipt
+  recordHostNetworkChange(source: OhHostDiagnosticSource, kind: OhHostNetworkKind, available: boolean): OhHostDiagnosticReceipt
+  recordHostOwnershipReleased(source: OhHostDiagnosticSource): OhHostDiagnosticReceipt
+  coreVersion(): string
+  installProcessObservability(
+    config: OhObservabilityConfig,
+    directories: OhHostDirectories
+  ): OhObservabilitySetup
+  queryProcessObservabilityHealth(): OhObservabilityHealth
+  flushProcessObservability(deadlineMs: number): Promise<OhObservabilitySignalSummary>
+  shutdownProcessObservability(deadlineMs: number): Promise<OhObservabilitySignalSummary>
+  prepareHost(host: OhHost): PreparedHost
+  createStartupLifecycle(): OhStartupLifecycle
+  startEngine(
+    config: { appVersion: string; profileId: string },
+    preparedHost: PreparedHost,
+    lifecycle: OhStartupLifecycle
+  ): Promise<OhEngine>
+}
+
+export default engine

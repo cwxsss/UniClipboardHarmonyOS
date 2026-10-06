@@ -7,29 +7,33 @@
   "adaptationScript": "tools/apply-engine-ohos-rc22-adaptation.ps1",
   "adaptationScriptSha256": "f038d4110e2abebc546d19e9c1d3e3d868c4421eb1053a7db38feac9bd684c08",
   "patchFile": "engine-ohos-rc22-adaptation.patch",
-  "patchSha256": "a6f1fad2f34e6558dbb2e91f2f567167263455a823ea3f899ad8ae5c6bd49876",
+  "patchSha256": "a2198b231d97042366b64418ac3454ef85b4b30e2a28b6f6991de28e367502b9",
   "build": {
     "rustToolchain": "1.95.0",
-    "cargoLockSha256": "ec0f38f78911f9cd9ee3cf77cd8e34f6ff93cbecf344f2e5c11ffafc3116b027",
+    "cargoLockSha256": "1dcf1f2b61a59407464f2808486fb5703a237ee344e7559100c26171cd2b7d5f",
     "cargoProfile": "release",
     "target": "aarch64-unknown-linux-ohos",
     "devecoStudio": "26.0.0.821",
     "harmonySdk": "26.0.0.105",
-    "minimumHarmonyOsApi": 24
+    "minimumHarmonyOsApi": 24,
+    "targets": [
+      "aarch64-unknown-linux-ohos",
+      "x86_64-unknown-linux-ohos"
+    ]
   },
   "embeddedLibrary": {
     "path": "package/libs/arm64-v8a/libuc_ohos_napi.so",
-    "sha256": "55c724312b2ab5e6722a4de83d8940f43b3478ab90cbe6f8e65ec8f6116b811e",
-    "size": 27202024
+    "sha256": "567b3f5b556b7c37216ddb7433112da0f74f554d182676298ccdbe15ad9b518c",
+    "size": 27215584
   },
   "embeddedDeclaration": {
     "path": "package/src/main/cpp/types/libuc_ohos_napi/index.d.ts",
-    "sha256": "8c831d84ef69be0f2e277331abb267ced07f9e6f1d7fe0df2f39827042026379",
-    "size": 14195
+    "sha256": "3c7f07be68e086d77335b5f34fe7ec49623e892bd10eb4d23a53d902555e6305",
+    "size": 14194
   },
   "physicalDeviceAcceptance": {
     "status": "not_run",
-    "reason": "No HarmonyOS device installation or cross-device acceptance was performed."
+    "reason": "Rebuilt UniClipboard-only binaries; physical-device installation and cross-device clipboard acceptance pending a device-trusted developer signature."
   },
   "adaptedCapabilities": [
     "network settings and relay probing",
@@ -44,5 +48,17 @@
     "queryMembershipConvergence",
     "querySharedDeviceRefresh",
     "queryMemberRemoval"
+  ],
+  "embeddedLibraries": [
+    {
+      "path": "package/libs/arm64-v8a/libuc_ohos_napi.so",
+      "sha256": "567b3f5b556b7c37216ddb7433112da0f74f554d182676298ccdbe15ad9b518c",
+      "size": 27215584
+    },
+    {
+      "path": "package/libs/x86_64/libuc_ohos_napi.so",
+      "sha256": "917cc7fc33063aac30fa83dcaeea961f3c18973ffe3e1f5d4caabb0da8d3772b",
+      "size": 31109072
+    }
   ]
 }

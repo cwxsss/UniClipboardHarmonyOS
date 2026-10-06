@@ -6,6 +6,7 @@ import {
 } from './EngineRuntimeService';
 import { SpaceProfileDirectory, SpaceProfileRecord } from './SpaceProfileStore';
 import { Logger } from '../util/Logger';
+import { pcConnectionState } from './PcConnectionPolicy';
 
 const logger: Logger = new Logger('SpaceRuntimeSupervisor');
 
@@ -23,6 +24,9 @@ export class SpaceRuntimeSupervisor {
 
   async activate(context: common.UIAbilityContext, directory: SpaceProfileDirectory,
     profileId: string): Promise<EngineSessionRecovery> {
+    if (!pcConnectionState.isEnabled()) {
+      throw new Error('PC_SYNC_UNICLIPBOARD_DISABLED');
+    }
     let pending: Promise<void> | null = this.operation;
     if (pending !== null) {
       await pending;
@@ -47,6 +51,13 @@ export class SpaceRuntimeSupervisor {
   }
 
   async shutdown(): Promise<void> {
+    let pending: Promise<void> | null = this.operation;
+    if (pending !== null) {
+      try {
+        await pending;
+      } catch (error) {
+      }
+    }
     let runtimes: EngineRuntimeService[] = Array.from(this.backgroundRuntimes.values());
     this.backgroundRuntimes.clear();
     for (let index: number = 0; index < runtimes.length; index += 1) {
@@ -69,12 +80,18 @@ export class SpaceRuntimeSupervisor {
     let previousProfileId: string = this.activeProfileId;
     if (previousProfileId !== profileId) {
       await engineRuntimeService.shutdown();
-      await this.startBackgroundProfile(context, previousProfileId, directory);
       await this.stopBackgroundProfile(profileId);
     }
     try {
       let recovery: EngineSessionRecovery = await engineRuntimeService.activateProfile(context, profileId);
       this.activeProfileId = profileId;
+      if (previousProfileId !== profileId) {
+        try {
+          await this.startBackgroundProfile(context, previousProfileId, directory);
+        } catch (error) {
+          logger.warn('Previous space background startup failed; the selected space remains active.');
+        }
+      }
       resolve(recovery);
     } catch (error) {
       if (previousProfileId !== profileId) {
@@ -99,13 +116,20 @@ export class SpaceRuntimeSupervisor {
     for (let index: number = 0; index < directory.profiles.length; index += 1) {
       let profile: SpaceProfileRecord = directory.profiles[index];
       if (profile.enabled && profile.joined && profile.profileId !== activeProfileId) {
-        await this.startBackgroundProfile(context, profile.profileId, directory);
+        try {
+          await this.startBackgroundProfile(context, profile.profileId, directory);
+        } catch (error) {
+          logger.warn('A secondary space failed to start; the active PC connection remains available.');
+        }
       }
     }
   }
 
   private async startBackgroundProfile(context: common.UIAbilityContext, profileId: string,
     directory: SpaceProfileDirectory): Promise<void> {
+    if (!pcConnectionState.isEnabled()) {
+      return;
+    }
     if (profileId === this.activeProfileId || this.backgroundRuntimes.has(profileId)) {
       return;
     }
@@ -115,13 +139,17 @@ export class SpaceRuntimeSupervisor {
       return;
     }
     let runtime: EngineRuntimeService = EngineRuntimeService.createForProfile(profileId, false);
-    await runtime.prepare(context);
-    await runtime.start();
     try {
+      await runtime.prepare(context);
+      await runtime.start();
       await runtime.recoverSession(true);
       this.backgroundRuntimes.set(profileId, runtime);
     } catch (error) {
-      await runtime.shutdown();
+      try {
+        await runtime.shutdown();
+      } catch (shutdownError) {
+        logger.warn('Failed secondary space cleanup did not complete cleanly.');
+      }
       throw new Error('background space runtime startup failed');
     }
   }

@@ -10,48 +10,53 @@
   "embeddedLibraries": [
     {
       "path": "package/libs/arm64-v8a/libuc_ohos_napi.so",
-      "sha256": "55c724312b2ab5e6722a4de83d8940f43b3478ab90cbe6f8e65ec8f6116b811e",
-      "size": 27202024
+      "sha256": "567b3f5b556b7c37216ddb7433112da0f74f554d182676298ccdbe15ad9b518c",
+      "size": 27215584
+    },
+    {
+      "path": "package/libs/x86_64/libuc_ohos_napi.so",
+      "sha256": "917cc7fc33063aac30fa83dcaeea961f3c18973ffe3e1f5d4caabb0da8d3772b",
+      "size": 31109072
     }
   ],
   "embeddedDeclaration": {
     "path": "package/src/main/cpp/types/libuc_ohos_napi/index.d.ts",
-    "sha256": "352e15d69012e67f59f07fa28c5dc3f5dc0d48cdb30b88f56baa4a5b58033dbe",
-    "size": 15085
+    "sha256": "3c7f07be68e086d77335b5f34fe7ec49623e892bd10eb4d23a53d902555e6305",
+    "size": 14194
   },
   "harmonyAdaptation": {
     "script": "tools/apply-engine-ohos-rc22-adaptation.ps1",
     "scriptSha256": "f038d4110e2abebc546d19e9c1d3e3d868c4421eb1053a7db38feac9bd684c08",
     "patch": "engine-ohos-rc22-adaptation.patch",
-    "patchSha256": "a6f1fad2f34e6558dbb2e91f2f567167263455a823ea3f899ad8ae5c6bd49876",
+    "patchSha256": "a2198b231d97042366b64418ac3454ef85b4b30e2a28b6f6991de28e367502b9",
     "metadata": "harmony-adaptation.json",
     "physicalDeviceAcceptance": "not_run"
   },
   "files": [
     {
       "name": "UniClipboardEngine.har",
-      "sha256": "79a6d745c2310964ef130af88101f70126da31b4f0743858fe06a63b82fb3109",
-      "size": 12731964
+      "sha256": "3553fb061decc35ffbef5b55636a52574ecbee702d92365b6203ba234765cd49",
+      "size": 23432554
     },
     {
       "name": "UniClipboardEngine.har.checksum.txt",
-      "sha256": "4eff5aab42c45e80ff3f444a5f97c82afdc44df26b6e2a07f3b0a171fd7053bc",
+      "sha256": "b12a0b2d579e066400a61830acbf702e4bda4133aaf644312d6046001d8e2ab2",
       "size": 65
     },
     {
       "name": "libuc_ohos_napi.so",
-      "sha256": "55c724312b2ab5e6722a4de83d8940f43b3478ab90cbe6f8e65ec8f6116b811e",
-      "size": 27202024
+      "sha256": "567b3f5b556b7c37216ddb7433112da0f74f554d182676298ccdbe15ad9b518c",
+      "size": 27215584
     },
     {
       "name": "uc-ohos-napi.checksum.txt",
-      "sha256": "ed054aa3a75b67e1c1ac36049c8401625ab902f4a862ac605683bdf8a9288de9",
+      "sha256": "c6df28fb05ca6429e59af3911e494c512b02363b8aee1bbf8a7b1c2725aa70d7",
       "size": 65
     },
     {
       "name": "index.d.ts",
-      "sha256": "352e15d69012e67f59f07fa28c5dc3f5dc0d48cdb30b88f56baa4a5b58033dbe",
-      "size": 15085
+      "sha256": "3c7f07be68e086d77335b5f34fe7ec49623e892bd10eb4d23a53d902555e6305",
+      "size": 14194
     },
     {
       "name": "upstream-index.d.ts",
@@ -75,8 +80,8 @@
     },
     {
       "name": "Cargo.lock",
-      "sha256": "ec0f38f78911f9cd9ee3cf77cd8e34f6ff93cbecf344f2e5c11ffafc3116b027",
-      "size": 206229
+      "sha256": "1dcf1f2b61a59407464f2808486fb5703a237ee344e7559100c26171cd2b7d5f",
+      "size": 206242
     },
     {
       "name": "runtime-dependencies.txt",
@@ -100,18 +105,28 @@
     },
     {
       "name": "harmony-adaptation.json",
-      "sha256": "e4390cdd21ab8528b757c33075ac61445283b2a69a174b9b54c014a8b421ef22",
-      "size": 1993
+      "sha256": "ffc89c37c503b5da214f26f5da8e5936245a6f2631c3608e3d354bb0e911fb25",
+      "size": 2560
     },
     {
       "name": "engine-ohos-rc22-adaptation.patch",
-      "sha256": "a6f1fad2f34e6558dbb2e91f2f567167263455a823ea3f899ad8ae5c6bd49876",
-      "size": 39582
+      "sha256": "a2198b231d97042366b64418ac3454ef85b4b30e2a28b6f6991de28e367502b9",
+      "size": 54461
     },
     {
       "name": "release-manifest.json",
-      "sha256": "041b3f60990090875b5cf8ca7b9cc6b68cc52f972b9c887849f14a8147fc060e",
-      "size": 3519
+      "sha256": "64b810d4b19791ff131236f65005bb738be2486acdb05d5782e7c507cbcd2ce8",
+      "size": 4596
+    },
+    {
+      "name": "libuc_ohos_napi-x86_64.so",
+      "sha256": "917cc7fc33063aac30fa83dcaeea961f3c18973ffe3e1f5d4caabb0da8d3772b",
+      "size": 31109072
+    },
+    {
+      "name": "uc-ohos-napi-x86_64.checksum.txt",
+      "sha256": "3f59c2d87bb3c905de1dcb07d67148f032adb2ff2e124d86b9a965ff66210e31",
+      "size": 65
     }
   ]
 }

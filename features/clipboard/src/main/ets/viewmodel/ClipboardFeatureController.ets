@@ -74,6 +74,8 @@ import {
   SpaceProfileStore,
   spaceRuntimeSupervisor,
   ReceivedNotificationService,
+  PcConnectionObserver,
+  pcConnectionService,
 } from 'common';
 
 import { HistoryDataSource } from './HistoryDataSource';
@@ -191,7 +193,7 @@ export interface SpaceDeviceRemovalInteraction {
 
 
 @Observed
-export class ClipboardFeatureController implements EngineRuntimeEventObserver {
+export class ClipboardFeatureController implements EngineRuntimeEventObserver, PcConnectionObserver {
   private static instance: ClipboardFeatureController | null = null;
   public avoidAreaRectHeight: number = 0;
   public navigationRectHeight: number = 0;
@@ -205,6 +207,8 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   private sessionHistoryDataSourceInstance: HistoryDataSource<ClipboardHistoryItem> =
     new HistoryDataSource<ClipboardHistoryItem>();
   public busy: boolean = false;
+  public pcConnectionBusy: boolean = false;
+  private pcConnectionGeneration: number = -1;
   public composerText: string = '';
   public latestText: string = '';
   public latestKind: string = 'Text';
@@ -272,6 +276,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   public spaceRelaySettingsBusy: boolean = false;
   // 0 = 无状态，1 = 保存成功，2 = 中继不可达或地址格式有误，3 = 引擎未就绪（与中继无关）。
   public spaceRelaySettingsState: number = 0;
+  public spaceRelaySettingsFailureCategory: string = '';
   public spaceRelayOverview: EngineRelayOverview | null = null;
   public spaceRelayOverviewBusy: boolean = false;
   public spaceRelayOverviewState: number = 0;
@@ -449,9 +454,27 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   }
 
   public setSpaceJoined(joined: boolean): void {
-    this.spaceJoined = joined;
-    AppStorage.setOrCreate('spaceJoined', joined);
-    engineRuntimeService.setClipboardPollingEnabled(joined && this.backgroundSyncEnabled);
+    this.spaceJoined = joined && pcConnectionService.isEnabled();
+    AppStorage.setOrCreate('spaceJoined', this.spaceJoined);
+    engineRuntimeService.setClipboardPollingEnabled(this.spaceJoined && this.backgroundSyncEnabled);
+  }
+
+  public onPcConnectionChanged(busy: boolean): void {
+    let wasSwitching: boolean = this.pcConnectionBusy;
+    this.pcConnectionBusy = busy;
+    let generation: number = pcConnectionService.getGeneration();
+    if (generation !== this.pcConnectionGeneration) {
+      this.lastOfficialActiveEntryId = '';
+      this.pcConnectionGeneration = generation;
+    }
+    this.backgroundSyncEnabled = AppStorage.get<boolean>('backgroundSyncEnabled') === true;
+    if (busy) {
+      this.setSpaceJoined(false);
+      this.spacePeerConnected = false;
+      this.spaceNodeState = 0;
+    } else if (wasSwitching && this.uiContextRef !== null) {
+      this.initializeSpaceRuntime();
+    }
   }
 
   public prepareSharedHistory(uiContext: UIContext): void {
@@ -461,6 +484,11 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
 
   public start(uiContext: UIContext): void {
     this.uiContextRef = uiContext;
+    let context: common.Context | undefined = uiContext.getHostContext();
+    if (context !== undefined) {
+      pcConnectionService.restore(context);
+    }
+    pcConnectionService.addObserver(this);
     this.refreshApplicationVersion();
     let materialTypes: Array<hdsMaterial.MaterialType> = hdsMaterial.getSystemMaterialTypes();
     if (materialTypes.indexOf(hdsMaterial.MaterialType.IMMERSIVE) >= 0) {
@@ -530,6 +558,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   }
 
   public stop(): void {
+    pcConnectionService.removeObserver(this);
     engineRuntimeService.removeEventObserver(this);
     this.pollingActive = false;
     if (this.officialEngineInboundRefreshTimerId >= 0) {
@@ -635,6 +664,18 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       if (!granted) {
         this.recordConnectionDiagnosticFailure('pasteboard_permission_denied');
         logger.warn('UniClipboard cannot read the system clipboard because permission was denied; phone-to-PC sync stays unavailable.');
+      } else {
+        let context: common.Context | undefined = this.getUIContext().getHostContext();
+        if (context !== undefined) {
+          pcConnectionService.ensureActive(context as common.UIAbilityContext).then((): void => {
+            if (pcConnectionService.isEnabled()) {
+              this.spaceNodeState = 0;
+              this.initializeSpaceRuntime();
+            }
+          }).catch((): void => {
+            this.recordConnectionDiagnosticFailure('node_unavailable');
+          });
+        }
       }
       this.refreshConnectionDiagnosticPermissions();
     }).catch((): void => {
@@ -1097,6 +1138,10 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   }
 
   public async initializeSpaceRuntime(): Promise<void> {
+    if (!pcConnectionService.isEnabled()) {
+      this.setSpaceJoined(false);
+      return;
+    }
     if (this.spaceNodeState === 1 || this.spaceNodeState === 2) {
       return;
     }
@@ -1115,13 +1160,17 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
         this.spaceProfileDirectory = directory;
         this.spaceProfiles = directory.profiles;
         this.activeSendProfileId = directory.activeProfileId();
-        let recovery = await spaceRuntimeSupervisor.restore(context as common.UIAbilityContext, directory);
-        this.setSpaceJoined(recovery.resumed);
-        this.markSpaceProfileJoined(this.activeSendProfileId, recovery.resumed);
+        await pcConnectionService.ensureActive(context as common.UIAbilityContext);
+        if (!pcConnectionService.isEnabled()) {
+          return;
+        }
+        let resumed: boolean = AppStorage.get<boolean>('officialEngineSessionResumed') === true;
+        this.setSpaceJoined(resumed);
+        this.markSpaceProfileJoined(this.activeSendProfileId, resumed);
       } catch (error) {
         this.setSpaceJoined(false);
         this.spaceSwitchOpen = false;
-        this.reportError('space', 'recover space session failed; re-pairing is required: ' +
+        this.reportError('space', 'recover space session failed; waiting for connection recovery: ' +
           this.errorDetail(error));
       }
       await this.refreshSpaceNetworkSettings();
@@ -1212,23 +1261,40 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     return urls;
   }
 
+  public relaySaveFailureMessage(): Resource {
+    if (this.spaceRelaySettingsFailureCategory === 'internal') {
+      return $r('app.string.space_relay_save_storage_failed');
+    }
+    if (this.spaceRelaySettingsFailureCategory === 'permission_denied') {
+      return $r('app.string.space_relay_save_permission_failed');
+    }
+    if (this.spaceRelaySettingsFailureCategory === 'bad_request') {
+      return $r('app.string.space_relay_save_invalid');
+    }
+    return $r('app.string.space_relay_save_failed');
+  }
+
   public async saveSpaceNetworkSettings(): Promise<void> {
     if (this.spaceRelaySettingsBusy) {
       return;
     }
     this.spaceRelaySettingsBusy = true;
     this.spaceRelaySettingsState = 0;
+    this.spaceRelaySettingsFailureCategory = '';
     let requestedAllowRelayFallback: boolean = this.spaceRelayFallbackEnabled;
     let requestedRelayUrls: string[] = this.spaceRelayUrls();
     try {
       await this.ensureOfficialEngineRunning();
     } catch (error) {
+      this.reportError('space-relay',
+        'failed to start sync engine before saving relay settings: ' + this.errorDetail(error));
+      this.spaceRelaySettingsState = 3;
+      this.spaceRelaySettingsBusy = false;
+      return;
     }
-    // 保存失败有两类完全不同的原因，必须分开上报，否则排查方向会被彻底带偏：
-    // - 引擎未就绪（spaceNodeState !== 2）：任何地址都写不进去，与中继本身无关；
-    // - 引擎已就绪：才真的是中继不可达或地址格式有误。
-    // rc.17 的升级前备份 fail-closed 会让引擎永远起不来，此时旧文案把故障指向了中继。
-    let engineReady: boolean = this.spaceNodeState === 2;
+    // 使用运行时状态，不依赖可能停留在上次连接结果的页面状态。
+    // 探测失败不阻止保存；地址校验和配置写入由 Engine 的更新操作负责。
+    let engineReady: boolean = this.engineRuntime.getSnapshot().state === EngineRuntimeState.RUNNING;
     try {
       if (engineReady) {
         for (let index = 0; index < requestedRelayUrls.length; index += 1) {
@@ -1248,6 +1314,8 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     } catch (error) {
       let detail: string = this.errorDetail(error);
       if (engineReady) {
+        this.spaceRelaySettingsFailureCategory = error instanceof EngineRuntimeError ?
+          (error as EngineRuntimeError).category : '';
         this.reportError('space-relay', 'failed to save relay settings: ' + detail);
         this.spaceRelaySettingsState = 2;
       } else {
@@ -5223,6 +5291,7 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     if (!this.spaceJoined) {
       return true;
     }
+    let generation: number = pcConnectionService.getGeneration();
     await this.ensureOfficialEngineRunning();
     let active = await engineRuntimeService.queryActiveClipboard();
     if (active === null || active.entryId.length === 0 || active.entryId === this.lastOfficialActiveEntryId) {
@@ -5237,15 +5306,18 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       let payload: ClipboardFilePayload = this.clipboardService.readFile(exportedPath);
       let imagePayload: image.PixelMap | null = await this.tryDecodeOfficialEngineImage(payload.data);
       let incomingFileNames: string[] = this.incomingFileNamesByEntry.get(active.entryId) ?? [];
-      this.lastOfficialActiveEntryId = active.entryId;
+      if (!pcConnectionService.isEnabled() || generation !== pcConnectionService.getGeneration()) {
+        return false;
+      }
       this.latestContentId = active.entryId;
       if (imagePayload !== null) {
         this.applyOfficialEngineImage(active, payload, imagePayload, exportedPath);
       } else if (incomingFileNames.length === 0 && this.isLikelyOfficialEngineText(payload.data)) {
-        this.applyOfficialEngineText(active, payload.data);
+        await this.applyOfficialEngineText(active, payload.data);
       } else {
         this.applyOfficialEngineFile(active, payload, exportedPath, incomingFileNames);
       }
+      this.lastOfficialActiveEntryId = active.entryId;
       this.incomingFileNamesByEntry.delete(active.entryId);
     } catch (error) {
       return false;
@@ -5257,6 +5329,9 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
   }
 
   private async ensureOfficialEngineRunning(): Promise<void> {
+    if (!pcConnectionService.isEnabled()) {
+      throw new Error('PC_SYNC_UNICLIPBOARD_DISABLED');
+    }
     let snapshot: EngineRuntimeSnapshot = this.engineRuntime.getSnapshot();
     if (snapshot.state === EngineRuntimeState.RUNNING) {
       return;
@@ -5353,9 +5428,10 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
     return controls * 20 < data.length;
   }
 
-  private applyOfficialEngineText(active: EngineActiveClipboard, data: Uint8Array): void {
+  private async applyOfficialEngineText(active: EngineActiveClipboard, data: Uint8Array): Promise<void> {
     let decoder: util.TextDecoder = util.TextDecoder.create('utf-8', { fatal: false, ignoreBOM: true });
     let text: string = decoder.decodeToString(data);
+    await engineRuntimeService.writeIncomingClipboardText(text);
     this.latestText = text;
     this.latestKind = 'Text';
     this.latestImage = null;
@@ -5364,8 +5440,6 @@ export class ClipboardFeatureController implements EngineRuntimeEventObserver {
       this.refreshCurrentLinkPreview();
     }
     this.addHistory(text, 'received', 'Text', null, null, '', active.entryId, active.activatedBy);
-    this.clipboardService.writeText(text).catch((): void => {
-    });
     this.notifyReceivedContent('Text', text, null, 0, active.activatedBy);
   }
 

@@ -25,13 +25,14 @@ import {
   BackgroundSyncPreferenceService,
   BackgroundSyncTaskService,
   engineRuntimeService,
-  spaceRuntimeSupervisor
+  pcConnectionService,
+  PcConnectionObserver
 } from 'common';
 
 const DOMAIN = 0x0000;
 const SHARE_ACTION: string = 'ohos.want.action.sendData';
 
-export default class EntryAbility extends UIAbility {
+export default class EntryAbility extends UIAbility implements PcConnectionObserver {
   private mainWindow: window.Window | null = null;
   private pendingShareWant: Want | null = null;
   private appearanceStorageService: AppearanceStorageService = new AppearanceStorageService();
@@ -42,8 +43,14 @@ export default class EntryAbility extends UIAbility {
   private networkConnection: connection.NetConnection | null = null;
 
   private networkOpportunityCallback = (): void => {
-    engineRuntimeService.notifyConnectivityOpportunity('network_changed').catch((): void => {
-      // Network callbacks may arrive while the Engine is intentionally suspended.
+    if (pcConnectionService.isInBackground() &&
+      AppStorage.get<boolean>('backgroundSyncEnabled') !== true) {
+      return;
+    }
+    this.startEngineRuntime().then(async (): Promise<void> => {
+      await engineRuntimeService.notifyConnectivityOpportunity('network_changed');
+    }).catch((): void => {
+      hilog.warn(DOMAIN, 'testTag', 'PC connection recovery is waiting for the next network opportunity.');
     });
   };
 
@@ -67,6 +74,8 @@ export default class EntryAbility extends UIAbility {
     AppStorage.setOrCreate('backgroundSyncEnabled', backgroundSyncEnabled);
     AppStorage.setOrCreate('spaceJoined', false);
     AppStorage.setOrCreate('officialEngineSessionResumed', false);
+    pcConnectionService.restore(this.context);
+    pcConnectionService.addObserver(this);
     this.startEngineRuntime().catch((error: Object): void => {
       let detail: string = error instanceof Error ? (error as Error).message : JSON.stringify(error);
       hilog.warn(DOMAIN, 'testTag', 'Official Engine startup did not complete cleanly: %{public}s', detail);
@@ -100,30 +109,25 @@ export default class EntryAbility extends UIAbility {
   }
 
   private async performEngineRuntimeStart(): Promise<void> {
-    await engineRuntimeService.prepare(this.context);
-    await engineRuntimeService.start();
-    let resumed: boolean = false;
-    try {
-      let recovery = await engineRuntimeService.recoverSession(true);
-      resumed = recovery.resumed;
-    } catch (error) {
-      let detail: string = error instanceof Error ? (error as Error).message : JSON.stringify(error);
-      hilog.warn(DOMAIN, 'testTag', 'Official Engine session requires re-pairing: %{public}s', detail);
-    }
-    AppStorage.setOrCreate('officialEngineSessionResumed', resumed);
-    AppStorage.setOrCreate('spaceJoined', resumed);
+    await pcConnectionService.ensureActive(this.context);
     this.updateClipboardMonitoring();
-    hilog.info(DOMAIN, 'testTag', 'Official Engine started. resumed=%{public}d',
-      resumed ? 1 : 0);
+  }
+
+  public onPcConnectionChanged(busy: boolean): void {
+    this.updateClipboardMonitoring();
+    if (pcConnectionService.isInBackground()) {
+      this.updateBackgroundPolicy();
+    }
   }
 
   onDestroy(): void {
     this.unregisterNetworkRecoveryListener();
+    pcConnectionService.removeObserver(this);
     engineRuntimeService.setClipboardPollingEnabled(false);
     this.backgroundSyncTaskService.stop(this.context).catch((): void => {
       hilog.warn(DOMAIN, 'testTag', 'Background sync task shutdown did not complete cleanly.');
     });
-    spaceRuntimeSupervisor.shutdown().catch((): void => {
+    pcConnectionService.shutdown(this.context).catch((): void => {
       hilog.warn(DOMAIN, 'testTag', 'Engine runtime shutdown did not complete cleanly.');
     });
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onDestroy');
@@ -209,6 +213,7 @@ export default class EntryAbility extends UIAbility {
   }
 
   onForeground(): void {
+    pcConnectionService.setInBackground(false);
     let clipboardController: ClipboardFeatureController = ClipboardFeatureController.getInstance();
     this.backgroundSyncTaskService.stop(this.context).catch((): void => {
       hilog.warn(DOMAIN, 'testTag', 'Background sync task cleanup did not complete cleanly.');
@@ -216,9 +221,11 @@ export default class EntryAbility extends UIAbility {
     this.startEngineRuntime().then((): void => {
       this.updateClipboardMonitoring();
       clipboardController.resumeRealtimePolling();
-      engineRuntimeService.notifyConnectivityOpportunity('foreground').catch((): void => {
-        hilog.warn(DOMAIN, 'testTag', 'Connectivity recovery hint was not accepted by the Engine.');
-      });
+      if (pcConnectionService.isEnabled()) {
+        engineRuntimeService.notifyConnectivityOpportunity('foreground').catch((): void => {
+          hilog.warn(DOMAIN, 'testTag', 'Connectivity recovery hint was not accepted by the Engine.');
+        });
+      }
     }).catch((error: Object): void => {
       clipboardController.resumeRealtimePolling();
       let detail: string = error instanceof Error ? (error as Error).message : JSON.stringify(error);
@@ -228,12 +235,19 @@ export default class EntryAbility extends UIAbility {
   }
 
   onBackground(): void {
+    pcConnectionService.setInBackground(true);
     ClipboardFeatureController.getInstance().pauseRealtimePolling();
+    this.updateBackgroundPolicy();
+    hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onBackground');
+  }
+
+  private updateBackgroundPolicy(): void {
     let backgroundSyncEnabled: boolean | undefined = AppStorage.get<boolean>('backgroundSyncEnabled');
     let spaceJoined: boolean | undefined = AppStorage.get<boolean>('spaceJoined');
-    let keepEngineRunning: boolean = backgroundSyncEnabled === true && spaceJoined === true;
-    if (keepEngineRunning) {
-      engineRuntimeService.setClipboardPollingEnabled(true);
+    let uniRunning: boolean = pcConnectionService.isEnabled() &&
+      backgroundSyncEnabled === true && spaceJoined === true;
+    if (uniRunning) {
+      engineRuntimeService.setClipboardPollingEnabled(uniRunning);
       this.backgroundSyncTaskService.start(this.context).catch((): void => {
         hilog.warn(DOMAIN, 'testTag', 'Background sync task startup did not complete cleanly.');
       });
@@ -243,18 +257,18 @@ export default class EntryAbility extends UIAbility {
         hilog.warn(DOMAIN, 'testTag', 'Background sync task cleanup did not complete cleanly.');
       });
     }
-    if (!keepEngineRunning) {
+    if (!uniRunning && pcConnectionService.isEnabled()) {
       engineRuntimeService.suspend().catch((): void => {
         hilog.warn(DOMAIN, 'testTag', 'Engine runtime suspend did not complete cleanly.');
       });
     }
-    hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onBackground');
   }
 
   private updateClipboardMonitoring(): void {
     let backgroundSyncEnabled: boolean | undefined = AppStorage.get<boolean>('backgroundSyncEnabled');
     let spaceJoined: boolean | undefined = AppStorage.get<boolean>('spaceJoined');
-    engineRuntimeService.setClipboardPollingEnabled(backgroundSyncEnabled === true && spaceJoined === true);
+    engineRuntimeService.setClipboardPollingEnabled(
+      pcConnectionService.isEnabled() && backgroundSyncEnabled === true && spaceJoined === true);
   }
 
   private registerNetworkRecoveryListener(): void {

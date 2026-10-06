@@ -26,6 +26,7 @@ import {
 import { EngineClipboardObserver, EngineClipboardSnapshot } from '../engine/EngineClipboardHost';
 import { EngineHostError } from '../engine/EngineHostError';
 import { Logger } from '../util/Logger';
+import { pcConnectionState } from './PcConnectionPolicy';
 
 const ENGINE_EVENT_TIMEOUT_MS: number = 1000;
 const ENGINE_SHUTDOWN_DEADLINE_MS: number = 3000;
@@ -730,6 +731,7 @@ export interface EngineRuntimeBackend {
 }
 
 export interface EngineRuntimeHost {
+  prepareRelayConfiguration?(): void;
   prepare(context: common.UIAbilityContext): EngineHostCallbacks;
   listenClipboard(observer: EngineClipboardObserver): void;
   releaseClipboardListener(): void;
@@ -1346,6 +1348,10 @@ class OfficialEngineRuntimeHost implements EngineRuntimeHost {
     this.profileId = profileId;
   }
 
+  prepareRelayConfiguration(): void {
+    this.adapter.prepareRelayConfiguration();
+  }
+
   prepare(context: common.UIAbilityContext): EngineHostCallbacks {
     return this.adapter.prepare(context, this.profileId);
   }
@@ -1401,7 +1407,12 @@ export class EngineRuntimeService implements EngineClipboardObserver {
   private eventPollTask: Promise<void> | null = null;
   private clipboardCaptureTask: Promise<void> | null = null;
   private pendingClipboardSnapshot: EngineClipboardSnapshot | null = null;
+  private clipboardRetryTimer: number = -1;
+  private clipboardRetryDelayMs: number = 1000;
+  private clipboardLifecyclePausing: boolean = false;
   private clipboardWriteSuppression: boolean = false;
+  private clipboardListenerActive: boolean = false;
+  private backgroundClipboardPollingEnabled: boolean = false;
   private eventPolling: boolean = false;
   private observers: EngineRuntimeObserver[] = [];
   private eventObservers: EngineRuntimeEventObserver[] = [];
@@ -1459,14 +1470,26 @@ export class EngineRuntimeService implements EngineClipboardObserver {
       return;
     }
     this.clipboardCaptureEnabled = enabled;
-    if (this.state !== EngineRuntimeState.RUNNING && this.state !== EngineRuntimeState.SUSPENDED) {
+    this.updateClipboardListener();
+  }
+
+  private shouldListenForClipboard(): boolean {
+    return this.clipboardCaptureEnabled && pcConnectionState.isEnabled();
+  }
+
+  private updateClipboardListener(force: boolean = false): void {
+    if (!force && this.state !== EngineRuntimeState.RUNNING && this.state !== EngineRuntimeState.SUSPENDED) {
       return;
     }
-    if (enabled) {
+    let shouldListen: boolean = this.shouldListenForClipboard();
+    if (shouldListen && !this.clipboardListenerActive) {
       this.host.listenClipboard(this);
-    } else {
+      this.clipboardListenerActive = true;
+    } else if (!shouldListen && this.clipboardListenerActive) {
       this.host.releaseClipboardListener();
+      this.clipboardListenerActive = false;
     }
+    this.host.setClipboardPollingEnabled(this.backgroundClipboardPollingEnabled && shouldListen);
   }
 
   async prepareForTesting(callbacks: EngineHostCallbacks, config: EngineRuntimeStartConfig): Promise<void> {
@@ -1547,6 +1570,9 @@ export class EngineRuntimeService implements EngineClipboardObserver {
   }
 
   async start(): Promise<void> {
+    if (!pcConnectionState.isEnabled()) {
+      throw new EngineRuntimeError('pc_sync_disabled', 'start');
+    }
     let pendingShutdown: Promise<void> | null = this.shutdownTask;
     if (pendingShutdown !== null) {
       await pendingShutdown;
@@ -1611,6 +1637,7 @@ export class EngineRuntimeService implements EngineClipboardObserver {
         }
         return handle.notifyConnectivityOpportunity(reason);
       });
+    this.retryPendingClipboard();
   }
 
   async queryNetworkSettings(): Promise<EngineNetworkSettings> {
@@ -1656,11 +1683,28 @@ export class EngineRuntimeService implements EngineClipboardObserver {
 
   async updateNetworkSettings(allowRelayFallback: boolean, customRelayUrls: string[]):
     Promise<EngineNetworkSettings> {
-    return await this.executeFeature('update_network_settings',
-      (handle: EngineRuntimeHandle): Promise<EngineNetworkSettings> =>
-        handle.updateNetworkSettings(allowRelayFallback, customRelayUrls));
+    // Native update recovers valid transactions under its mutation lock.
+    let requestedUrls: string[] = customRelayUrls.slice();
+    for (let attempt: number = 0; attempt < 2; attempt += 1) {
+      try {
+        return await this.executeFeature('update_network_settings',
+          async (handle: EngineRuntimeHandle): Promise<EngineNetworkSettings> => {
+            if (this.host.prepareRelayConfiguration !== undefined) {
+              this.host.prepareRelayConfiguration();
+            }
+            return await handle.updateNetworkSettings(allowRelayFallback, requestedUrls);
+          });
+      } catch (error) {
+        let failure: EngineRuntimeError = this.toRuntimeError('update_network_settings', error);
+        if (attempt !== 0 || failure.category !== 'internal' || failure.errorCode !== 1392 ||
+          this.state !== EngineRuntimeState.RUNNING) {
+          throw failure;
+        }
+        logger.warn('Relay configuration write failed; recovering the transaction before one retry.');
+      }
+    }
+    throw new EngineRuntimeError('internal', 'update_network_settings');
   }
-
   async probeRelayUrl(url: string): Promise<number> {
     return await this.executeReadOnly('probe_relay_url',
       (handle: EngineRuntimeHandle): Promise<number> => handle.probeRelayUrl(url));
@@ -1718,7 +1762,8 @@ export class EngineRuntimeService implements EngineClipboardObserver {
   }
 
   setClipboardPollingEnabled(enabled: boolean): void {
-    this.host.setClipboardPollingEnabled(enabled && this.clipboardCaptureEnabled);
+    this.backgroundClipboardPollingEnabled = enabled;
+    this.host.setClipboardPollingEnabled(enabled && this.shouldListenForClipboard());
   }
 
   async queryActiveClipboard(): Promise<EngineActiveClipboard | null> {
@@ -1774,6 +1819,24 @@ export class EngineRuntimeService implements EngineClipboardObserver {
     }
   }
 
+  /** Commit a received text through the same host that owns the clipboard baseline. */
+  async writeIncomingClipboardText(text: string): Promise<void> {
+    this.requireRunningHandle('clipboard_write');
+    let callbacks: EngineHostCallbacks | null = this.callbacks;
+    if (callbacks === null) {
+      throw new EngineRuntimeError('not_prepared', 'clipboard_write');
+    }
+    let encoder: util.TextEncoder = util.TextEncoder.create('utf-8');
+    let result = callbacks.clipboardWrite({
+      observedAtMs: Date.now(),
+      representations: [{ kind: 'inline', format: 'text/plain', mimeType: 'text/plain',
+        bytes: encoder.encodeInto(text) }]
+    });
+    if (!result.ok) {
+      throw new EngineRuntimeError(result.errorCategory ?? 'clipboard_write_failed', 'clipboard_write');
+    }
+  }
+
   async exportEntry(entryId: string, destinationHandle: string): Promise<void> {
     await this.executeFeature('export_entry',
       (handle: EngineRuntimeHandle): Promise<void> => handle.exportEntry(entryId, destinationHandle));
@@ -1826,13 +1889,22 @@ export class EngineRuntimeService implements EngineClipboardObserver {
 
   onClipboardChanged(snapshot: EngineClipboardSnapshot): void {
     logger.info('Clipboard observer invoked state=' + this.state);
-    if (this.clipboardWriteSuppression || this.state !== EngineRuntimeState.RUNNING) {
+    if (this.clipboardWriteSuppression || !pcConnectionState.isEnabled()) {
+      return;
+    }
+    if (this.state !== EngineRuntimeState.RUNNING || !this.clipboardCaptureEnabled) {
+      return;
+    }
+    if (this.clipboardLifecyclePausing) {
+      this.pendingClipboardSnapshot = snapshot;
       return;
     }
     if (this.clipboardCaptureTask !== null) {
       this.pendingClipboardSnapshot = snapshot;
       return;
     }
+    this.cancelClipboardRetry();
+    this.pendingClipboardSnapshot = null;
     let task: Promise<void> = this.drainClipboardSnapshots(snapshot);
     this.clipboardCaptureTask = task;
     task.then((): void => {
@@ -1881,10 +1953,14 @@ export class EngineRuntimeService implements EngineClipboardObserver {
       return;
     }
     try {
+      this.clipboardLifecyclePausing = true;
+      await this.waitForClipboardCapture();
       await this.handle.suspend();
       this.setState(EngineRuntimeState.SUSPENDED);
     } catch (error) {
       throw this.fail('suspend', error);
+    } finally {
+      this.clipboardLifecyclePausing = false;
     }
   }
 
@@ -1914,6 +1990,7 @@ export class EngineRuntimeService implements EngineClipboardObserver {
     try {
       await this.handle.resume();
       this.setState(EngineRuntimeState.RUNNING);
+      this.retryPendingClipboard();
     } catch (error) {
       let runtimeError: EngineRuntimeError = this.fail('resume', error);
       logger.error('Engine resume failed category=' + runtimeError.category +
@@ -2051,9 +2128,7 @@ export class EngineRuntimeService implements EngineClipboardObserver {
       }
       let startedHandle: EngineRuntimeHandle = await this.backend.startEngine(config, preparedHost);
       this.handle = startedHandle;
-      if (this.clipboardCaptureEnabled) {
-        this.host.listenClipboard(this);
-      }
+      this.updateClipboardListener(true);
       this.startEventPolling(startedHandle);
       this.lastErrorCategory = '';
       this.setState(EngineRuntimeState.RUNNING);
@@ -2106,6 +2181,8 @@ export class EngineRuntimeService implements EngineClipboardObserver {
       return;
     }
     this.setState(EngineRuntimeState.STOPPING);
+    this.clipboardLifecyclePausing = true;
+    await this.waitForClipboardCapture();
     this.eventPolling = false;
     let shutdownError: EngineRuntimeError | null = null;
     let activeHandle: EngineRuntimeHandle | null = this.handle;
@@ -2149,9 +2226,23 @@ export class EngineRuntimeService implements EngineClipboardObserver {
   }
 
   private async pollEvents(startedHandle: EngineRuntimeHandle): Promise<void> {
+    let retryDelayMs: number = 1000;
     try {
       while (this.eventPolling && this.handle === startedHandle) {
-        let event: EngineRuntimeEvent | null = await startedHandle.nextEvent(ENGINE_EVENT_TIMEOUT_MS);
+        let event: EngineRuntimeEvent | null = null;
+        try {
+          event = await startedHandle.nextEvent(ENGINE_EVENT_TIMEOUT_MS);
+          retryDelayMs = 1000;
+        } catch (error) {
+          if (!this.eventPolling || this.handle !== startedHandle) {
+            break;
+          }
+          let runtimeError: EngineRuntimeError = this.toRuntimeError('event_poll', error as Object);
+          logger.warn('Engine event polling retry category=' + runtimeError.category);
+          await new Promise<void>((resolve): void => { setTimeout(resolve, retryDelayMs); });
+          retryDelayMs = Math.min(retryDelayMs * 2, 2000);
+          continue;
+        }
         if (!this.eventPolling || this.handle !== startedHandle) {
           break;
         }
@@ -2195,6 +2286,9 @@ export class EngineRuntimeService implements EngineClipboardObserver {
   }
 
   private clearRuntimeResources(): void {
+    this.cancelClipboardRetry();
+    this.clipboardRetryDelayMs = 1000;
+    this.clipboardLifecyclePausing = false;
     this.handle = null;
     this.preparedHost = null;
     this.callbacks = null;
@@ -2203,14 +2297,20 @@ export class EngineRuntimeService implements EngineClipboardObserver {
     this.clipboardCaptureTask = null;
     this.pendingClipboardSnapshot = null;
     this.clipboardWriteSuppression = false;
+    this.clipboardListenerActive = false;
+    this.backgroundClipboardPollingEnabled = false;
     this.eventPolling = false;
   }
 
-  private async sendClipboardSnapshotFromHost(snapshot: EngineClipboardSnapshot): Promise<void> {
+  private async sendClipboardSnapshotFromHost(snapshot: EngineClipboardSnapshot,
+    expectedHandle: EngineRuntimeHandle | null): Promise<boolean> {
+    if (this.handle !== expectedHandle || !pcConnectionState.isEnabled()) {
+      return true;
+    }
     let text: string = this.extractClipboardText(snapshot);
     if (text.length === 0) {
       logger.info('Automatic clipboard send skipped reason=no_text');
-      return;
+      return true;
     }
     try {
       let handle: EngineRuntimeHandle = this.requireRunningHandle('capture_clipboard');
@@ -2219,18 +2319,87 @@ export class EngineRuntimeService implements EngineClipboardObserver {
         ' pending=' + report.totalPending.toString() +
         ' offline=' + report.totalOffline.toString() +
         ' errored=' + report.totalErrored.toString());
+      this.clipboardRetryDelayMs = 1000;
+      return true;
     } catch (error) {
       let runtimeError: EngineRuntimeError = this.toRuntimeError('send_clipboard', error as Object);
       logger.warn('Automatic clipboard send failed category=' + runtimeError.category);
+      return false;
     }
   }
 
   private async drainClipboardSnapshots(initialSnapshot: EngineClipboardSnapshot): Promise<void> {
+    let expectedHandle: EngineRuntimeHandle | null = this.handle;
     let snapshot: EngineClipboardSnapshot | null = initialSnapshot;
     while (snapshot !== null) {
-      await this.sendClipboardSnapshotFromHost(snapshot);
+      if (this.handle !== expectedHandle) {
+        return;
+      }
+      let sent: boolean = await this.sendClipboardSnapshotFromHost(snapshot, expectedHandle);
+      if (this.handle !== expectedHandle || !pcConnectionState.isEnabled()) {
+        return;
+      }
+      if (!sent) {
+        if (this.pendingClipboardSnapshot === null) {
+          this.pendingClipboardSnapshot = snapshot;
+        }
+        this.scheduleClipboardRetry(expectedHandle);
+        return;
+      }
+      if (this.clipboardLifecyclePausing) {
+        return;
+      }
       snapshot = this.pendingClipboardSnapshot;
       this.pendingClipboardSnapshot = null;
+    }
+  }
+
+  private cancelClipboardRetry(): void {
+    if (this.clipboardRetryTimer >= 0) {
+      clearTimeout(this.clipboardRetryTimer);
+      this.clipboardRetryTimer = -1;
+    }
+  }
+
+  private scheduleClipboardRetry(expectedHandle: EngineRuntimeHandle | null): void {
+    this.cancelClipboardRetry();
+    this.clipboardRetryTimer = setTimeout((): void => {
+      this.clipboardRetryTimer = -1;
+      if (this.handle === expectedHandle) {
+        this.retryPendingClipboard();
+      }
+    }, this.clipboardRetryDelayMs);
+    this.clipboardRetryDelayMs = Math.min(this.clipboardRetryDelayMs * 2, 10000);
+  }
+
+  private retryPendingClipboard(): void {
+    if (this.clipboardCaptureTask !== null || this.state !== EngineRuntimeState.RUNNING ||
+      this.clipboardLifecyclePausing || !pcConnectionState.isEnabled()) {
+      return;
+    }
+    let snapshot: EngineClipboardSnapshot | null = this.pendingClipboardSnapshot;
+    if (snapshot !== null) {
+      this.onClipboardChanged(snapshot);
+    }
+  }
+
+  private async waitForClipboardCapture(): Promise<void> {
+    this.cancelClipboardRetry();
+    let pending: Promise<void> | null = this.clipboardCaptureTask;
+    if (pending === null) {
+      return;
+    }
+    let deadlineTimer: number = -1;
+    let deadline: Promise<void> = new Promise<void>((resolve): void => {
+      deadlineTimer = setTimeout(resolve, ENGINE_SHUTDOWN_DEADLINE_MS);
+    });
+    try {
+      await Promise.race([pending.catch((): void => {}), deadline]);
+    } finally {
+      if (deadlineTimer >= 0) {
+        clearTimeout(deadlineTimer);
+      }
+      this.cancelClipboardRetry();
     }
   }
 
@@ -2247,6 +2416,9 @@ export class EngineRuntimeService implements EngineClipboardObserver {
   }
 
   private requireRunningHandle(operation: string): EngineRuntimeHandle {
+    if (!pcConnectionState.isEnabled()) {
+      throw new EngineRuntimeError('pc_sync_disabled', operation);
+    }
     if (this.state !== EngineRuntimeState.RUNNING || this.handle === null) {
       throw new EngineRuntimeError('not_running', operation);
     }

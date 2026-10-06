@@ -64,8 +64,9 @@ export class EngineClipboardHost {
   private lastClipboardText: string = '';
   private lastChangeCount: number = -1;
   private lastPollFailureLogAtMs: number = 0;
+  private writing: boolean = false;
   private updateCallback = (): void => {
-    let changed: boolean = this.notifyClipboardChange();
+    let changed: boolean = this.notifyClipboardChange(true);
     if (changed) {
       this.pollIdleRounds = 0;
     }
@@ -97,6 +98,7 @@ export class EngineClipboardHost {
         try {
           let text: string = this.decoder.decodeToString(representation.bytes);
           let data: pasteboard.PasteData = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, text);
+          this.writing = true;
           this.systemPasteboard.setDataSync(data);
           this.lastClipboardText = text;
           this.hasClipboardBaseline = true;
@@ -109,6 +111,8 @@ export class EngineClipboardHost {
           return;
         } catch (error) {
           throw this.accessError(error as Object, 'clipboard_write');
+        } finally {
+          this.writing = false;
         }
       }
     }
@@ -180,8 +184,8 @@ export class EngineClipboardHost {
     }
   }
 
-  private notifyClipboardChange(): boolean {
-    if (!this.listening || this.observer === null) {
+  private notifyClipboardChange(explicitUpdate: boolean = false): boolean {
+    if (this.writing || !this.listening || this.observer === null) {
       return false;
     }
     try {
@@ -206,6 +210,12 @@ export class EngineClipboardHost {
       if (!this.hasClipboardBaseline) {
         this.lastClipboardText = currentText;
         this.hasClipboardBaseline = true;
+        // An actual update after a denied initial read is the user's first copy.
+        // Passive polling still establishes a baseline without sending old data.
+        if (explicitUpdate && currentText.length > 0) {
+          this.observer.onClipboardChanged(this.snapshotFromText(currentText));
+          return true;
+        }
         return false;
       }
       if (!shouldNotifyClipboardChange(this.hasClipboardBaseline, this.lastClipboardText, currentText)) {

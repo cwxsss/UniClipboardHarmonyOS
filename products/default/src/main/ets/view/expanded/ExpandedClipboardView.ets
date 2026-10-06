@@ -1,6 +1,5 @@
 import { LengthMetrics, mediaquery, SymbolGlyphModifier, window } from '@kit.ArkUI';
 import {
-  common,
   ConfigurationConstant
 } from '@kit.AbilityKit';
 import { BusinessError, deviceInfo, pasteboard } from '@kit.BasicServicesKit';
@@ -4168,7 +4167,7 @@ export struct ExpandedClipboardView {
             .fontSize(12)
             .fontColor($r('app.color.success'))
         } else if (this.controller.spaceRelaySettingsState === 2) {
-          Text($r('app.string.space_relay_save_failed'))
+          Text(this.controller.relaySaveFailureMessage())
             .fontSize(12)
             .fontColor($r('app.color.danger'))
         } else if (this.controller.spaceRelaySettingsState === 3) {

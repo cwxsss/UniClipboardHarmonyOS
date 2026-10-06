@@ -1,6 +1,19 @@
 {
   "string": [
     {
+      "name": "space_relay_save_storage_failed",
+      "value": "配置存储失败，自动恢复并重试后仍未成功；已有配置未清空，请查看诊断日志。"
+    },
+    {
+      "name": "space_relay_save_permission_failed",
+      "value": "保存失败，系统拒绝配置存储访问；请解锁后重试，仍失败时查看诊断日志。"
+    },
+    {
+      "name": "space_relay_save_invalid",
+      "value": "保存失败，中继地址格式无效，请检查地址。"
+    },
+
+    {
       "name": "pasteboard_permission_reason",
       "value": "用于读取你主动选择发送的剪贴板文本或图片"
     },
@@ -510,11 +523,11 @@
     },
     {
       "name": "space_relay_save_failed",
-      "value": "保存失败，中继不可达或地址格式有误，请修改后重试"
+      "value": "保存失败，地址格式有误或配置未能写入，请检查后重试"
     },
     {
       "name": "space_relay_save_engine_unavailable",
-      "value": "保存失败，同步引擎尚未就绪（与中继地址无关）。请完全退出并重新打开应用后重试；若仍然如此，请查看诊断日志中的“升级前备份”失败原因。"
+      "value": "保存失败，同步引擎未能启动，暂时无法保存配置。请查看诊断日志中的启动或升级备份错误。"
     },
     {
       "name": "space_relay_overview_title",

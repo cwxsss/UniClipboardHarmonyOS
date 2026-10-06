@@ -93,3 +93,4 @@ export {
   unpackOpticalEnvelope
 } from './src/main/ets/service/OpticalTransferService';
 export { ReceivedNotificationService } from './src/main/ets/service/NotificationService';
+export { PcConnectionObserver, PcConnectionService, pcConnectionService } from './src/main/ets/service/PcConnectionService';

@@ -1,5 +1,18 @@
 {
   "string": [
+    {
+      "name": "space_relay_save_storage_failed",
+      "value": "Configuration storage failed after recovery and one retry. Existing configuration data has not been cleared; see diagnostics."
+    },
+    {
+      "name": "space_relay_save_permission_failed",
+      "value": "Configuration storage access was denied. Unlock and retry; see diagnostics if it still fails."
+    },
+    {
+      "name": "space_relay_save_invalid",
+      "value": "Invalid relay address. Check the URL format."
+    },
+
     { "name": "pasteboard_permission_reason", "value": "Read clipboard text or images only when you choose to send them" },
     { "name": "app_title", "value": "UniClipboard" },
     { "name": "app_subtitle", "value": "Your content stays between trusted devices" },
@@ -127,8 +140,8 @@
     { "name": "space_relay_retry_action", "value": "Retry save" },
     { "name": "space_relay_saving_action", "value": "Saving…" },
     { "name": "space_relay_saved", "value": "Relay settings saved. Fully exit and reopen the app to apply them." },
-    { "name": "space_relay_save_failed", "value": "Could not save. The relay is unreachable or the URL is invalid. Edit the settings and retry." },
-    { "name": "space_relay_save_engine_unavailable", "value": "Could not save: the sync engine is not ready yet, which is unrelated to the relay URL. Fully exit and reopen the app, then retry. If it still fails, check the pre-upgrade backup failure in the diagnostic log." },
+    { "name": "space_relay_save_failed", "value": "Could not save. The URL is invalid or the configuration could not be written. Check the settings and retry." },
+    { "name": "space_relay_save_engine_unavailable", "value": "Could not save because the sync engine failed to start. Check the startup or upgrade backup error in the diagnostic log." },
     { "name": "space_relay_overview_title", "value": "Relay status" },
     { "name": "space_relay_refresh_action", "value": "Refresh status" },
     { "name": "space_relay_saved_mode", "value": "Saved" },

@@ -1,5 +1,125 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 4adc3ef..750005d 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -133,7 +133,7 @@ version = "1.1.5"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
+ dependencies = [
+- "windows-sys 0.60.2",
++ "windows-sys 0.61.2",
+ ]
+ 
+ [[package]]
+@@ -144,7 +144,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
+ dependencies = [
+  "anstyle",
+  "once_cell_polyfill",
+- "windows-sys 0.60.2",
++ "windows-sys 0.61.2",
+ ]
+ 
+ [[package]]
+@@ -1261,7 +1261,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "ccc2776f0c61eca1ca32528f85548abd1a4be8fb53d1b21c013e4f18da1e7090"
+ dependencies = [
+  "data-encoding",
+- "syn 2.0.117",
++ "syn 1.0.109",
+ ]
+ 
+ [[package]]
+@@ -1468,7 +1468,7 @@ dependencies = [
+  "libc",
+  "option-ext",
+  "redox_users",
+- "windows-sys 0.59.0",
++ "windows-sys 0.61.2",
+ ]
+ 
+ [[package]]
+@@ -1670,7 +1670,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
+ dependencies = [
+  "libc",
+- "windows-sys 0.59.0",
++ "windows-sys 0.61.2",
+ ]
+ 
+ [[package]]
+@@ -4113,7 +4113,7 @@ version = "0.50.3"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
+ dependencies = [
+- "windows-sys 0.59.0",
++ "windows-sys 0.61.2",
+ ]
+ 
+ [[package]]
+@@ -5603,7 +5603,7 @@ dependencies = [
+  "errno",
+  "libc",
+  "linux-raw-sys",
+- "windows-sys 0.59.0",
++ "windows-sys 0.61.2",
+ ]
+ 
+ [[package]]
+@@ -5695,7 +5695,7 @@ dependencies = [
+  "security-framework",
+  "security-framework-sys",
+  "webpki-root-certs",
+- "windows-sys 0.59.0",
++ "windows-sys 0.61.2",
+ ]
+ 
+ [[package]]
+@@ -5855,7 +5855,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "5b55fb86dfd3a2f5f76ea78310a88f96c4ea21a3031f8d212443d56123fd0521"
+ dependencies = [
+  "libc",
+- "windows-sys 0.59.0",
++ "windows-sys 0.61.2",
+ ]
+ 
+ [[package]]
+@@ -6193,7 +6193,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
+ dependencies = [
+  "libc",
+- "windows-sys 0.60.2",
++ "windows-sys 0.61.2",
+ ]
+ 
+ [[package]]
+@@ -6437,7 +6437,7 @@ dependencies = [
+  "getrandom 0.4.2",
+  "once_cell",
+  "rustix",
+- "windows-sys 0.59.0",
++ "windows-sys 0.61.2",
+ ]
+ 
+ [[package]]
+@@ -7178,6 +7178,7 @@ dependencies = [
+  "libc",
+  "libsqlite3-sys",
+  "mockall",
++ "n0-error",
+  "network-interface",
+  "noq-proto",
+  "opaque-ke",
+@@ -7891,7 +7892,7 @@ version = "0.1.11"
+ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
+ dependencies = [
+- "windows-sys 0.59.0",
++ "windows-sys 0.61.2",
+ ]
+ 
+ [[package]]
 diff --git a/bindings/uc-ohos-napi/ohos/index.d.ts b/bindings/uc-ohos-napi/ohos/index.d.ts
-index 7ff27ea0..96e7cdad 100644
+index 7ff27ea..2bf1b20 100644
 --- a/bindings/uc-ohos-napi/ohos/index.d.ts
 +++ b/bindings/uc-ohos-napi/ohos/index.d.ts
 @@ -107,6 +107,11 @@ export interface OhNetworkRecoveryStatus {
@@ -206,8 +326,16 @@ index 7ff27ea0..96e7cdad 100644
    exportEntry(entryId: string, destinationHandle: string): Promise<void>
    nextEvent(timeoutMs: number): Promise<OhEngineEvent | null>
    shutdown(deadlineMs: number): Promise<void>
+@@ -279,7 +370,6 @@ export interface OhStartupLifecycle {
+   resume(): Promise<void>
+ }
+ 
+-
+ // 本地诊断计数使用十进制字符串；只有当前进程的刷新得到确认。
+ export enum OhHostDiagnosticSource { Application, ShareExtension, KeyboardExtension, BackgroundService }
+ export enum OhHostDiagnosticAction { RuntimeStart, RuntimeStop, OwnershipAcquire, SecurityPrepare }
 diff --git a/bindings/uc-ohos-napi/src/lib.rs b/bindings/uc-ohos-napi/src/lib.rs
-index ad543a66..28bdfb0a 100644
+index ad543a6..28bdfb0 100644
 --- a/bindings/uc-ohos-napi/src/lib.rs
 +++ b/bindings/uc-ohos-napi/src/lib.rs
 @@ -138,6 +138,12 @@ pub struct OhNetworkRecoveryStatus {
@@ -362,7 +490,7 @@ index ad543a66..28bdfb0a 100644
  
  pub struct PreparedHost {
 diff --git a/bindings/uc-ohos-napi/src/runtime.rs b/bindings/uc-ohos-napi/src/runtime.rs
-index 4489f677..ad01fb25 100644
+index 4489f67..ad01fb2 100644
 --- a/bindings/uc-ohos-napi/src/runtime.rs
 +++ b/bindings/uc-ohos-napi/src/runtime.rs
 @@ -8,18 +8,23 @@ use napi_derive::napi;
@@ -769,7 +897,7 @@ index 4489f677..ad01fb25 100644
      fn network_recovery_event_keeps_the_stable_status() {
          let event = map_event(EngineEvent::NetworkRecoveryChanged(
 diff --git a/bindings/uc-ohos-napi/tests/app_project_contract.rs b/bindings/uc-ohos-napi/tests/app_project_contract.rs
-index 4f92f2a5..97e472e1 100644
+index 4f92f2a..97e472e 100644
 --- a/bindings/uc-ohos-napi/tests/app_project_contract.rs
 +++ b/bindings/uc-ohos-napi/tests/app_project_contract.rs
 @@ -115,47 +115,43 @@ fn ohos_probe_page_loads_the_engine_version_from_napi() {
@@ -846,7 +974,7 @@ index 4f92f2a5..97e472e1 100644
  
  #[test]
 diff --git a/bindings/uc-ohos-napi/tests/public_contract.rs b/bindings/uc-ohos-napi/tests/public_contract.rs
-index 105d56ab..a4fbec21 100644
+index 105d56a..a4fbec2 100644
 --- a/bindings/uc-ohos-napi/tests/public_contract.rs
 +++ b/bindings/uc-ohos-napi/tests/public_contract.rs
 @@ -1,10 +1,7 @@
@@ -893,8 +1021,316 @@ index 105d56ab..a4fbec21 100644
 +        );
 +    }
 +}
+diff --git a/crates/uc-application/src/settings/facade.rs b/crates/uc-application/src/settings/facade.rs
+index c0add97..36585de 100644
+--- a/crates/uc-application/src/settings/facade.rs
++++ b/crates/uc-application/src/settings/facade.rs
+@@ -261,7 +261,7 @@ impl SettingsFacade {
+     /// 失败原样返回，同时由本负责人记录一次固定分类（公开契约边界会丢弃来源）。
+     #[instrument(skip_all)]
+     pub async fn get(&self) -> Result<SettingsView, SettingsFacadeError> {
+-        let result = self.load_view().await;
++        let result: Result<SettingsView, SettingsFacadeError> = self.load_view().await;
+         if let Err(error) = &result {
+             uc_warn!(
+                 operation = "get_settings",
+@@ -286,12 +286,22 @@ impl SettingsFacade {
+ 
+     #[instrument(skip_all)]
+     pub async fn update(&self, patch: SettingsPatch) -> Result<SettingsView, SettingsFacadeError> {
+-        let result = self
++        let result: Result<SettingsView, SettingsFacadeError> = self
+             .relay_configuration
+             .apply(patch, None)
+             .await
+             .map(|saved| saved.settings.into())
+             .map_err(Into::into);
++        if let Err(error) = &result {
++            uc_warn!(
++                operation = "update_settings",
++                outcome = "failed",
++                error_kind = "settings_update",
++                error_class = error.class(),
++                io_error_kind = io_error_kind(error),
++                "settings update failed"
++            );
++        }
+         uc_debug!(success = result.is_ok(), "settings update completed");
+         result
+     }
+@@ -302,7 +312,7 @@ impl SettingsFacade {
+         patch: SettingsPatch,
+         edit: RelayCredentialEdit,
+     ) -> Result<RelaySaveView, SettingsFacadeError> {
+-        let result = self
++        let result: Result<RelaySaveView, SettingsFacadeError> = self
+             .relay_configuration
+             .apply(patch, Some(&edit))
+             .await
+@@ -506,6 +516,45 @@ mod tests {
+         assert!(!output.contains("SECRET_SETTINGS_PATH"), "{output}");
+     }
+ 
++    struct FailingSaveSettings;
++
++    #[async_trait]
++    impl SettingsPort for FailingSaveSettings {
++        async fn load(&self) -> anyhow::Result<Settings> {
++            Ok(Settings::default())
++        }
++
++        async fn save(&self, _settings: &Settings) -> anyhow::Result<()> {
++            Err(anyhow::Error::new(std::io::Error::new(
++                std::io::ErrorKind::PermissionDenied,
++                "SECRET_SETTINGS_PATH",
++            )))
++        }
++    }
++
++    #[tokio::test]
++    async fn a_failed_settings_update_records_only_fixed_classification() {
++        let logs = uc_testkit::log_capture::CapturedLogs::default();
++        let _guard = logs.install();
++        let facade = SettingsFacade::new(Arc::new(FailingSaveSettings));
++
++        let error = facade.update(SettingsPatch::default()).await.unwrap_err();
++
++        assert!(matches!(error, SettingsFacadeError::Save(_)));
++        let output = logs.output();
++        assert_eq!(logs.count("settings update failed"), 1, "{output}");
++        assert!(
++            output.contains("error_kind=\"settings_update\""),
++            "{output}"
++        );
++        assert!(output.contains("error_class=\"save\""), "{output}");
++        assert!(
++            output.contains("io_error_kind=PermissionDenied"),
++            "{output}"
++        );
++        assert!(!output.contains("SECRET_SETTINGS_PATH"), "{output}");
++    }
++
+     #[tokio::test]
+     async fn a_successful_settings_read_writes_no_failure_record() {
+         let logs = uc_testkit::log_capture::CapturedLogs::default();
+diff --git a/crates/uc-infra/Cargo.toml b/crates/uc-infra/Cargo.toml
+index 9ebcfdb..3a9c86f 100644
+--- a/crates/uc-infra/Cargo.toml
++++ b/crates/uc-infra/Cargo.toml
+@@ -34,6 +34,7 @@ chrono = { version = "0.4", features = ["serde"] }
+ # Error handling
+ anyhow = "1.0"
+ thiserror = "2.0"
++n0-error = "1.0.1"
+ 
+ # Async traits
+ async-trait = "0.1"
+@@ -66,6 +67,7 @@ tokio = { version = "1", features = [
+   "macros",
+   "time",
+   "io-util",
++  "net",
+ ] }
+ 
+ tracing = "0.1"
+diff --git b/crates/uc-infra/src/network/iroh/dns_resolver.rs b/crates/uc-infra/src/network/iroh/dns_resolver.rs
+new file mode 100644
+index 0000000..97ba7f7
+--- /dev/null
++++ b/crates/uc-infra/src/network/iroh/dns_resolver.rs
+@@ -0,0 +1,126 @@
++//! Platform DNS integration for iroh.
++//!
++//! HarmonyOS exposes DNS through its libc resolver while the target is compiled
++//! with Linux/Unix cfgs. Hickory's generic Unix path reads resolv.conf and sends
++//! DNS packets itself; use the host resolver for address records on OHOS instead.
++
++use iroh::dns::DnsResolver;
++
++#[cfg(any(target_env = "ohos", test))]
++use {
++    iroh::dns::{BoxIter, DnsError, Resolver, TxtRecordData, DNS_TIMEOUT},
++    n0_error::StdResultExt,
++    std::{
++        future::Future,
++        net::{IpAddr, Ipv4Addr, Ipv6Addr},
++        pin::Pin,
++    },
++};
++
++#[cfg(any(target_env = "ohos", test))]
++type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
++
++#[cfg(any(target_env = "ohos", test))]
++#[derive(Debug)]
++struct OhosSystemResolver {
++    txt_resolver: DnsResolver,
++}
++
++#[cfg(any(target_env = "ohos", test))]
++impl OhosSystemResolver {
++    fn new() -> Self {
++        Self {
++            txt_resolver: DnsResolver::new(),
++        }
++    }
++
++    fn lookup_addresses(host: String) -> BoxFuture<Result<Vec<IpAddr>, DnsError>> {
++        Box::pin(async move {
++            let addresses = tokio::net::lookup_host((host.as_str(), 0)).await.anyerr()?;
++            Ok(addresses.map(|address| address.ip()).collect())
++        })
++    }
++}
++
++#[cfg(any(target_env = "ohos", test))]
++impl Resolver for OhosSystemResolver {
++    fn lookup_ipv4(&self, host: String) -> BoxFuture<Result<BoxIter<Ipv4Addr>, DnsError>> {
++        Box::pin(async move {
++            let addresses = Self::lookup_addresses(host).await?;
++            let addresses = addresses
++                .into_iter()
++                .filter_map(|address| match address {
++                    IpAddr::V4(address) => Some(address),
++                    IpAddr::V6(_) => None,
++                })
++                .collect::<Vec<_>>();
++            Ok(Box::new(addresses.into_iter()) as BoxIter<Ipv4Addr>)
++        })
++    }
++
++    fn lookup_ipv6(&self, host: String) -> BoxFuture<Result<BoxIter<Ipv6Addr>, DnsError>> {
++        Box::pin(async move {
++            let addresses = Self::lookup_addresses(host).await?;
++            let addresses = addresses
++                .into_iter()
++                .filter_map(|address| match address {
++                    IpAddr::V6(address) => Some(address),
++                    IpAddr::V4(_) => None,
++                })
++                .collect::<Vec<_>>();
++            Ok(Box::new(addresses.into_iter()) as BoxIter<Ipv6Addr>)
++        })
++    }
++
++    fn lookup_txt(&self, host: String) -> BoxFuture<Result<BoxIter<TxtRecordData>, DnsError>> {
++        let resolver = self.txt_resolver.clone();
++        Box::pin(async move {
++            let records = resolver.lookup_txt(host, DNS_TIMEOUT).await?;
++            Ok(Box::new(records.collect::<Vec<_>>().into_iter()) as BoxIter<TxtRecordData>)
++        })
++    }
++
++    fn clear_cache(&self) {
++        self.txt_resolver.clear_cache();
++    }
++
++    fn reset(&self) -> Box<dyn Resolver> {
++        let txt_resolver = self.txt_resolver.clone();
++        txt_resolver.reset();
++        Box::new(Self { txt_resolver })
++    }
++}
++
++pub(crate) fn platform_dns_resolver() -> DnsResolver {
++    #[cfg(target_env = "ohos")]
++    {
++        DnsResolver::custom(OhosSystemResolver::new())
++    }
++
++    #[cfg(not(target_env = "ohos"))]
++    {
++        DnsResolver::new()
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::OhosSystemResolver;
++    use iroh::dns::Resolver;
++    use std::net::Ipv4Addr;
++
++    #[tokio::test]
++    async fn system_resolver_resolves_loopback_via_host_name_service() {
++        let resolver = OhosSystemResolver::new();
++        let addresses = resolver
++            .lookup_ipv4("localhost".to_string())
++            .await
++            .expect("system resolver should resolve localhost")
++            .collect::<Vec<_>>();
++
++        assert!(
++            addresses.contains(&Ipv4Addr::LOCALHOST),
++            "expected 127.0.0.1 from the system resolver, got {addresses:?}"
++        );
++    }
++}
+diff --git a/crates/uc-infra/src/network/iroh/mod.rs b/crates/uc-infra/src/network/iroh/mod.rs
+index 73464cb..dc15b6a 100644
+--- a/crates/uc-infra/src/network/iroh/mod.rs
++++ b/crates/uc-infra/src/network/iroh/mod.rs
+@@ -13,6 +13,7 @@ mod conn_path;
+ mod connect;
+ pub mod connection_channel_adapter;
+ mod connection_diagnostics;
++mod dns_resolver;
+ pub mod group_update_adapter;
+ pub mod identity_store;
+ pub(crate) mod inbound_peer;
+diff --git a/crates/uc-infra/src/network/iroh/node.rs b/crates/uc-infra/src/network/iroh/node.rs
+index ea4380e..1074e88 100644
+--- a/crates/uc-infra/src/network/iroh/node.rs
++++ b/crates/uc-infra/src/network/iroh/node.rs
+@@ -839,6 +839,7 @@ impl IrohNodeBuilder {
+         let mut endpoint_builder = Endpoint::builder(presets::N0)
+             .clear_address_lookup()
+             .secret_key(secret)
++            .dns_resolver(super::dns_resolver::platform_dns_resolver())
+             .relay_mode(relay_mode)
+             .transport_config(build_transport_config(config.congestion_controller))
+             // UniClipboard#486: drop Clash TUN / link-local IPs from every
+diff --git a/crates/uc-infra/src/network/iroh/relay_probe.rs b/crates/uc-infra/src/network/iroh/relay_probe.rs
+index a3d0978..91ea8b4 100644
+--- a/crates/uc-infra/src/network/iroh/relay_probe.rs
++++ b/crates/uc-infra/src/network/iroh/relay_probe.rs
+@@ -133,7 +133,7 @@ impl IrohRelayProbeAdapter {
+                 RelayProbeError::Other(RelayProbeDetail::with_context("init tls config", err))
+             })?;
+         Ok(Self {
+-            dns_resolver: DnsResolver::new(),
++            dns_resolver: super::dns_resolver::platform_dns_resolver(),
+             tls_config,
+         })
+     }
+diff --git a/crates/uc-infra/src/security/profile_backup_archive/archive.rs b/crates/uc-infra/src/security/profile_backup_archive/archive.rs
+index 06554fa..c7c6389 100644
+--- a/crates/uc-infra/src/security/profile_backup_archive/archive.rs
++++ b/crates/uc-infra/src/security/profile_backup_archive/archive.rs
+@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
+ 
+ use uuid::Uuid;
+ 
+-#[cfg(target_os = "android")]
++#[cfg(any(target_os = "android", all(target_os = "linux", target_env = "ohos")))]
+ use crate::fs::atomic_publish::rename_no_replace_io;
+ 
+ use super::error::invalid_archive;
+@@ -70,10 +70,10 @@ impl ProfileBackupArchive {
+         if verified_source != source || verified_digest != first_digest {
+             return Err(ProfileBackupArchiveError::StateChanged);
+         }
+-        // Android 应用沙箱禁止硬链接；使用同样拒绝覆盖的原子重命名。
+-        #[cfg(target_os = "android")]
++        // Android 和 HarmonyOS 使用兼容应用沙箱且同样拒绝覆盖的原子重命名。
++        #[cfg(any(target_os = "android", all(target_os = "linux", target_env = "ohos")))]
+         rename_no_replace_io(&pending, &self.path(id))?;
+-        #[cfg(not(target_os = "android"))]
++        #[cfg(not(any(target_os = "android", all(target_os = "linux", target_env = "ohos"))))]
+         {
+             fs::hard_link(&pending, self.path(id))?;
+             sync_directory(&directory)?;
 diff --git a/tests/hosts/ohos/entry/src/main/ets/host/EngineRuntime.ets b/tests/hosts/ohos/entry/src/main/ets/host/EngineRuntime.ets
-index 57c7b669..6b652445 100644
+index 57c7b66..6b65244 100644
 --- a/tests/hosts/ohos/entry/src/main/ets/host/EngineRuntime.ets
 +++ b/tests/hosts/ohos/entry/src/main/ets/host/EngineRuntime.ets
 @@ -1,5 +1,5 @@
@@ -991,7 +1427,7 @@ index 57c7b669..6b652445 100644
    }
  
 diff --git a/tests/hosts/ohos/entry/src/main/ets/pages/Index.ets b/tests/hosts/ohos/entry/src/main/ets/pages/Index.ets
-index 00478639..8aedeb95 100644
+index 0047863..8aedeb9 100644
 --- a/tests/hosts/ohos/entry/src/main/ets/pages/Index.ets
 +++ b/tests/hosts/ohos/entry/src/main/ets/pages/Index.ets
 @@ -13,7 +13,7 @@ struct Index {

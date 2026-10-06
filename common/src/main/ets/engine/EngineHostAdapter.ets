@@ -4,6 +4,7 @@ import { EngineClipboardHost, EngineClipboardObserver, EngineClipboardSnapshot }
 import { EngineFileHandleRegistry, EngineFileMetadata } from './EngineFileHandleRegistry';
 import { EngineHostError, EngineHostErrorCategory } from './EngineHostError';
 import { EngineSecureAssetStore } from './EngineSecureAssetStore';
+import { pcConnectionState } from '../service/PcConnectionPolicy';
 
 const ENGINE_DIRECTORY_NAME: string = 'uniclipboard-engine-v1-1';
 const LEGACY_PROFILE_ID: string = '.engine-v1-1';
@@ -116,7 +117,12 @@ class EngineHostCallbacksImpl implements EngineHostCallbacks {
     this.execute((): EngineClipboardSnapshot => this.clipboard.read());
 
   clipboardWrite = (snapshot: EngineClipboardSnapshot): EngineHostResult<void> =>
-    this.execute((): void => this.clipboard.write(snapshot));
+    this.execute((): void => {
+      if (!pcConnectionState.isEnabled()) {
+        throw new EngineHostError(EngineHostErrorCategory.UNAVAILABLE, 'pc_sync_disabled');
+      }
+      this.clipboard.write(snapshot);
+    });
 
   private execute<T>(operation: () => T): EngineHostResult<T> {
     try {
@@ -124,8 +130,10 @@ class EngineHostCallbacksImpl implements EngineHostCallbacks {
     } catch (error) {
       if (error instanceof EngineHostError) {
         let hostError: EngineHostError = error as EngineHostError;
+        console.error('[engine-host] failed operation=' + hostError.operation + ' category=' + hostError.category);
         return { ok: false, errorCategory: hostError.category };
       }
+      console.error('[engine-host] failed nativeCode=' + (error as Error).name);
       return { ok: false, errorCategory: EngineHostErrorCategory.IO };
     }
   }
@@ -144,6 +152,14 @@ export class EngineHostAdapter {
     return new EngineHostCallbacksImpl(directories, this.storage, this.files, this.clipboard);
   }
 
+  prepareRelayConfiguration(): void {
+    // Reading repairs only the known empty transaction marker. Valid records
+    // remain untouched for Engine to recover under its transaction lock.
+    let pending: Uint8Array | null = this.storage.get('relay_configuration:transaction:v1');
+    if (pending !== null) {
+      pending.fill(0);
+    }
+  }
   registerInput(uri: string, mimeType: string = ''): string {
     return this.files.registerInput(uri, mimeType);
   }

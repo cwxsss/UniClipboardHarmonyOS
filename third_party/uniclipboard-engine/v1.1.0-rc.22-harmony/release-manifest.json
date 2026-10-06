@@ -6,13 +6,14 @@
     "upstreamReleaseUrl": "https://github.com/UniClipboard/Engine/releases/tag/v1.1.0-rc.22",
     "upstreamHarSha256": "df65472233da55754e7108b6dcef30ad777faab1efe0504c706411c19a461cb7",
     "rustToolchain": "1.95.0",
-    "cargoLockSha256": "ec0f38f78911f9cd9ee3cf77cd8e34f6ff93cbecf344f2e5c11ffafc3116b027",
-    "localOhosAdapterPatchSha256": "a6f1fad2f34e6558dbb2e91f2f567167263455a823ea3f899ad8ae5c6bd49876"
+    "cargoLockSha256": "1dcf1f2b61a59407464f2808486fb5703a237ee344e7559100c26171cd2b7d5f",
+    "localOhosAdapterPatchSha256": "a2198b231d97042366b64418ac3454ef85b4b30e2a28b6f6991de28e367502b9"
   },
   "compatibility": {
     "minimumHarmonyOsApi": 24,
     "architectures": [
-      "arm64-v8a"
+      "arm64-v8a",
+      "x86_64"
     ],
     "deviceAcceptance": "not_run",
     "minimumSystems": {
@@ -23,33 +24,57 @@
     "cargoProfile": "release",
     "target": "aarch64-unknown-linux-ohos",
     "devecoStudio": "26.0.0.821",
-    "harmonySdk": "26.0.0.105"
+    "harmonySdk": "26.0.0.105",
+    "targets": [
+      "aarch64-unknown-linux-ohos",
+      "x86_64-unknown-linux-ohos"
+    ]
   },
   "artifacts": [
     {
       "name": "UniClipboardEngine.har",
-      "sha256": "79a6d745c2310964ef130af88101f70126da31b4f0743858fe06a63b82fb3109",
-      "size": 12731964
+      "sha256": "3553fb061decc35ffbef5b55636a52574ecbee702d92365b6203ba234765cd49",
+      "size": 23432554,
+      "platform": "harmonyos",
+      "architectures": [
+        "arm64-v8a",
+        "x86_64"
+      ]
     },
     {
       "name": "UniClipboardEngine.har.checksum.txt",
-      "sha256": "4eff5aab42c45e80ff3f444a5f97c82afdc44df26b6e2a07f3b0a171fd7053bc",
-      "size": 65
+      "sha256": "b12a0b2d579e066400a61830acbf702e4bda4133aaf644312d6046001d8e2ab2",
+      "size": 65,
+      "platform": "harmonyos",
+      "architectures": [
+        "arm64-v8a",
+        "x86_64"
+      ]
     },
     {
       "name": "libuc_ohos_napi.so",
-      "sha256": "55c724312b2ab5e6722a4de83d8940f43b3478ab90cbe6f8e65ec8f6116b811e",
-      "size": 27202024
+      "sha256": "567b3f5b556b7c37216ddb7433112da0f74f554d182676298ccdbe15ad9b518c",
+      "size": 27215584,
+      "platform": "harmonyos",
+      "architectures": [
+        "arm64-v8a"
+      ]
     },
     {
       "name": "uc-ohos-napi.checksum.txt",
-      "sha256": "ed054aa3a75b67e1c1ac36049c8401625ab902f4a862ac605683bdf8a9288de9",
-      "size": 65
+      "sha256": "c6df28fb05ca6429e59af3911e494c512b02363b8aee1bbf8a7b1c2725aa70d7",
+      "size": 65,
+      "platform": "harmonyos",
+      "architectures": [
+        "arm64-v8a"
+      ]
     },
     {
       "name": "index.d.ts",
-      "sha256": "352e15d69012e67f59f07fa28c5dc3f5dc0d48cdb30b88f56baa4a5b58033dbe",
-      "size": 15085
+      "sha256": "3c7f07be68e086d77335b5f34fe7ec49623e892bd10eb4d23a53d902555e6305",
+      "size": 14194,
+      "platform": "harmonyos",
+      "architectures": []
     },
     {
       "name": "upstream-index.d.ts",
@@ -73,8 +98,8 @@
     },
     {
       "name": "Cargo.lock",
-      "sha256": "ec0f38f78911f9cd9ee3cf77cd8e34f6ff93cbecf344f2e5c11ffafc3116b027",
-      "size": 206229
+      "sha256": "1dcf1f2b61a59407464f2808486fb5703a237ee344e7559100c26171cd2b7d5f",
+      "size": 206242
     },
     {
       "name": "runtime-dependencies.txt",
@@ -98,13 +123,31 @@
     },
     {
       "name": "harmony-adaptation.json",
-      "sha256": "e4390cdd21ab8528b757c33075ac61445283b2a69a174b9b54c014a8b421ef22",
-      "size": 1993
+      "sha256": "ffc89c37c503b5da214f26f5da8e5936245a6f2631c3608e3d354bb0e911fb25",
+      "size": 2560
     },
     {
       "name": "engine-ohos-rc22-adaptation.patch",
-      "sha256": "a6f1fad2f34e6558dbb2e91f2f567167263455a823ea3f899ad8ae5c6bd49876",
-      "size": 39582
+      "sha256": "a2198b231d97042366b64418ac3454ef85b4b30e2a28b6f6991de28e367502b9",
+      "size": 54461
+    },
+    {
+      "name": "libuc_ohos_napi-x86_64.so",
+      "platform": "harmonyos",
+      "architectures": [
+        "x86_64"
+      ],
+      "sha256": "917cc7fc33063aac30fa83dcaeea961f3c18973ffe3e1f5d4caabb0da8d3772b",
+      "size": 31109072
+    },
+    {
+      "name": "uc-ohos-napi-x86_64.checksum.txt",
+      "platform": "harmonyos",
+      "architectures": [
+        "x86_64"
+      ],
+      "sha256": "3f59c2d87bb3c905de1dcb07d67148f032adb2ff2e124d86b9a965ff66210e31",
+      "size": 65
     }
   ]
 }
